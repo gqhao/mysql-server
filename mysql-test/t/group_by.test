@@ -53,6 +53,9 @@ INSERT INTO t2 VALUES (5,'name','pass','mail','Y','v','n','adr','1','1','1');
 
 ANALYZE TABLE t1,t2;
 
+# Tests printing of TemptableAggregateIterator.
+EXPLAIN FORMAT=tree SELECT t2.userid, MIN(t1.score) FROM t1, t2 WHERE t1.userID=t2.userID GROUP BY t2.userid;
+
 SELECT t2.userid, MIN(t1.score) FROM t1, t2 WHERE t1.userID=t2.userID GROUP BY t2.userid;
 SELECT t2.userid, MIN(t1.score) FROM t1, t2 WHERE t1.userID=t2.userID GROUP BY t2.userid ORDER BY NULL;
 SELECT t2.userid, MIN(t1.score) FROM t1, t2 WHERE t1.userID=t2.userID AND t1.spID=2  GROUP BY t2.userid;
@@ -262,22 +265,22 @@ CREATE TABLE t1 (
 
 INSERT INTO t1 VALUES (1,1,1),(2,2,2),(2,1,1),(3,3,3),(4,3,3),(5,3,3),(6,3,3),(7,3,3);
 ANALYZE TABLE t1;
-explain select userid,count(*) from t1 group by userid desc;
-explain select userid,count(*) from t1 group by userid desc order by null;
-select userid,count(*) from t1 group by userid desc;
-select userid,count(*) from t1 group by userid desc having (count(*)+1) IN (4,3);
-select userid,count(*) from t1 group by userid desc having 3  IN (1,COUNT(*));
-explain select spid,count(*) from t1 where spid between 1 and 2 group by spid desc;
+explain select userid,count(*) from t1 group by userid order by userid desc;
+explain select userid,count(*) from t1 group by userid order by null;
+select userid,count(*) from t1 group by userid order by userid desc;
+select userid,count(*) from t1 group by userid having (count(*)+1) IN (4,3) order by userid desc;
+select userid,count(*) from t1 group by userid having 3  IN (1,COUNT(*)) order by userid desc;
+explain select spid,count(*) from t1 where spid between 1 and 2 group by spid order by spid desc;
 explain select spid,count(*) from t1 where spid between 1 and 2 group by spid;
 explain select spid,count(*) from t1 where spid between 1 and 2 group by spid order by null;
 select spid,count(*) from t1 where spid between 1 and 2 group by spid;
-select spid,count(*) from t1 where spid between 1 and 2 group by spid desc;
-explain select sql_big_result spid,sum(userid) from t1 group by spid desc;
-explain select sql_big_result spid,sum(userid) from t1 group by spid desc order by null;
-select sql_big_result spid,sum(userid) from t1 group by spid desc;
-explain select sql_big_result score,count(*) from t1 group by score desc;
-explain select sql_big_result score,count(*) from t1 group by score desc order by null;
-select sql_big_result score,count(*) from t1 group by score desc;
+select spid,count(*) from t1 where spid between 1 and 2 group by spid order by spid desc;
+explain select sql_big_result spid,sum(userid) from t1 group by spid order by spid desc;
+explain select sql_big_result spid,sum(userid) from t1 group by spid order by null;
+select sql_big_result spid,sum(userid) from t1 group by spid order by spid desc;
+explain select sql_big_result score,count(*) from t1 group by score order by score desc;
+explain select sql_big_result score,count(*) from t1 group by score order by null;
+select sql_big_result score,count(*) from t1 group by score order by score desc;
 drop table t1;
 
 # not purely group_by bug, but group_by is involved...
@@ -301,12 +304,12 @@ SELECT binary a FROM t1 GROUP BY 1;
 SELECT binary a,count(*) FROM t1 GROUP BY 1;
 # Do the same tests with MyISAM temporary tables
 SET BIG_TABLES=1;
-SELECT a FROM t1 GROUP BY a ASC;
-SELECT a,count(*) FROM t1 GROUP BY a ASC;
-SELECT a FROM t1 GROUP BY binary a ASC;
-SELECT a,count(*) FROM t1 GROUP BY binary a ASC;
-SELECT binary a FROM t1 GROUP BY 1 ASC;
-SELECT binary a,count(*) FROM t1 GROUP BY 1 ASC;
+SELECT a FROM t1 GROUP BY a ORDER BY a;
+SELECT a,count(*) FROM t1 GROUP BY a ORDER BY a;
+SELECT a FROM t1 GROUP BY binary a ORDER BY binary a;
+SELECT a,count(*) FROM t1 GROUP BY binary a ORDER BY binary a;
+SELECT binary a FROM t1 GROUP BY 1 ORDER BY 1;
+SELECT binary a,count(*) FROM t1 GROUP BY 1 ORDER BY 1;
 SET BIG_TABLES=0;
 
 --source include/restore_sql_mode_after_turn_off_only_full_group_by.inc
@@ -388,6 +391,7 @@ CREATE TABLE t3 (
 );
 INSERT INTO t3 VALUES (3, 'Yes');
 
+--sorted_result
 select * from t1 AS m LEFT JOIN t2 AS c1 ON m.c1id = 
 c1.id AND c1.active = 'Yes' LEFT JOIN t3 AS c2 ON m.c2id = c2.id AND 
 c2.active = 'Yes' WHERE m.pid=1  AND (c1.id IS NOT NULL OR c2.id IS NOT NULL);
@@ -463,11 +467,8 @@ CREATE TABLE t1 (
 );
 INSERT INTO t1 VALUES (1,1),(2,2),(1,1),(3,3),(3,3),(3,3),(3,3),(3,3);
 ANALYZE TABLE t1;
-# Here we select unordered GROUP BY into a temporary talbe, 
-# and then sort it with filesort (GROUP BY in MySQL 
-# implies sorted order of results)
-SELECT userid,count(*) FROM t1 GROUP BY userid DESC;
-EXPLAIN SELECT userid,count(*) FROM t1 GROUP BY userid DESC;
+SELECT userid,count(*) FROM t1 GROUP BY userid ORDER BY userid DESC;
+EXPLAIN SELECT userid,count(*) FROM t1 GROUP BY userid ORDER BY userid DESC;
 DROP TABLE t1;
 CREATE TABLE t1 (
   i int(11) default NULL,
@@ -560,7 +561,8 @@ insert into t2 select
    concat('val-', x3.a + 3*x4.a), -- 12
    concat('val-', @a:=x3.a + 3*x4.a + 12*C.a), -- 120
    concat('val-', @a + 120*D.a)
-from t1 x3, t1 x4, t1 C, t1 D where x3.a < 3 and x4.a < 4 and D.a < 4;
+from t1 x3, t1 x4, t1 C, t1 D where x3.a < 3 and x4.a < 4 and D.a < 4
+order by x3.a, x4.a, C.a, D.a;
 
 delete from t2  where a = 2 and b = 'val-2' order by a,b,c,d limit 30;
 
@@ -732,7 +734,6 @@ insert into t2 values ('aaa', 'bb1'), ('aaa', 'bb2');
 # query with ambiguous column reference 'c2'
 select t1.c1 as c2 from t1, t2 where t1.c2 = t2.c4
 group by c2;
-show warnings;
 
 --source include/restore_sql_mode_after_turn_off_only_full_group_by.inc
 
@@ -740,7 +741,6 @@ show warnings;
 select t1.c1 as c2 from t1, t2 where t1.c2 = t2.c4
 group by t1.c1;
 
-show warnings;
 drop table t1, t2;
 
 #
@@ -1671,7 +1671,8 @@ GROUP BY field1, field2;
 
 SELECT SQL_BIG_RESULT tbl1.col1 AS field1, tbl2.col1 AS field2
 FROM t1 as tbl1, t1 as tbl2 
-GROUP BY field1 ASC, field2 ASC 
+GROUP BY field1, field2
+ORDER BY field1, field2
 LIMIT 3;
 
 DROP VIEW v1;
@@ -2754,7 +2755,7 @@ DROP TABLE t;
 CREATE TABLE t(d DATE, i INT);
 INSERT INTO t VALUES(NULL,1),('2017-01-14',3);
 SELECT WEEK(d)/10, GROUP_CONCAT(i) FROM t GROUP BY WEEK(d)/10;
-SELECT WEEK(d)/10, GROUP_CONCAT(i) FROM t GROUP BY WEEK(d)/10 DESC;
+SELECT WEEK(d)/10, GROUP_CONCAT(i) FROM t GROUP BY WEEK(d)/10 ORDER BY WEEK(d)/10 DESC;
 DROP TABLE t;
 
 --echo #
@@ -2769,13 +2770,226 @@ while ($i < 2) {
 --eval CREATE TABLE t(a $type, b INT)
 INSERT INTO t VALUES ('1', 10), ('1', 11), ('2', 20), ('2', 20), ('3', 30);
 --source include/turn_off_only_full_group_by.inc
+--sorted_result
 SELECT (SELECT a) AS col1, COUNT(DISTINCT b) FROM t GROUP BY -col1;
 # This query gave the right results also before the fix:
+--sorted_result
 SELECT (SELECT a) AS col1, COUNT(b) FROM t GROUP BY -col1;
 # Same query with SQL_BIG_RESULT or WITH ROLLUP gave wrong results:
+--sorted_result
 SELECT SQL_BIG_RESULT (SELECT a) AS col1, COUNT(b) FROM t GROUP BY -col1;
+--sorted_result
 SELECT (SELECT a) AS col1, COUNT(b) FROM t GROUP BY -col1 WITH ROLLUP;
 --source include/restore_sql_mode_after_turn_off_only_full_group_by.inc
 DROP TABLE t;
 --inc $i
 }
+
+--echo #
+--echo # WL#8963: REMOVAL OF NON STANDARD GROUP BY ASC/DESC
+--echo #
+
+CREATE TABLE t1 (i INTEGER NOT NULL, j INTEGER NOT NULL, key(i,j));
+INSERT INTO t1 VALUES (1,2),(1,4),(1,3),(2,5),(5,3),(2,6),(6,2);
+
+#Check for syntax errors
+--error 1064
+SELECT i, SUM(j) FROM t1 GROUP BY i ASC;
+--error 1064
+SELECT i, SUM(j) FROM t1 GROUP BY i DESC;
+
+#Should use the index
+--replace_column 10 # 11 #
+EXPLAIN SELECT i, SUM(j) FROM t1 GROUP BY i;
+SELECT i, SUM(j) FROM t1 GROUP BY i;
+
+#Should use the index - order by in this case will be moved to group by
+--replace_column 10 # 11 #
+EXPLAIN SELECT i, SUM(j) FROM t1 GROUP BY i ORDER BY i;
+SELECT i, SUM(j) FROM t1 GROUP BY i ORDER BY i;
+
+#Should use index for group by and filesort for order by
+--replace_column 10 # 11 #
+EXPLAIN SELECT i, SUM(j) FROM t1 GROUP BY i ORDER BY SUM(j);
+SELECT i, SUM(j) FROM t1 GROUP BY i ORDER BY SUM(j);
+
+ALTER TABLE t1 ADD UNIQUE INDEX (i,j);
+
+#Test for code which removed group by when it is on unique columns
+EXPLAIN SELECT i FROM t1 GROUP BY j,i ORDER BY i,j;
+SELECT i, SUM(j) FROM t1 GROUP BY j,i ORDER BY i,j;
+
+DROP TABLE t1;
+
+--echo # End of tests for WL#8693
+
+--echo #
+--echo # Bug #29214970: WRONG RESULTS FOR GROUP EXPRESSIONS WITH THE ITERATOR EXECUTOR
+--echo #
+
+CREATE TABLE t1 (
+	f1 INTEGER,
+	f2 INTEGER,
+	KEY k1 ( f1 )
+);
+
+INSERT INTO t1 VALUES ( 1, 1 );
+INSERT INTO t1 VALUES ( 1, 2 );
+INSERT INTO t1 VALUES ( 1, 3 );
+INSERT INTO t1 VALUES ( 2, 1 );
+INSERT INTO t1 VALUES ( 2, 2 );
+INSERT INTO t1 VALUES ( 3, 5 );
+
+ANALYZE TABLE t1;
+
+#
+# The COUNT(DISTINCT ...) is to force the optimizer to use running aggregation on
+# using the f1 index, instead of aggregating into a temporary table (which doesn't
+# expose the bug). Other ways to do the same would include ROLLUP. Output the
+# plan to make sure it doesn't change in a way that would mask the bug.
+#
+EXPLAIN FORMAT=tree SELECT f1, f1 + 1, COUNT(DISTINCT f2) AS x FROM t1 GROUP BY f1 ORDER BY x;
+SELECT f1, f1 + 1, COUNT(DISTINCT f2) AS x FROM t1 GROUP BY f1 ORDER BY x;
+
+DROP TABLE t1;
+
+--echo # Bug#29240516: Count on nullable expression may return wrong result
+
+CREATE TABLE t1 (
+  vc varchar(255) DEFAULT NULL,
+  b tinyint DEFAULT NULL
+);
+
+INSERT INTO t1 (vc, b) VALUES (1, true), (2, false), (3, true), (4, false);
+INSERT INTO t1 (vc) VALUES (5), (6), (7), (8), (9), (10);
+
+SELECT COUNT(b), COUNT(*)
+FROM t1;
+
+SELECT COUNT(b)
+FROM t1
+HAVING COUNT(1) > 0;
+
+DROP TABLE t1;
+
+--echo # Bug#28857990: Different result for COUNT with EXISTS subquery
+
+CREATE TABLE d (pk INT PRIMARY KEY);
+INSERT INTO d VALUES (1),(2),(3),(4),(5);
+
+CREATE TABLE c (col_varchar VARCHAR(1));
+INSERT INTO c VALUES ('a'),('b'),('c'),('d'),('e');
+
+SELECT COUNT(pk) FROM d WHERE EXISTS (SELECT col_varchar FROM c);
+
+DROP TABLE c, d;
+
+--echo #
+--echo # Bug #29396628: SIG 6 AT LIST<ITEM>::END | SQL_LIST.H
+--echo #
+
+#
+# This bug is not related to ROLLUP per se, and can probably be triggered
+# without it, but ROLLUP processing happens to check the validity of the
+# linked list representing all the fields, so it's the simplest way to
+# trigger the bug.
+#
+CREATE TABLE t1 (
+  f1 integer,
+  f2 integer,
+  f3 integer
+);
+SELECT * FROM t1 GROUP BY f3,f2,f1 WITH ROLLUP;
+DROP TABLE t1;
+
+--echo # Bug#23599127 Unexpected unknown column error without ONLY_FULL_GROUP_BY
+
+SET SQL_MODE = '';
+
+CREATE TABLE t1 (
+  id_aams int NOT NULL ,
+  PRIMARY KEY (id_aams)
+);
+
+CREATE TABLE t2 (
+  id int NOT NULL,
+  id_game int DEFAULT NULL,
+  code_id char(11) DEFAULT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY codeid (code_id,id_game)
+);
+
+select count(distinct x.id_aams)
+from (select *
+      from (select t1.id_aams, t2.*
+            from t1 left join t2
+                 on t2.code_id='G0000000012' and
+                    t1.id_aams=t2.id_game
+            where t1.id_aams=1715000360
+            order by t2.id desc
+           ) as g
+      group by g.id_aams
+      having g.id is null
+     ) as x;
+
+DELIMITER //;
+CREATE FUNCTION f1(vlt_code_id CHAR(11)) RETURNS tinyint DETERMINISTIC
+BEGIN
+  DECLARE not_installed TINYINT DEFAULT 0;
+
+  select count(distinct x.id_aams)
+  into not_installed
+  from (select *
+        from (select t1.id_aams, t2.*
+              from t1 left join t2
+                   on t2.code_id = vlt_code_id and
+                      t1.id_aams = t2.id_game
+              where t1.id_aams = 1715000360
+              order by t2.id desc
+             ) as g
+        group by g.id_aams
+        having g.id is null
+       ) as x;
+
+RETURN TRUE;
+END //
+
+DELIMITER ;//
+
+SELECT f1('G0000000012');
+SELECT f1('G0000000012');
+
+PREPARE stmt from "
+select count(distinct x.id_aams)
+from (select g.id_aams, g.id
+      from (select t1.id_aams, t2.*
+            from t1 left join t2
+                 on t2.code_id='G0000000012' and
+                    t1.id_aams=t2.id_game
+            where t1.id_aams=1715000360
+            order by t2.id desc
+           ) as g
+      group by g.id_aams
+      having g.id is null
+     ) as x";
+
+EXECUTE stmt;
+EXECUTE stmt;
+
+DEALLOCATE PREPARE stmt;
+DROP FUNCTION f1;
+DROP TABLE t1, t2;
+
+SET SQL_MODE = DEFAULT;
+
+--echo # Bug#31562881: Crash in change_to_use_tmp_fields_except_sums
+
+CREATE TABLE w(a INTEGER);
+INSERT INTO w VALUES (1),(2),(3),(4);
+--error ER_DATA_OUT_OF_RANGE
+SELECT MAX(FROM_UNIXTIME(1536999161)),
+       GROUP_CONCAT(ST_LATFROMGEOHASH(ST_GEOHASH(POINT(115,155),201)))
+FROM w RIGHT JOIN w AS e ON TRUE
+GROUP BY w.a
+LIMIT 39;
+DROP TABLE w;

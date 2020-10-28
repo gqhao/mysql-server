@@ -149,6 +149,7 @@ stage/innodb/alter table (log apply index)	YES
 stage/innodb/alter table (log apply table)	YES
 stage/innodb/alter table (merge sort)	YES
 stage/innodb/alter table (read PK and internal sort)	YES
+stage/innodb/alter tablespace (encryption)	YES
 stage/innodb/buffer pool load	YES
 stage/innodb/clone (file copy)	YES
 stage/innodb/clone (page copy)	YES
@@ -212,6 +213,7 @@ thread_instrumentation
 enabled_threads	thread_type
 innodb/buf_dump_thread	BACKGROUND
 innodb/buf_resize_thread	BACKGROUND
+innodb/clone_gtid_thread	BACKGROUND
 innodb/dict_stats_thread	BACKGROUND
 innodb/fts_optimize_thread	BACKGROUND
 innodb/io_ibuf_thread	BACKGROUND
@@ -225,7 +227,6 @@ innodb/io_write_thread	BACKGROUND
 innodb/io_write_thread	BACKGROUND
 innodb/io_write_thread	BACKGROUND
 innodb/log_checkpointer_thread	BACKGROUND
-innodb/log_closer_thread	BACKGROUND
 innodb/log_flush_notifier_thread	BACKGROUND
 innodb/log_flusher_thread	BACKGROUND
 innodb/log_write_notifier_thread	BACKGROUND
@@ -262,6 +263,7 @@ thread_instrumentation
 enabled_threads	thread_type
 innodb/buf_dump_thread	BACKGROUND
 innodb/buf_resize_thread	BACKGROUND
+innodb/clone_gtid_thread	BACKGROUND
 innodb/dict_stats_thread	BACKGROUND
 innodb/fts_optimize_thread	BACKGROUND
 innodb/io_ibuf_thread	BACKGROUND
@@ -275,7 +277,6 @@ innodb/io_write_thread	BACKGROUND
 innodb/io_write_thread	BACKGROUND
 innodb/io_write_thread	BACKGROUND
 innodb/log_checkpointer_thread	BACKGROUND
-innodb/log_closer_thread	BACKGROUND
 innodb/log_flush_notifier_thread	BACKGROUND
 innodb/log_flusher_thread	BACKGROUND
 innodb/log_write_notifier_thread	BACKGROUND
@@ -369,6 +370,7 @@ stage/innodb/alter table (log apply index)	YES
 stage/innodb/alter table (log apply table)	YES
 stage/innodb/alter table (merge sort)	YES
 stage/innodb/alter table (read PK and internal sort)	YES
+stage/innodb/alter tablespace (encryption)	YES
 stage/innodb/buffer pool load	YES
 stage/innodb/clone (file copy)	YES
 stage/innodb/clone (page copy)	YES

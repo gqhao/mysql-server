@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2015, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -31,8 +31,8 @@
 #include "my_inttypes.h"
 #include "my_sys.h"
 #include "mysql/components/services/log_builtins.h"
-#include "sql/dd/cache/dictionary_client.h"  // Dictionary_client
-#include "sql/dd/impl/bootstrap_ctx.h"       // bootstrap::DD_bootstrap_ctx
+#include "sql/dd/cache/dictionary_client.h"       // Dictionary_client
+#include "sql/dd/impl/bootstrap/bootstrap_ctx.h"  // bootstrap::DD_bootstrap_ctx
 #include "sql/dd/impl/cache/cache_element.h"
 #include "sql/dd/impl/raw/object_keys.h"           // Primary_id_key
 #include "sql/dd/impl/raw/raw_record.h"            // Raw_record
@@ -67,8 +67,9 @@
 #include "sql/dd/types/table_stat.h"                // Table_stat
 #include "sql/dd/types/tablespace.h"                // Tablespace
 #include "sql/dd/types/view.h"                      // View
-#include "sql/dd/upgrade/upgrade.h"                 // allow_sdi_creation
+#include "sql/dd/upgrade_57/upgrade.h"              // allow_sdi_creation
 #include "sql/debug_sync.h"                         // DEBUG_SYNC
+#include "sql/error_handler.h"                      // Internal_error_handler
 #include "sql/log.h"
 #include "sql/sql_class.h"  // THD
 
@@ -124,6 +125,25 @@ void Storage_adapter::core_get(const K &key, const T **object) {
   }
 }
 
+// Update the dictionary object for a dd entity in the core registry.
+void Storage_adapter::core_update(const dd::Tablespace *new_tsp) {
+  if (new_tsp->id() != MYSQL_TABLESPACE_DD_ID) {
+    return;
+  }
+
+  Cache_element<typename dd::Tablespace::Cache_partition> *element = nullptr;
+  typename dd::Tablespace::Id_key key(new_tsp->id());
+  MUTEX_LOCK(lock, &m_lock);
+  m_core_registry.get(key, &element);
+  DBUG_ASSERT(element != nullptr);
+  m_core_registry.remove(element);
+  std::unique_ptr<const dd::Tablespace> old{element->object()};
+
+  element->set_object(new_tsp->clone());
+  element->recreate_keys();
+  m_core_registry.put(element);
+}
+
 // Get a dictionary object from persistent storage.
 template <typename K, typename T>
 bool Storage_adapter::get(THD *thd, const K &key, enum_tx_isolation isolation,
@@ -163,7 +183,7 @@ bool Storage_adapter::get(THD *thd, const K &key, enum_tx_isolation isolation,
   }
 
   // Restore the object from the record.
-  Entity_object *new_object = NULL;
+  Entity_object *new_object = nullptr;
   if (r.get() &&
       table.restore_object_from_record(&trx.otx, *r.get(), &new_object)) {
     DBUG_ASSERT(thd->is_system_thread() || thd->killed || thd->is_error());
@@ -272,6 +292,20 @@ void Storage_adapter::core_store(THD *thd, T *object) {
   m_core_registry.put(element);
 }
 
+// Re-map error messages emitted during DDL with innodb-read-only == 1.
+class Open_dictionary_tables_error_handler : public Internal_error_handler {
+ public:
+  bool handle_condition(THD *, uint sql_errno, const char *,
+                        Sql_condition::enum_severity_level *,
+                        const char *) override {
+    if (sql_errno == ER_OPEN_AS_READONLY) {
+      my_error(ER_READ_ONLY_MODE, MYF(0));
+      return true;
+    }
+    return false;
+  }
+};
+
 // Store a dictionary object to persistent storage.
 template <typename T>
 bool Storage_adapter::store(THD *thd, T *object) {
@@ -293,10 +327,14 @@ bool Storage_adapter::store(THD *thd, T *object) {
   ctx.otx.register_tables<T>();
   DEBUG_SYNC(thd, "before_storing_dd_object");
 
+  Open_dictionary_tables_error_handler error_handler;
+  thd->push_internal_handler(&error_handler);
   if (ctx.otx.open_tables() || object->impl()->store(&ctx.otx)) {
     DBUG_ASSERT(thd->is_system_thread() || thd->killed || thd->is_error());
+    thd->pop_internal_handler();
     return true;
   }
+  thd->pop_internal_handler();
 
   // Do not create SDIs for tablespaces and tables while creating
   // dictionary entry during upgrade.
@@ -495,13 +533,13 @@ template bool Storage_adapter::drop(THD *, const Event *);
 template bool Storage_adapter::store(THD *, Event *);
 
 template bool Storage_adapter::get<Resource_group::Id_key, Resource_group>(
-    THD *, const Tablespace::Id_key &, enum_tx_isolation, bool,
+    THD *, const Resource_group::Id_key &, enum_tx_isolation, bool,
     const Resource_group **);
 template bool Storage_adapter::get<Resource_group::Name_key, Resource_group>(
-    THD *, const Tablespace::Name_key &, enum_tx_isolation, bool,
+    THD *, const Resource_group::Name_key &, enum_tx_isolation, bool,
     const Resource_group **);
 template bool Storage_adapter::get<Resource_group::Aux_key, Resource_group>(
-    THD *, const Tablespace::Aux_key &, enum_tx_isolation, bool,
+    THD *, const Resource_group::Aux_key &, enum_tx_isolation, bool,
     const Resource_group **);
 template bool Storage_adapter::drop(THD *, const Resource_group *);
 template bool Storage_adapter::store(THD *, Resource_group *);
@@ -594,6 +632,17 @@ template bool Storage_adapter::get<Index_stat::Name_key, Index_stat>(
     const Index_stat **);
 template bool Storage_adapter::store(THD *, Index_stat *);
 template bool Storage_adapter::drop(THD *, const Index_stat *);
+
+// Doxygen doesn't understand this explicit template instantiation.
+#ifndef IN_DOXYGEN
+template void Storage_adapter::core_drop<Schema>(THD *, const Schema *);
+template void Storage_adapter::core_drop<Table>(THD *, const Table *);
+template void Storage_adapter::core_drop<Tablespace>(THD *, const Tablespace *);
+
+template void Storage_adapter::core_store<Schema>(THD *, Schema *);
+template void Storage_adapter::core_store<Table>(THD *, Table *);
+template void Storage_adapter::core_store<Tablespace>(THD *, Tablespace *);
+#endif
 
 }  // namespace cache
 }  // namespace dd

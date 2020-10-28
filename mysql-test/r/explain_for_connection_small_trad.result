@@ -44,8 +44,8 @@ SYNC_POINT:before_reset_query_plan
 Diff: EXPLAIN NORMAL vs OTHER
 @@ -1,2 +1,2 @@
  id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
--1	SIMPLE	t1	NULL	ref	key1	key1	4	const	4	20.00	Using index condition; Using where; Using filesort
-+1	SIMPLE	t1	NULL	ref	key1	key1	4	const	4	100.00	Using index condition; Using where; Using filesort
+-1	SIMPLE	t1	NULL	ref	key1	key1	4	const	4	20.00	Using where; Using filesort
++1	SIMPLE	t1	NULL	ref	key1	key1	4	const	4	100.00	Using where; Using filesort
 QUERY: SELECT t1.c2   FROM t2 STRAIGHT_JOIN t1 ON t1.c1 < t2.c1 
 STATUS: EQUAL
 QUERY: SELECT STRAIGHT_JOIN * FROM (t1 LEFT JOIN  (t2 LEFT JOIN (t3 LEFT OUTER JOIN t4 ON t3.c1 <= t4.c1_key) ON t2.c1 = t4.c3)  ON t1.c1 = t4.c2) RIGHT OUTER JOIN t5 ON t2.c2 <= t5.c1 WHERE t1.i1 = 1 
@@ -92,16 +92,16 @@ SYNC_POINT:before_reset_query_plan
 Diff: EXPLAIN NORMAL vs OTHER
 @@ -1,2 +1,2 @@
  id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
--1	SIMPLE	t1	NULL	ref	a_c,a	a	5	const	1	75.00	Using index condition; Using where; Using filesort
-+1	SIMPLE	t1	NULL	ref	a_c,a	a	5	const	1	100.00	Using index condition; Using where; Using filesort
+-1	SIMPLE	t1	NULL	ref	a_c,a	a	5	const	1	75.00	Using where; Using filesort
++1	SIMPLE	t1	NULL	ref	a_c,a	a	5	const	1	100.00	Using where; Using filesort
 QUERY: SELECT 1 AS col FROM t1 WHERE a=2 AND (c=10 OR c IS NULL) ORDER BY c DESC 
 STATUS:NOT_EQUAL
 SYNC_POINT:before_reset_query_plan
 Diff: EXPLAIN NORMAL vs OTHER
 @@ -1,2 +1,2 @@
  id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
--1	SIMPLE	t1	NULL	ref	a_c,a	a	5	const	1	75.00	Using index condition; Using where; Using filesort
-+1	SIMPLE	t1	NULL	ref	a_c,a	a	5	const	1	100.00	Using index condition; Using where; Using filesort
+-1	SIMPLE	t1	NULL	ref	a_c,a	a	5	const	1	75.00	Using where; Using filesort
++1	SIMPLE	t1	NULL	ref	a_c,a	a	5	const	1	100.00	Using where; Using filesort
 QUERY: UPDATE t1 SET b = CONCAT(b, ', max(a) in t2: ', (SELECT MAX(a) FROM t2)) WHERE a = 5 
 STATUS:NOT_EQUAL
 SYNC_POINT:planned_single_update
@@ -133,15 +133,7 @@ Diff: EXPLAIN NORMAL vs OTHER
 QUERY: SELECT DISTINCT topic FROM t2 WHERE NOT EXISTS(SELECT * FROM t3 WHERE numeropost=topic) 
 STATUS: EQUAL
 QUERY: DELETE FROM t1 WHERE topic IN (SELECT DISTINCT topic FROM t2 WHERE NOT EXISTS(SELECT * FROM t3 WHERE numeropost=topic)) 
-STATUS:NOT_EQUAL
-SYNC_POINT:planned_single_delete
-Diff: EXPLAIN NORMAL vs OTHER
-@@ -2,3 +2,3 @@
- 1	DELETE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
--2	DEPENDENT SUBQUERY	t2	NULL	index_subquery	topic	topic	3	func	2	100.00	Using where; Using index
--3	DEPENDENT SUBQUERY	t3	NULL	system	PRIMARY	NULL	NULL	NULL	1	100.00	NULL
-+2	SUBQUERY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Plan isn't ready yet
-+3	SUBQUERY	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Plan isn't ready yet
+STATUS: EQUAL
 QUERY: SELECT cns.id, cns.max_anno_dep, cns.max_anno_dep = (SELECT s.anno_dep FROM t1 AS s WHERE s.id_cns = cns.id ORDER BY s.anno_dep DESC LIMIT 1) AS PIPPO FROM t2 AS cns 
 STATUS: EQUAL
 QUERY: SELECT (SELECT 1 FROM  t1 WHERE t1.a=t2.a ORDER BY t1.b LIMIT 1) AS d1 FROM t2 
@@ -167,7 +159,7 @@ STATUS:NOT_EQUAL
 SYNC_POINT:after_join_optimize
 Diff: EXPLAIN NORMAL vs OTHER
 @@ -3,3 +3,3 @@
- 1	SIMPLE	alias2	NULL	ALL	col_varchar_key	NULL	NULL	NULL	5	20.00	Using where; Using join buffer (Block Nested Loop)
+ 1	SIMPLE	alias2	NULL	ALL	col_varchar_key	NULL	NULL	NULL	5	20.00	Using where; Using join buffer (hash join)
 -1	SIMPLE	t1	NULL	ALL	col_varchar_key	NULL	NULL	NULL	5	26.66	Range checked for each record (index map: 0x4)
 +1	SIMPLE	t1	NULL	ALL	col_varchar_key	NULL	NULL	NULL	5	100.00	Range checked for each record (index map: 0x4)
  1	SIMPLE	sq2_alias2	NULL	ref	col_int_key	col_int_key	4	func	2	100.00	Using where; Using index; End temporary
@@ -176,7 +168,7 @@ STATUS:NOT_EQUAL
 SYNC_POINT:after_join_optimize
 Diff: EXPLAIN NORMAL vs OTHER
 @@ -3,3 +3,3 @@
- 1	SIMPLE	alias2	NULL	ALL	col_varchar_key	NULL	NULL	NULL	5	20.00	Using where; Using join buffer (Block Nested Loop)
+ 1	SIMPLE	alias2	NULL	ALL	col_varchar_key	NULL	NULL	NULL	5	20.00	Using where; Using join buffer (hash join)
 -1	SIMPLE	t1	NULL	ALL	col_varchar_key	NULL	NULL	NULL	5	26.66	Range checked for each record (index map: 0x4)
 +1	SIMPLE	t1	NULL	ALL	col_varchar_key	NULL	NULL	NULL	5	100.00	Range checked for each record (index map: 0x4)
  1	SIMPLE	sq2_alias2	NULL	ref	col_int_key	col_int_key	4	func	2	100.00	Using where; Using index; End temporary
@@ -198,7 +190,7 @@ SYNC_POINT:before_reset_query_plan
 Diff: EXPLAIN NORMAL vs OTHER
 @@ -2,2 +2,2 @@
  1	SIMPLE	alias1	NULL	ref	col_int_key	col_int_key	5	const	1	100.00	NULL
--1	SIMPLE	alias2	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where; Using join buffer (Block Nested Loop)
-+1	SIMPLE	alias2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where; Using join buffer (Block Nested Loop)
+-1	SIMPLE	alias2	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where; Using join buffer (hash join)
++1	SIMPLE	alias2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where; Using join buffer (hash join)
 QUERY: SELECT DISTINCT alias2.pk AS field1, alias2.pk AS field2, alias2.pk AS field3 FROM t1 AS alias1 RIGHT JOIN t2 AS alias2  ON  alias1.col_varchar_key =  alias2.col_varchar_key WHERE alias1.col_int >alias1.col_int HAVING field3 = 7 ORDER BY field1, field2, field3 LIMIT 10 OFFSET 1
 STATUS: EQUAL

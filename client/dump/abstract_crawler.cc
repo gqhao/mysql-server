@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+  Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -60,10 +60,14 @@ Mysql::Tools::Base::Abstract_program *Abstract_crawler::get_program() {
 }
 
 void Abstract_crawler::process_dump_task(I_dump_task *new_dump_task) {
+  /*
+   Add the tasks to this list so that even if we error out,
+   cleanup is done properly.
+  */
+  m_dump_tasks_created.push_back(new_dump_task);
+
   /* in case of error stop all further processing */
   if (get_program()->get_error_code()) return;
-
-  m_dump_tasks_created.push_back(new_dump_task);
 
   Item_processing_data *main_item_processing_data =
       this->new_task_created(new_dump_task);
@@ -76,7 +80,7 @@ void Abstract_crawler::process_dump_task(I_dump_task *new_dump_task) {
     Chain_data *chain_data = new Chain_data(new_chain_id);
 
     I_object_reader *chain = (*it)->create_chain(chain_data, new_dump_task);
-    if (chain != NULL) {
+    if (chain != nullptr) {
       main_item_processing_data->set_chain(chain_data);
       chain->read_object(this->new_chain_created(
           chain_data, main_item_processing_data, chain));
@@ -93,9 +97,8 @@ void Abstract_crawler::wait_for_tasks_completion() {
     while ((*it)->is_completed() == false) {
       /* in case of error stop all running queues */
       if (get_program()->get_error_code()) {
-        for (std::vector<I_chain_maker *>::iterator it = m_chain_makers.begin();
-             it != m_chain_makers.end(); ++it) {
-          (*it)->stop_queues();
+        for (const auto &chain_maker : m_chain_makers) {
+          chain_maker->stop_queues();
         }
         return;
       }

@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -27,9 +27,9 @@
 #include <memory>  // std::unique_ptr
 #include <new>
 
+#include "sql/dd/impl/properties_impl.h"
 #include "sql/dd/impl/raw/raw_record.h"
 #include "sql/dd/impl/types/weak_object_impl.h"  // dd::Weak_object_impl
-#include "sql/dd/properties.h"
 #include "sql/dd/sdi_fwd.h"
 #include "sql/dd/string_type.h"
 #include "sql/dd/types/tablespace_file.h"  // dd::Tablespace_file
@@ -58,24 +58,24 @@ class Tablespace_file_impl : public Weak_object_impl, public Tablespace_file {
   Tablespace_file_impl(const Tablespace_file_impl &src,
                        Tablespace_impl *parent);
 
-  virtual ~Tablespace_file_impl() {}
+  ~Tablespace_file_impl() override {}
 
  public:
-  virtual const Object_table &object_table() const;
+  const Object_table &object_table() const override;
 
-  virtual bool store(Open_dictionary_tables_ctx *otx);
+  bool store(Open_dictionary_tables_ctx *otx) override;
 
-  virtual bool validate() const;
+  bool validate() const override;
 
-  virtual bool store_attributes(Raw_record *r);
+  bool store_attributes(Raw_record *r) override;
 
-  virtual bool restore_attributes(const Raw_record &r);
+  bool restore_attributes(const Raw_record &r) override;
 
-  void serialize(Sdi_wcontext *wctx, Sdi_writer *w) const;
+  void serialize(Sdi_wcontext *wctx, Sdi_writer *w) const override;
 
-  bool deserialize(Sdi_rcontext *rctx, const RJ_Value &val);
+  bool deserialize(Sdi_rcontext *rctx, const RJ_Value &val) override;
 
-  virtual void debug_print(String_type &outb) const;
+  void debug_print(String_type &outb) const override;
 
   void set_ordinal_position(uint ordinal_position) {
     m_ordinal_position = ordinal_position;
@@ -88,15 +88,15 @@ class Tablespace_file_impl : public Weak_object_impl, public Tablespace_file {
   // ordinal_position.
   /////////////////////////////////////////////////////////////////////////
 
-  virtual uint ordinal_position() const { return m_ordinal_position; }
+  uint ordinal_position() const override { return m_ordinal_position; }
 
   /////////////////////////////////////////////////////////////////////////
   // filename.
   /////////////////////////////////////////////////////////////////////////
 
-  virtual const String_type &filename() const { return m_filename; }
+  const String_type &filename() const override { return m_filename; }
 
-  virtual void set_filename(const String_type &filename) {
+  void set_filename(const String_type &filename) override {
     m_filename = filename;
   }
 
@@ -104,21 +104,23 @@ class Tablespace_file_impl : public Weak_object_impl, public Tablespace_file {
   // se_private_data.
   /////////////////////////////////////////////////////////////////////////
 
-  virtual const Properties &se_private_data() const {
-    return *m_se_private_data;
+  const Properties &se_private_data() const override {
+    return m_se_private_data;
   }
 
-  virtual Properties &se_private_data() { return *m_se_private_data; }
+  Properties &se_private_data() override { return m_se_private_data; }
 
-  virtual bool set_se_private_data_raw(const String_type &se_private_data_raw);
+  bool set_se_private_data(const String_type &se_private_data_raw) override {
+    return m_se_private_data.insert_values(se_private_data_raw);
+  }
 
   /////////////////////////////////////////////////////////////////////////
   // tablespace.
   /////////////////////////////////////////////////////////////////////////
 
-  virtual const Tablespace &tablespace() const;
+  const Tablespace &tablespace() const override;
 
-  virtual Tablespace &tablespace();
+  Tablespace &tablespace() override;
 
  public:
   static Tablespace_file_impl *restore_item(Tablespace_impl *ts) {
@@ -131,15 +133,15 @@ class Tablespace_file_impl : public Weak_object_impl, public Tablespace_file {
   }
 
  public:
-  virtual Object_key *create_primary_key() const;
-  virtual bool has_new_primary_key() const;
+  Object_key *create_primary_key() const override;
+  bool has_new_primary_key() const override;
 
  private:
   // Fields
   uint m_ordinal_position;
 
   String_type m_filename;
-  std::unique_ptr<Properties> m_se_private_data;
+  Properties_impl m_se_private_data;
 
   // References to other objects
   Tablespace_impl *m_tablespace;

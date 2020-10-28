@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -144,7 +144,7 @@ public:
       StateBuilding = 2,      ///< Building, not yet usable
       StateDropping = 3,      ///< Offlining or dropping, not usable
       StateOnline = 4,        ///< Online, usable
-      StateBackup = 5,        ///< Online, being backuped, usable
+      ObsoleteStateBackup = 5,///< Online, being backed-up, usable
       StateBroken = 9         ///< Broken, should be dropped and re-created
     };
 
@@ -220,6 +220,7 @@ public:
       PartitionBalance_ForRAByNode = NDB_PARTITION_BALANCE_FOR_RA_BY_NODE,
     };
 
+    Object(const Object&) = default;
   private:
     Object&operator=(const Object&);
   };
@@ -230,19 +231,19 @@ public:
   {
   public:
     ObjectId();
-    virtual ~ObjectId();
+    ~ObjectId() override;
     
     /**
      * Get status of object
      */
-    virtual Status getObjectStatus() const;
+    Status getObjectStatus() const override;
     
     /**
      * Get version of object
      */
-    virtual int getObjectVersion() const;
+    int getObjectVersion() const override;
     
-    virtual int getObjectId() const;
+    int getObjectId() const override;
     
   private:
     friend class NdbDictObjectImpl;
@@ -480,7 +481,7 @@ public:
      */
     bool getPartitionKey() const;
 #ifndef DOXYGEN_SHOULD_SKIP_DEPRECATED
-    inline bool getDistributionKey() const { return getPartitionKey(); };
+    inline bool getDistributionKey() const { return getPartitionKey(); }
 #endif
 
     ArrayType getArrayType() const;
@@ -619,7 +620,7 @@ public:
     void setPartitionKey(bool enable);
 #ifndef DOXYGEN_SHOULD_SKIP_DEPRECATED
     inline void setDistributionKey(bool enable)
-    { setPartitionKey(enable); };
+    { setPartitionKey(enable); }
 #endif
 
     void setArrayType(ArrayType type);
@@ -894,7 +895,7 @@ public:
      * @param  table  Table to be copied
      */
     Table(const Table& table); 
-    virtual ~Table();
+    ~Table() override;
     
     /**
      * Assignment operator, deep copy
@@ -1001,13 +1002,13 @@ public:
     /**
      * Get object status
      */
-    virtual Object::Status getObjectStatus() const;
+    Object::Status getObjectStatus() const override;
     void setStatusInvalid() const;
 
     /**
      * Get object version
      */
-    virtual int getObjectVersion() const;
+    int getObjectVersion() const override;
 
     /**
      * Set/Get indicator if default number of partitions is used in table.
@@ -1018,7 +1019,7 @@ public:
     /**
      * Get object id
      */
-    virtual int getObjectId() const;
+    int getObjectId() const override;
 
     /**
      * Set frm file to store with this table
@@ -1194,6 +1195,9 @@ public:
 
     void setFullyReplicated(bool val);
     bool getFullyReplicated() const;
+
+    void setRowChecksum(Uint32);
+    Uint32 getRowChecksum();
 #endif
 
     // these 2 are not de-doxygenated
@@ -1327,17 +1331,17 @@ public:
     /**
      * Get object status
      */
-    virtual Object::Status getObjectStatus() const;
+    Object::Status getObjectStatus() const override;
 
     /**
      * Get object version
      */
-    virtual int getObjectVersion() const;
+    int getObjectVersion() const override;
 
     /**
      * Get object id
      */
-    virtual int getObjectId() const;
+    int getObjectId() const override;
 
     /**
      * Get default NdbRecord object for this index
@@ -1363,7 +1367,7 @@ public:
      *  @param  name  Name of index
      */
     Index(const char * name = "");
-    virtual ~Index();
+    ~Index() override;
 
     /**
      * Set the name of an index
@@ -1620,7 +1624,7 @@ public:
      *  @param  table Reference retrieved from NdbDictionary
      */
     Event(const char *name, const NdbDictionary::Table& table);
-    virtual ~Event();
+    ~Event() override;
     /**
      * Set unique identifier for the event
      */
@@ -1746,17 +1750,17 @@ public:
     /**
      * Get object status
      */
-    virtual Object::Status getObjectStatus() const;
+    Object::Status getObjectStatus() const override;
 
     /**
      * Get object version
      */
-    virtual int getObjectVersion() const;
+    int getObjectVersion() const override;
 
     /**
      * Get object id
      */
-    virtual int getObjectId() const;
+    int getObjectId() const override;
 
 #ifndef DOXYGEN_SHOULD_SKIP_INTERNAL
     void print();
@@ -1990,7 +1994,7 @@ public:
   public:
     LogfileGroup();
     LogfileGroup(const LogfileGroup&);
-    virtual ~LogfileGroup();
+    ~LogfileGroup() override;
 
     void setName(const char * name);
     const char* getName() const;
@@ -2006,17 +2010,17 @@ public:
     /**
      * Get object status
      */
-    virtual Object::Status getObjectStatus() const;
+    Object::Status getObjectStatus() const override;
 
     /**
      * Get object version
      */
-    virtual int getObjectVersion() const;
+    int getObjectVersion() const override;
 
     /**
      * Get object id
      */
-    virtual int getObjectId() const;
+    int getObjectId() const override;
 
   private:
     friend class NdbDictionaryImpl;
@@ -2032,7 +2036,7 @@ public:
   public:
     Tablespace();
     Tablespace(const Tablespace&);
-    virtual ~Tablespace();
+    ~Tablespace() override;
 
     void setName(const char * name);
     const char* getName() const;
@@ -2052,17 +2056,17 @@ public:
     /**
      * Get object status
      */
-    virtual Object::Status getObjectStatus() const;
+    Object::Status getObjectStatus() const override;
 
     /**
      * Get object version
      */
-    virtual int getObjectVersion() const;
+    int getObjectVersion() const override;
 
     /**
      * Get object id
      */
-    virtual int getObjectId() const;
+    int getObjectId() const override;
 
   private:
     friend class NdbTablespaceImpl;
@@ -2074,7 +2078,7 @@ public:
   public:
     Datafile();
     Datafile(const Datafile&);
-    virtual ~Datafile();
+    ~Datafile() override;
 
     void setPath(const char * name);
     const char* getPath() const;
@@ -2091,17 +2095,17 @@ public:
     /**
      * Get object status
      */
-    virtual Object::Status getObjectStatus() const;
+    Object::Status getObjectStatus() const override;
 
     /**
      * Get object version
      */
-    virtual int getObjectVersion() const;
+    int getObjectVersion() const override;
 
     /**
      * Get object id
      */
-    virtual int getObjectId() const;
+    int getObjectId() const override;
 
   private:
     friend class NdbDatafileImpl;
@@ -2113,7 +2117,7 @@ public:
   public:
     Undofile();
     Undofile(const Undofile&);
-    virtual ~Undofile();
+    ~Undofile() override;
 
     void setPath(const char * path);
     const char* getPath() const;
@@ -2129,17 +2133,17 @@ public:
     /**
      * Get object status
      */
-    virtual Object::Status getObjectStatus() const;
+    Object::Status getObjectStatus() const override;
 
     /**
      * Get object version
      */
-    virtual int getObjectVersion() const;
+    int getObjectVersion() const override;
 
     /**
      * Get object id
      */
-    virtual int getObjectId() const;
+    int getObjectId() const override;
 
   private:
     friend class NdbUndofileImpl;
@@ -2156,7 +2160,7 @@ public:
   public:
     HashMap();
     HashMap(const HashMap&);
-    virtual ~HashMap();
+    ~HashMap() override;
 
     void setName(const char *);
     const char * getName() const;
@@ -2174,17 +2178,17 @@ public:
     /**
      * Get object status
      */
-    virtual Object::Status getObjectStatus() const;
+    Object::Status getObjectStatus() const override;
 
     /**
      * Get object version
      */
-    virtual int getObjectVersion() const;
+    int getObjectVersion() const override;
 
     /**
      * Get object id
      */
-    virtual int getObjectId() const;
+    int getObjectId() const override;
 
   private:
     friend class NdbHashMapImpl;
@@ -2201,7 +2205,7 @@ public:
   public:
     ForeignKey();
     ForeignKey(const ForeignKey&);
-    virtual ~ForeignKey();
+    ~ForeignKey() override;
 
     enum FkAction
     {
@@ -2262,17 +2266,17 @@ public:
     /**
      * Get object status
      */
-    virtual Object::Status getObjectStatus() const;
+    Object::Status getObjectStatus() const override;
 
     /**
      * Get object id
      */
-    virtual int getObjectId() const;
+    int getObjectId() const override;
 
     /**
      * Get object version
      */
-    virtual int getObjectVersion() const;
+    int getObjectVersion() const override;
 
   private:
     friend class NdbForeignKeyImpl;
@@ -2295,6 +2299,7 @@ public:
        * @struct  Element
        * @brief   Object to be stored in an NdbDictionary::Dictionary::List
        */
+      List& operator=(const List&) = default;
       struct Element {
 	unsigned id;            ///< Id of object
         Object::Type type;      ///< Type of object
@@ -2510,7 +2515,7 @@ public:
     /**
      * Start table optimization given defined table object
      * @param t Object of table to optimize
-     * @param Pre-allocated OptimizeTableHandle
+     * @param h Pre-allocated OptimizeTableHandle
      * @return 0 if successful otherwise -1.
      */
     int
@@ -2519,7 +2524,7 @@ public:
     /**
      * Start index optimization given defined index object
      * @param ind Object of index to optimize
-     * @param Pre-allocated OptimizeIndexHandle
+     * @param h Pre-allocated OptimizeIndexHandle
      * @return 0 if successful otherwise -1.
      */
     int

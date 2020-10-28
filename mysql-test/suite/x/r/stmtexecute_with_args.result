@@ -222,7 +222,7 @@ Mysqlx.Resultset.ColumnMetaData {
 
 Mysqlx.Resultset.ColumnMetaData {
   type: BYTES
-  collation: 45
+  collation: 255
   length: 44
   flags: 16
 }
@@ -277,7 +277,7 @@ Mysqlx.Resultset.ColumnMetaData {
   original_table: ""
   schema: ""
   catalog: "def"
-  collation: 45
+  collation: 255
   length: 44
   flags: 16
 }
@@ -348,6 +348,30 @@ Mysqlx.Error {
   sql_state: "42000"
 }
 
+Mysqlx.Ok {
+  msg: "bye!"
+}
+ok
+
+Check boolean value as argument for placeholder (document scenario)
+-------------------------------------------------------------------
+
+command ok
+
+2 rows affected
+Records: 2  Duplicates: 0  Warnings: 0
+Verify ["SELECT doc->>'$.name' as result FROM xtest.booleans WHERE doc->'$.active' = ?" for '?=true' returns 'foo']
+Verify ["SELECT doc->>'$.name' as result FROM xtest.booleans WHERE doc->'$.active' = ?" for '?=false' returns 'bar']
+
+Check boolean value as argument for placeholder (classic scenario)
+------------------------------------------------------------------
+
+0 rows affected
+
+2 rows affected
+Records: 2  Duplicates: 0  Warnings: 0
+Verify ["SELECT `name` as result FROM xtest.classic WHERE `active` = ?" for '?=true' returns 'foo']
+Verify ["SELECT `name` as result FROM xtest.classic WHERE `active` = ?" for '?=false' returns 'bar']
 Mysqlx.Ok {
   msg: "bye!"
 }

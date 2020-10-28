@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2013, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -48,7 +48,7 @@ bool One_thread_connection_handler::add_connection(Channel_info *channel_info) {
   }
 
   THD *thd = channel_info->create_thd();
-  if (thd == NULL) {
+  if (thd == nullptr) {
     connection_errors_internal++;
     channel_info->send_error_and_close_channel(ER_OUT_OF_RESOURCES, 0, false);
     Connection_handler_manager::dec_connection_count();
@@ -66,13 +66,7 @@ bool One_thread_connection_handler::add_connection(Channel_info *channel_info) {
     stack overruns.
   */
   thd_set_thread_stack(thd, (char *)&thd);
-  if (thd->store_globals()) {
-    close_connection(thd, ER_OUT_OF_RESOURCES);
-    thd->release_resources();
-    delete thd;
-    Connection_handler_manager::dec_connection_count();
-    return true;
-  }
+  thd->store_globals();
 
   mysql_thread_set_psi_id(thd->thread_id());
   mysql_socket_set_thread_owner(

@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -22,7 +22,6 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 */
 
-
 #include <ndb_global.h>
 
 #include <NdbTCP.h>
@@ -30,32 +29,42 @@
 #include "BackupFormat.hpp"
 #include <AttributeHeader.hpp>
 #include <SimpleProperties.hpp>
+#include <util/version.h>
 #include <ndb_version.h>
-#include <util/ndbzio.h>
+#include "kernel/signaldata/FsOpenReq.hpp"
+#include "portlib/ndb_file.h"
+#include "util/ndbxfrm_iterator.h"
+#include "util/ndbxfrm_readfile.h"
+#include "util/ndb_openssl_evp.h"
 
 #define JAM_FILE_ID 476
+
+//#define DUMMY_PASSWORD
+
+using byte = unsigned char;
+
 static const Uint32 MaxReadWords = 32768;
 
-bool readHeader(ndbzio_stream*, BackupFormat::FileHeader *);
-bool readFragHeader(ndbzio_stream*, BackupFormat::DataFile::FragmentHeader *);
-bool readFragFooter(ndbzio_stream*, BackupFormat::DataFile::FragmentFooter *);
-Int32 readRecord(ndbzio_stream*, Uint32 **, Uint32*, bool print);
+bool readHeader(ndbxfrm_readfile*, BackupFormat::FileHeader *);
+bool readFragHeader(ndbxfrm_readfile*, BackupFormat::DataFile::FragmentHeader *);
+bool readFragFooter(ndbxfrm_readfile*, BackupFormat::DataFile::FragmentFooter *);
+Int32 readRecord(ndbxfrm_readfile*, Uint32 **, Uint32*, bool print);
 
 NdbOut & operator<<(NdbOut&, const BackupFormat::FileHeader &); 
 NdbOut & operator<<(NdbOut&, const BackupFormat::DataFile::FragmentHeader &); 
 NdbOut & operator<<(NdbOut&, const BackupFormat::DataFile::FragmentFooter &); 
 
-bool readLCPCtlFile(ndbzio_stream* f, BackupFormat::LCPCtlFile *ret);
-bool readTableList(ndbzio_stream*, BackupFormat::CtlFile::TableList **);
-bool readTableDesc(ndbzio_stream*, BackupFormat::CtlFile::TableDescription **);
-bool readGCPEntry(ndbzio_stream*, BackupFormat::CtlFile::GCPEntry **);
+bool readLCPCtlFile(ndbxfrm_readfile* f, BackupFormat::LCPCtlFile *ret);
+bool readTableList(ndbxfrm_readfile*, BackupFormat::CtlFile::TableList **);
+bool readTableDesc(ndbxfrm_readfile*, BackupFormat::CtlFile::TableDescription **);
+bool readGCPEntry(ndbxfrm_readfile*, BackupFormat::CtlFile::GCPEntry **);
 
 NdbOut & operator<<(NdbOut&, const BackupFormat::LCPCtlFile &); 
 NdbOut & operator<<(NdbOut&, const BackupFormat::CtlFile::TableList &); 
 NdbOut & operator<<(NdbOut&, const BackupFormat::CtlFile::TableDescription &); 
 NdbOut & operator<<(NdbOut&, const BackupFormat::CtlFile::GCPEntry &); 
 
-Int32 readLogEntry(ndbzio_stream*, Uint32**);
+Int32 readLogEntry(ndbxfrm_readfile*, Uint32**, Uint32 file_type, Uint32 version);
 
 struct RowEntry
 {
@@ -88,13 +97,16 @@ static Uint32 all_rows_count = 0;
 static RowEntry **row_entries = NULL;
 static RowEntry **row_all_entries = NULL;
 
+static const char* g_password = nullptr;
+
 #define IGNORE_PART 1
 #define ALL_PART 2
 #define CHANGE_PART 3
 
-inline void ndb_end_and_exit(int exitcode)
+[[noreturn]] inline void ndb_end_and_exit(int exitcode)
 {
   ndb_end(0);
+  ndb_openssl_evp::library_end();
   exit(exitcode);
 }
 
@@ -398,21 +410,32 @@ void handle_print_restored_rows(const char *file_input)
            print_restored_rows_fid);
 
   char buf[255];
-  ndbzio_stream fo;
-  bzero(&fo, sizeof(fo));
+  ndb_file file;
+  ndbxfrm_readfile fo;
+
   BaseString::snprintf(buf, sizeof(buf),
                        "%u/T%uF%u.ctl",
                        print_restored_rows_ctl_dir,
                        print_restored_rows_table,
                        print_restored_rows_fid);
-  int r = ndbzopen(&fo,buf,O_RDONLY);
-  if(r != 1)
+  int r = file.open(buf, FsOpenReq::OM_READONLY);
+  if (r != -1)
+  {
+#if !defined(DUMMY_PASSWORD)
+    r = fo.open(file,
+                reinterpret_cast<const byte*>(g_password),
+                (g_password != nullptr ? strlen(g_password) : 0));
+#else
+    r = fo.open(file, reinterpret_cast<const byte*>("DUMMY"), 5);
+#endif
+  }
+  if(r == -1)
   {
     ndbout_c("Failed to open file '%s', error: %d",
              buf, r);
     ndb_end_and_exit(1);
   }
-  ndbzio_stream* f = &fo;
+  ndbxfrm_readfile* f = &fo;
   BackupFormat::FileHeader fileHeader;
   if (!readHeader(f, &fileHeader))
   {
@@ -435,7 +458,8 @@ void handle_print_restored_rows(const char *file_input)
     ndbout << "Invalid LCP Control file!" << endl;
     ndb_end_and_exit(1);
   }
-  ndbzclose(f);
+  fo.close();
+  file.close();
 
   /**
    * Allocate the array of linked list first pointers.
@@ -498,8 +522,18 @@ void handle_print_restored_rows(const char *file_input)
                          i,
                          print_restored_rows_table,
                          print_restored_rows_fid);
-    r = ndbzopen(&fo,buf,O_RDONLY);
-    if(r != 1)
+    r = file.open(buf, FsOpenReq::OM_READONLY);
+    if (r != -1)
+    {
+#if !defined(DUMMY_PASSWORD)
+      r = fo.open(file,
+                  reinterpret_cast<const byte*>(g_password),
+                  (g_password != nullptr ? strlen(g_password) : 0));
+#else
+      r = fo.open(file, reinterpret_cast<const byte*>("DUMMY"), 5);
+#endif
+    }
+    if(r == -1)
     {
       ndbout_c("Failed to open file '%s', error: %d",
                buf, r);
@@ -615,7 +649,8 @@ void handle_print_restored_rows(const char *file_input)
         }
       }
     }
-    ndbzclose(f);
+    fo.close();
+    file.close();
     ndbout_c("Number of all rows currently are: %u", all_rows_count);
   }
   print_rows();
@@ -629,23 +664,70 @@ void handle_print_restored_rows(const char *file_input)
   exit(0);
 }
 
+const char * ndb_basename(const char *path);
+
+void usage(FILE* f, const char progname[])
+{
+  const char* name = ndb_basename(progname);
+  fprintf(f,
+          "Usage: %s [-v] [-P password] [--] filename\n"
+          "Usage: %s --print-restored-rows [-v] [-P password] [-i] [-p] [-u] "
+          "[-h word-count] [-c ctl-dir-num] [-f frag-id] [-t table-id] "
+          "[-n name] [--] filename\n"
+          "\n"
+          "  -c [0|1] control directory number\n"
+          "  -f frag  fragment id\n"
+          "  -h [0|1] print header words\n"
+          "  -i       show ignored rows\n"
+          "  -n file  file with row id to check, each row id is a line with:\n"
+          "           page number, space, index in page.\n"
+          "  -P       password for decryption\n"
+          "  -p       print rows per page\n"
+          "  -t tab   table id\n"
+          "  -u       do not print rows\n"
+          "  -v       verbose level, repeat for higher\n"
+          "  --print-restored-rows uses control file ctr/TtabFfrag.ctl as "
+          "given by -c, -f, and, -t.\n",
+          name, name);
+}
+
 int
 main(int argc, const char * argv[])
 {
-  const char *file = argv[1];
+  ndb_openssl_evp::library_init();
+  const char *file_name = argv[1];
   const char *file_input = NULL;
   ndb_init();
   if (argc > 2)
   {
-    for (int i = 1; i < argc; i++)
+    int i = 1;
+    for (i = 1; i < argc; i++)
     {
+      if (argv[i][0] != '-')
+      {
+        // Filename
+        break;
+      }
+      if (!strncmp(argv[i], "--", 2))
+      {
+        // Following args are filename(s)
+        i++;
+        break;
+      }
+      if (!strncmp(argv[i], "-P", 2))
+      {
+        g_password = argv[i+1];
+        i++;
+        continue;
+      }
+      if (!strncmp(argv[i], "-v", 2))
+      {
+        verbose_level++;
+        continue;
+      }
       if (print_restored_rows)
       {
-        if (!strncmp(argv[i], "-v", 2))
-        {
-          verbose_level++;
-        }
-        else if (!strncmp(argv[i], "-i", 2))
+        if (!strncmp(argv[i], "-i", 2))
         {
           show_ignored_rows = 1;
         }
@@ -664,14 +746,14 @@ main(int argc, const char * argv[])
             int ret = sscanf(argv[i+1], "%d", &num_data_words);
             if (ret != 1)
             {
-              printf("Usage: %s <filename>\n", argv[0]);
+              usage(stderr, argv[0]);
               ndb_end_and_exit(1);
             }
             i++;
           }
           else
           {
-            printf("Usage: %s <filename>\n", argv[0]);
+            usage(stderr, argv[0]);
             ndb_end_and_exit(1);
           }
         }
@@ -684,14 +766,14 @@ main(int argc, const char * argv[])
                 (print_restored_rows_ctl_dir != 0 &&
                  print_restored_rows_ctl_dir != 1))
             {
-              printf("Usage: %s <filename>\n", argv[0]);
+              usage(stderr, argv[0]);
               ndb_end_and_exit(1);
             }
             i++;
           }
           else
           {
-            printf("Usage: %s <filename>\n", argv[0]);
+            usage(stderr, argv[0]);
             ndb_end_and_exit(1);
           }
         }
@@ -702,14 +784,14 @@ main(int argc, const char * argv[])
             int ret = sscanf(argv[i+1], "%d", &print_restored_rows_fid);
             if (ret != 1)
             {
-              printf("Usage: %s <filename>\n", argv[0]);
+              usage(stderr, argv[0]);
               ndb_end_and_exit(1);
             }
             i++;
           }
-          else
+          else if (verbose_level == 0)
           {
-            printf("Usage: %s <filename>\n", argv[0]);
+            usage(stderr, argv[0]);
             ndb_end_and_exit(1);
           }
         }
@@ -720,14 +802,14 @@ main(int argc, const char * argv[])
             int ret = sscanf(argv[i+1], "%d", &print_restored_rows_table);
             if (ret != 1)
             {
-              printf("Usage: %s <filename>\n", argv[0]);
+              usage(stderr, argv[0]);
               ndb_end_and_exit(1);
             }
             i++;
           }
           else
           {
-            printf("Usage: %s <filename>\n", argv[0]);
+            usage(stderr, argv[0]);
             ndb_end_and_exit(1);
           }
         }
@@ -740,9 +822,14 @@ main(int argc, const char * argv[])
           }
           else
           {
-            printf("Usage: %s <filename>\n", argv[0]);
+            usage(stderr, argv[0]);
             ndb_end_and_exit(1);
           }
+        }
+        else
+        {
+          usage(stderr, argv[0]);
+          ndb_end_and_exit(1);
         }
       }
       else
@@ -753,19 +840,29 @@ main(int argc, const char * argv[])
         }
         else
         {
-          printf("Usage: %s <filename>\n", argv[0]);
+          usage(stderr, argv[0]);
           ndb_end_and_exit(1);
         }
       }
     }
+    if (i == argc || i + 1 < argc)
+    {
+      usage(stderr, argv[0]);
+      ndb_end_and_exit(1);
+    }
+    file_name = argv[i];
   }
   else if (argc == 2)
   {
-    ;
+    if (argv[1][0] == '-')
+    {
+      usage(stderr, argv[0]);
+      ndb_end_and_exit(1);
+    }
   }
   else if (argc <= 1)
   {
-    printf("Usage: %s <filename>\n", argv[0]);
+    usage(stderr, argv[0]);
     ndb_end_and_exit(1);
   }
   if (print_restored_rows)
@@ -773,24 +870,32 @@ main(int argc, const char * argv[])
     if (print_restored_rows_table == -1 ||
         print_restored_rows_fid == -1)
     {
-      printf("Usage: %s <filename>\n", argv[0]);
+      usage(stderr, argv[0]);
       ndb_end_and_exit(1);
     }
     handle_print_restored_rows(file_input);
   }
 
-  ndbzio_stream fo;
-  bzero(&fo, sizeof(fo));
-  int r= ndbzopen(&fo,file, O_RDONLY);
+  ndb_file file;
+  ndbxfrm_readfile fo;
 
-  if(r != 1)
+  int r = file.open(file_name, FsOpenReq::OM_READONLY);
+#if !defined(DUMMY_PASSWORD)
+  r = fo.open(file,
+              reinterpret_cast<const byte*>(g_password),
+              (g_password != nullptr ? strlen(g_password) : 0));
+#else
+  r = fo.open(file, reinterpret_cast<const byte*>("DUMMY"), 5);
+#endif
+
+  if(r == -1)
   {
     ndbout_c("Failed to open file '%s', error: %d",
              argv[1], r);
     ndb_end_and_exit(1);
   }
 
-  ndbzio_stream* f = &fo;
+  ndbxfrm_readfile* f = &fo;
 
   BackupFormat::FileHeader fileHeader;
   if(!readHeader(f, &fileHeader)){
@@ -801,29 +906,35 @@ main(int argc, const char * argv[])
 
   switch(fileHeader.FileType){
   case BackupFormat::DATA_FILE:
-    while(f->z_eof){
-      BackupFormat::DataFile::FragmentHeader fragHeader;
-      if(!readFragHeader(f, &fragHeader))
-	break;
+  {
+    BackupFormat::DataFile::FragmentHeader fragHeader;
+    while (readFragHeader(f, &fragHeader))
+    {
       ndbout << fragHeader << endl;
       
       Uint32 len, * data, header_type;
-      while((len = readRecord(f, &data, &header_type, true)) > 0){
-#if 0
-	ndbout << "-> " << hex;
-	for(Uint32 i = 0; i<len; i++){
-	  ndbout << data[i] << " ";
-	}
-	ndbout << endl;
-#endif
+      while((len = readRecord(f, &data, &header_type, true)) > 0)
+      {
+        if (verbose_level > 0)
+        {
+	  ndbout << "-> " << hex;
+	  for(Uint32 i = 0; i < len; i++)
+          {
+	    ndbout << data[i] << " ";
+          }
+	  ndbout << endl;
+        }
       }
 
       BackupFormat::DataFile::FragmentFooter fragFooter;
       if(!readFragFooter(f, &fragFooter))
+      {
 	break;
+      }
       ndbout << fragFooter << endl;
     }
-    break;
+  }
+  break;
   case BackupFormat::CTL_FILE:{
     BackupFormat::CtlFile::TableList * tabList;
     if(!readTableList(f, &tabList)){
@@ -851,13 +962,20 @@ main(int argc, const char * argv[])
     
     break;
   }
-  case BackupFormat::LOG_FILE:{
+  case BackupFormat::LOG_FILE:
+  case BackupFormat::UNDO_FILE:
+  {
     logEntryNo = 0;
+
+    const Uint32 log_entry_version =
+        (likely(ndbd_backup_file_fragid(fileHeader.BackupVersion)) ? 2 : 1);
 
     typedef BackupFormat::LogFile::LogEntry LogEntry;
 
-    Uint32 len, * data;
-    while((len = readLogEntry(f, &data)) > 0){
+    Int32 dataLen;
+    Uint32 * data;
+    while ((dataLen = readLogEntry(f, &data, fileHeader.FileType, log_entry_version)) > 0)
+    {
       LogEntry * logEntry = (LogEntry *) data;
       /**
        * Log Entry
@@ -866,27 +984,30 @@ main(int argc, const char * argv[])
       bool gcp = (event & 0x10000) != 0;
       event &= 0xFFFF;
       if(gcp)
-	len --;
+	dataLen--;
       
       ndbout << "LogEntry Table: " << (Uint32)ntohl(logEntry->TableId) 
 	     << " Event: " << event
-	     << " Length: " << (len - 2);
+	     << " Length: " << dataLen;
       
-      const Uint32 dataLen = len - 2;
-#if 0
-      Uint32 pos = 0;
-      while(pos < dataLen){
-	AttributeHeader * ah = (AttributeHeader*)&logEntry->Data[pos];
-	ndbout_c(" Attribut: %d Size: %d",
-		 ah->getAttributeId(),
-		 ah->getDataSize());
-	pos += ah->getDataSize() + 1;
-      }
-#endif
       if(gcp)
 	  ndbout << " GCP: " << (Uint32)ntohl(logEntry->Data[dataLen]);
       ndbout << endl;
+      if (verbose_level > 0)
+      {
+        Int32 pos = 0;
+        while (pos < dataLen)
+        {
+          AttributeHeader * ah = (AttributeHeader*)&logEntry->Data[pos];
+          ndbout_c(" Attribut: %d Size: %d",
+                   ah->getAttributeId(),
+                   ah->getDataSize());
+          pos += ah->getDataSize() + 1;
+        }
+        require(pos == dataLen);
+      }
     }
+    require(dataLen == 0);
     break;
   }
   case BackupFormat::LCP_FILE:
@@ -917,14 +1038,17 @@ main(int argc, const char * argv[])
       ndbout << fragHeader << endl;
       
       Uint32 len, * data, header_type;
-      while((len = readRecord(f, &data, &header_type, true)) > 0){
-#if 0
-	ndbout << "-> " << hex;
-	for(Uint32 i = 0; i<len; i++){
-	  ndbout << data[i] << " ";
-	}
-	ndbout << endl;
-#endif
+      while((len = readRecord(f, &data, &header_type, true)) > 0)
+      {
+        if (verbose_level > 0)
+        {
+	  ndbout << "-> " << hex;
+	  for(Uint32 i = 0; i < len; i++)
+          {
+	    ndbout << data[i] << " ";
+          }
+          ndbout << endl;
+        }
       }
       
       BackupFormat::DataFile::FragmentFooter fragFooter;
@@ -955,24 +1079,39 @@ main(int argc, const char * argv[])
 	   << fileHeader.FileType << endl;
     break;
   }
-  ndbzclose(f);
+  fo.close();
+  file.close();
   ndb_end_and_exit(0);
 }
 
-#define RETURN_FALSE() { ndbout_c("false: %d", __LINE__); abort(); return false; }
+#define RETURN_FALSE() { ndbout_c("false: %d", __LINE__); /*abort();*/ return false; }
 
 static bool endian = false;
+
+static inline Uint32 Twiddle32(Uint32 x)
+{
+  if (!endian) return x;
+  return ((x & 0x000000ff) << 24) |
+         ((x & 0x0000ff00) << 8) |
+         ((x & 0x00ff0000) >> 8) |
+         ((x & 0xff000000) >> 24);
+}
 
 static
 inline
 size_t
-aread(void * buf, size_t sz, size_t n, ndbzio_stream* f)
+aread(void * buf, size_t sz, size_t n, ndbxfrm_readfile* f)
 {
-  int error = 0;
-  unsigned r = ndbzread(f, buf, (unsigned)(sz * n), &error);
-  if (error || r != (sz * n))
+  byte* byte_buf = static_cast<byte*>(buf);
+  ndbxfrm_output_iterator it(byte_buf, byte_buf + sz * n, false);
+  int r = f->read_forward(&it);
+  if (r == -1)
   {
-    printf("\nFailed to read!!, r = %u, error = %d\n", r, error);
+    return 0; // TODO: fail somehow
+  }
+  r = it.begin() - byte_buf;
+  if (r % sz != 0)
+  {
     abort();
     exit(1);
   }
@@ -980,7 +1119,7 @@ aread(void * buf, size_t sz, size_t n, ndbzio_stream* f)
 }
 
 bool 
-readHeader(ndbzio_stream* f, BackupFormat::FileHeader * dst){
+readHeader(ndbxfrm_readfile* f, BackupFormat::FileHeader * dst){
   if(aread(dst, 4, 3, f) != 3)
     RETURN_FALSE();
 
@@ -1014,10 +1153,15 @@ readHeader(ndbzio_stream* f, BackupFormat::FileHeader * dst){
   if(dst->SectionType != BackupFormat::FILE_HEADER)
     RETURN_FALSE();
 
-  if(dst->SectionLength != ((sizeof(BackupFormat::FileHeader) - 12) >> 2))
+  const Uint32 file_header_section_length =
+    ((dst->BackupVersion < NDBD_RAW_LCP)
+     ? sizeof(BackupFormat::FileHeader_pre_backup_version)
+     : sizeof(BackupFormat::FileHeader))/4 - 3;
+
+  if(dst->SectionLength != file_header_section_length)
     RETURN_FALSE();
 
-  if(aread(&dst->FileType, 4, dst->SectionLength - 2, f) != 
+  if(aread(&dst->FileType, 4, dst->SectionLength - 2, f) !=
      (dst->SectionLength - 2))
     RETURN_FALSE();
 
@@ -1026,6 +1170,12 @@ readHeader(ndbzio_stream* f, BackupFormat::FileHeader * dst){
   dst->BackupKey_0 = ntohl(dst->BackupKey_0);
   dst->BackupKey_1 = ntohl(dst->BackupKey_1);
   
+  if (dst->BackupVersion < NDBD_RAW_LCP)
+  {
+    dst->NdbVersion = dst->BackupVersion;
+    dst->MySQLVersion = 0;
+  }
+
   if(dst->ByteOrder != 0x12345678)
     endian = true;
   
@@ -1033,7 +1183,7 @@ readHeader(ndbzio_stream* f, BackupFormat::FileHeader * dst){
 }
 
 bool 
-readFragHeader(ndbzio_stream* f, BackupFormat::DataFile::FragmentHeader * dst){
+readFragHeader(ndbxfrm_readfile* f, BackupFormat::DataFile::FragmentHeader * dst){
   if(aread(dst, 1, sizeof(* dst), f) != sizeof(* dst))
     return false;
 
@@ -1059,7 +1209,7 @@ readFragHeader(ndbzio_stream* f, BackupFormat::DataFile::FragmentHeader * dst){
 }
 
 bool 
-readFragFooter(ndbzio_stream* f, BackupFormat::DataFile::FragmentFooter * dst){
+readFragFooter(ndbxfrm_readfile* f, BackupFormat::DataFile::FragmentFooter * dst){
   if(aread(dst, 1, sizeof(* dst), f) != sizeof(* dst))
     RETURN_FALSE();
   
@@ -1090,7 +1240,7 @@ static union {
 } theData;
 
 Int32
-readRecord(ndbzio_stream* f, Uint32 **dst, Uint32 *ext_header_type, bool print)
+readRecord(ndbxfrm_readfile* f, Uint32 **dst, Uint32 *ext_header_type, bool print)
 {
   Uint32 len;
   if(aread(&len, 1, 4, f) != 4)
@@ -1113,7 +1263,7 @@ readRecord(ndbzio_stream* f, Uint32 **dst, Uint32 *ext_header_type, bool print)
       if (print)
       {
         ndbout_c("INSERT: RecNo: %u: Len: %x, page(%u,%u)",
-                 recNo, len, theData.buf[0], theData.buf[1]);
+                 recNo, len, Twiddle32(theData.buf[0]), Twiddle32(theData.buf[1]));
         if (num_data_words)
         {
           ndbout_c("Header_words[Header:%x,GCI:%u,Checksum: %x, X: %x]",
@@ -1131,7 +1281,7 @@ readRecord(ndbzio_stream* f, Uint32 **dst, Uint32 *ext_header_type, bool print)
       if (print)
       {
         ndbout_c("WRITE: RecNo: %u: Len: %x, page(%u,%u)",
-                 recNo, len, theData.buf[0], theData.buf[1]);
+                 recNo, len, Twiddle32(theData.buf[0]), Twiddle32(theData.buf[1]));
         if (num_data_words)
         {
           ndbout_c("Header_words[Header:%x,GCI:%u,Checksum: %x, X: %x]",
@@ -1148,7 +1298,7 @@ readRecord(ndbzio_stream* f, Uint32 **dst, Uint32 *ext_header_type, bool print)
     {
       if (print)
         ndbout_c("DELETE_BY_ROWID: RecNo: %u: Len: %x, page(%u,%u)",
-                 recNo, len, theData.buf[0], theData.buf[1]);
+                 recNo, len, Twiddle32(theData.buf[0]), Twiddle32(theData.buf[1]));
       recNo++;
       recDeleteByRowId++;
     }
@@ -1156,7 +1306,7 @@ readRecord(ndbzio_stream* f, Uint32 **dst, Uint32 *ext_header_type, bool print)
     {
       if (print)
         ndbout_c("DELETE_BY_PAGEID: RecNo: %u: Len: %x, page(%u)",
-                 recNo, len, theData.buf[0]);
+                 recNo, len, Twiddle32(theData.buf[0]));
       recNo++;
       recDeleteByPageId++;
     }
@@ -1183,15 +1333,72 @@ readRecord(ndbzio_stream* f, Uint32 **dst, Uint32 *ext_header_type, bool print)
 }
 
 Int32
-readLogEntry(ndbzio_stream* f, Uint32 **dst){
+readLogEntry(ndbxfrm_readfile* f, Uint32 **dst, Uint32 file_type, Uint32 version)
+{
+  static_assert(MaxReadWords >= BackupFormat::LogFile::LogEntry::MAX_SIZE, "");
+  constexpr Uint32 word_size = sizeof(Uint32);
+
   Uint32 len;
-  if(aread(&len, 1, 4, f) != 4)
+  if(aread(&len, word_size, 1, f) != 1)
     RETURN_FALSE();
-  
+
   len = ntohl(len);
+
+  if (len == 0)
+    return 0;
   
-  if(aread(&theData.buf[1], 4, len, f) != len)
-    return -1;
+  Uint32 data_len;
+  if (likely(version == 2))
+  {
+    constexpr Uint32 header_len =
+        BackupFormat::LogFile::LogEntry::HEADER_LENGTH_WORDS;
+    if (len < header_len)
+    {
+      return -1;
+    }
+    if (1 + len > MaxReadWords)
+    {
+      return -1;
+    }
+    data_len = len - header_len;
+    if (aread(&theData.buf[1], word_size, len, f) != len)
+    {
+      return -1;
+    }
+  }
+  else
+  {
+    assert(version == 1);
+    constexpr Uint32 header_len =
+        BackupFormat::LogFile::LogEntry_no_fragid::HEADER_LENGTH_WORDS;
+    if (len < header_len)
+    {
+      return -1;
+    }
+    static_assert(header_len <=
+                    BackupFormat::LogFile::LogEntry::HEADER_LENGTH_WORDS,
+                  "");
+    constexpr Uint32 header_len_diff =
+        BackupFormat::LogFile::LogEntry::HEADER_LENGTH_WORDS - header_len;
+    if (1 + len + header_len_diff > MaxReadWords)
+    {
+      return -1;
+    }
+    data_len = len - header_len;
+    if (aread(&theData.buf[1], word_size, header_len, f) != header_len)
+    {
+      return -1;
+    }
+    // No fragment id in log event, set it to zero.
+    theData.buf[BackupFormat::LogFile::LogEntry::FRAGID_OFFSET] = 0;
+    if (aread(&theData.buf[BackupFormat::LogFile::LogEntry::DATA_OFFSET],
+              word_size,
+              data_len,
+              f) != data_len)
+    {
+      return -1;
+    }
+  }
   
   theData.buf[0] = len;
   
@@ -1200,9 +1407,23 @@ readLogEntry(ndbzio_stream* f, Uint32 **dst){
   
   * dst = &theData.buf[0];
   
-  return len;
-}
+  if (file_type == BackupFormat::UNDO_FILE)
+  {
+    Uint32 tail_length;
+    if (aread(&tail_length, word_size, 1, f) != 1)
+    {
+      return -1;
+    }
+    tail_length = ntohl(tail_length);
 
+    if (len != tail_length)
+    {
+      return -1;
+    }
+  }
+
+  return data_len;
+}
 
 NdbOut & 
 operator<<(NdbOut& ndbout, const BackupFormat::FileHeader & hf){
@@ -1312,7 +1533,7 @@ Uint32 decompress_part_pairs(
 }
 
 bool 
-readLCPCtlFile(ndbzio_stream* f, BackupFormat::LCPCtlFile *ret)
+readLCPCtlFile(ndbxfrm_readfile* f, BackupFormat::LCPCtlFile *ret)
 {
   char * struct_dst = (char*)&theData.LCPCtlFile.Checksum;
   size_t struct_sz = sizeof(BackupFormat::LCPCtlFile) -
@@ -1357,7 +1578,7 @@ readLCPCtlFile(ndbzio_stream* f, BackupFormat::LCPCtlFile *ret)
 }
 
 bool 
-readTableList(ndbzio_stream* f, BackupFormat::CtlFile::TableList **ret){
+readTableList(ndbxfrm_readfile* f, BackupFormat::CtlFile::TableList **ret){
   BackupFormat::CtlFile::TableList * dst = &theData.TableList;
   
   if(aread(dst, 4, 2, f) != 2)
@@ -1383,7 +1604,7 @@ readTableList(ndbzio_stream* f, BackupFormat::CtlFile::TableList **ret){
 }
 
 bool 
-readTableDesc(ndbzio_stream* f, BackupFormat::CtlFile::TableDescription **ret){
+readTableDesc(ndbxfrm_readfile* f, BackupFormat::CtlFile::TableDescription **ret){
   BackupFormat::CtlFile::TableDescription * dst = &theData.TableDescription;
   
   if(aread(dst, 4, 3, f) != 3)
@@ -1406,7 +1627,7 @@ readTableDesc(ndbzio_stream* f, BackupFormat::CtlFile::TableDescription **ret){
 }
 
 bool 
-readGCPEntry(ndbzio_stream* f, BackupFormat::CtlFile::GCPEntry **ret){
+readGCPEntry(ndbxfrm_readfile* f, BackupFormat::CtlFile::GCPEntry **ret){
   BackupFormat::CtlFile::GCPEntry * dst = &theData.GcpEntry;
   
   if(aread(dst, 4, 4, f) != 4)
@@ -1484,6 +1705,7 @@ operator<<(NdbOut& ndbout, const BackupFormat::CtlFile::TableDescription & hf){
 	       << " value(" << it.getValueLen() << ") : " 
 	       << "\"" << "<TOO LONG>" << "\"" << endl;
       }
+      break;
     default:
       ndbout << "Unknown type for key: " << it.getKey() 
 	     << " type: " << it.getValueType() << endl;

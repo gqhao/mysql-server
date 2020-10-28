@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -89,7 +89,8 @@ Dbtux::execCREATE_TAB_REQ(Signal* signal)
     fragOpPtr.p->m_numAttrsRecvd = 0;
 #ifdef VM_TRACE
     if (debugFlags & DebugMeta) {
-      debugOut << "Seize frag op " << fragOpPtr.i << " " << *fragOpPtr.p << endl;
+      tuxDebugOut << "Seize frag op " << fragOpPtr.i << " "
+                  << *fragOpPtr.p << endl;
     }
 #endif
     // check if index has place for more fragments
@@ -189,7 +190,7 @@ Dbtux::execTUX_ADD_ATTRREQ(Signal* signal)
     new (&keyAttr) AttributeHeader(primaryAttrId, sizeInBytes);
 #ifdef VM_TRACE
     if (debugFlags & DebugMeta) {
-      debugOut << "attr " << attrId << " " << keyType << endl;
+      tuxDebugOut << "attr " << attrId << " " << keyType << endl;
     }
 #endif
     if (csNumber != 0) {
@@ -214,7 +215,7 @@ Dbtux::execTUX_ADD_ATTRREQ(Signal* signal)
       // compute min prefix
       const KeySpec& keySpec = indexPtr.p->m_keySpec;
       unsigned attrs = 0;
-      unsigned bytes = keySpec.get_nullmask_len(false);
+      unsigned bytes = 0;
       unsigned maxAttrs = indexPtr.p->m_numAttrs;
 #ifdef VM_TRACE
 #ifdef NDB_USE_GET_ENV
@@ -225,22 +226,28 @@ Dbtux::execTUX_ADD_ATTRREQ(Signal* signal)
       }
 #endif
 #endif
-      while (attrs < maxAttrs) {
+      while (attrs < maxAttrs)
+      {
+        /**
+         * Prefix is now saved as a normal Attrinfo data stream.
+         * This means that each column uses 4 bytes Attrinfo header
+         * the data is aligned on a word boundary.
+         */
         const KeyType& keyType = keySpec.get_type(attrs);
-        const unsigned newbytes = bytes + keyType.get_byte_size();
+        const unsigned word_size = (keyType.get_byte_size() + 3) / 4;
+        const unsigned newbytes = bytes + ((word_size + 1) * 4);
         if (newbytes > (MAX_TTREE_PREF_SIZE << 2))
           break;
         attrs++;
         bytes = newbytes;
       }
-      if (attrs == 0)
-        bytes = 0;
       indexPtr.p->m_prefAttrs = attrs;
       indexPtr.p->m_prefBytes = bytes;
       // fragment is defined
 #ifdef VM_TRACE
       if (debugFlags & DebugMeta) {
-        debugOut << "Release frag op " << fragOpPtr.i << " " << *fragOpPtr.p << endl;
+        tuxDebugOut << "Release frag op " << fragOpPtr.i << " " << *fragOpPtr.p
+                    << endl;
       }
 #endif
       c_fragOpPool.release(fragOpPtr);
@@ -261,7 +268,8 @@ Dbtux::execTUX_ADD_ATTRREQ(Signal* signal)
       signal, TuxAddAttrRef::SignalLength, JBB);
 #ifdef VM_TRACE
     if (debugFlags & DebugMeta) {
-      debugOut << "Release on attr error frag op " << fragOpPtr.i << " " << *fragOpPtr.p << endl;
+      tuxDebugOut << "Release on attr error frag op " << fragOpPtr.i << " "
+                  << *fragOpPtr.p << endl;
     }
 #endif
   // let DICT drop the unfinished index
@@ -329,7 +337,7 @@ Dbtux::execTUXFRAGREQ(Signal* signal)
     indexPtr.p->m_numFrags++;
 #ifdef VM_TRACE
     if (debugFlags & DebugMeta) {
-      debugOut << "Add frag " << fragPtr.i << " " << *fragPtr.p << endl;
+      tuxDebugOut << "Add frag " << fragPtr.i << " " << *fragPtr.p << endl;
     }
 #endif
     // error inserts
@@ -369,14 +377,14 @@ Dbtux::execTUXFRAGREQ(Signal* signal)
 #ifdef VM_TRACE
     if (debugFlags & DebugMeta) {
       if (fragNo == 0) {
-        debugOut << "Index id=" << indexPtr.i;
-        debugOut << " nodeSize=" << tree.m_nodeSize;
-        debugOut << " headSize=" << NodeHeadSize;
-        debugOut << " prefSize=" << tree.m_prefSize;
-        debugOut << " entrySize=" << TreeEntSize;
-        debugOut << " minOccup=" << tree.m_minOccup;
-        debugOut << " maxOccup=" << tree.m_maxOccup;
-        debugOut << endl;
+        tuxDebugOut << "Index id=" << indexPtr.i;
+        tuxDebugOut << " nodeSize=" << tree.m_nodeSize;
+        tuxDebugOut << " headSize=" << NodeHeadSize;
+        tuxDebugOut << " prefSize=" << tree.m_prefSize;
+        tuxDebugOut << " entrySize=" << TreeEntSize;
+        tuxDebugOut << " minOccup=" << tree.m_minOccup;
+        tuxDebugOut << " maxOccup=" << tree.m_maxOccup;
+        tuxDebugOut << endl;
       }
     }
 #endif
@@ -417,7 +425,8 @@ Dbtux::abortAddFragOp(Signal* signal)
   c_indexPool.getPtr(indexPtr, fragOpPtr.p->m_indexId);
 #ifdef VM_TRACE
   if (debugFlags & DebugMeta) {
-    debugOut << "Release on abort frag op " << fragOpPtr.i << " " << *fragOpPtr.p << endl;
+    tuxDebugOut << "Release on abort frag op " << fragOpPtr.i << " "
+                << *fragOpPtr.p << endl;
   }
 #endif
   c_fragOpPool.release(fragOpPtr);
@@ -519,7 +528,7 @@ Dbtux::execDROP_TAB_REQ(Signal* signal)
   // drop works regardless of index state
 #ifdef VM_TRACE
   if (debugFlags & DebugMeta) {
-    debugOut << "Drop index " << indexPtr.i << " " << *indexPtr.p << endl;
+    tuxDebugOut << "Drop index " << indexPtr.i << " " << *indexPtr.p << endl;
   }
 #endif
   ndbrequire(req->senderRef != 0);

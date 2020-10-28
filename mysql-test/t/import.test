@@ -1,3 +1,6 @@
+#Test requires MyISAM SE 
+--source include/force_myisam_default.inc
+--source include/have_myisam.inc
 
 --echo #
 --echo # Testing WL#7524 - Import from SDI files
@@ -191,7 +194,9 @@ EOF
 --echo # Copy SDI file back into data dir
 --copy_files_wildcard $EXPORT_DIR $MYSQLD_DATADIR/test/ t1_.sdi
 
---error ER_IMP_INCOMPATIBLE_SDI_VERSION
+# List error twice to avoid echoing error message, which will contain the
+# current server version number
+--error ER_IMP_INCOMPATIBLE_SDI_VERSION,ER_IMP_INCOMPATIBLE_SDI_VERSION
 IMPORT TABLE FROM 't1_.sdi';
 DROP TABLE t1;
 --remove_files_wildcard $EXPORT_DIR *
@@ -527,7 +532,7 @@ DROP TABLE t_case;
 let BASEDIR=    `select @@basedir`;
 let DDIR=       $MYSQL_TMP_DIR/lctn_test;
 let MYSQLD_LOG= $MYSQL_TMP_DIR/server.log;
-let extra_args= --no-defaults --innodb_dedicated_server=OFF --log-error=$MYSQLD_LOG --log-syslog=0 --loose-skip-auto_generate_certs --loose-skip-sha256_password_auto_generate_rsa_keys --skip-ssl --lower_case_table_names=1 --basedir=$BASEDIR --lc-messages-dir=$MYSQL_SHAREDIR;
+let extra_args= --no-defaults --innodb_dedicated_server=OFF --log-error=$MYSQLD_LOG --loose-skip-auto_generate_certs --loose-skip-sha256_password_auto_generate_rsa_keys --skip-ssl --lower_case_table_names=1 --basedir=$BASEDIR --lc-messages-dir=$MYSQL_SHAREDIR;
 let BOOTSTRAP_SQL= $MYSQL_TMP_DIR/tiny_bootstrap.sql;
 
 --echo # 0. Shut server down.
@@ -611,9 +616,6 @@ DROP TABLE t1;
 --remove_files_wildcard $EXPORT_DIR t*
 
 
---echo # Remove 'export' folder created at the beginning of test file.
---force-rmdir $EXPORT_DIR
-
 --echo #
 --echo # Bug#25914953 ASSERTION FAILED: M_THD->GET_TRANSACTION()->
 --echo # IS_EMPTY(TRANSACTION_CTX::STMT)
@@ -623,4 +625,49 @@ DROP TABLE t1;
 START TRANSACTION WITH CONSISTENT SNAPSHOT;
 --error ER_IMP_NO_FILES_MATCHED
 IMPORT TABLE FROM '';
+
+--echo #
+--echo # Bug#17468242/Wl#11807: Provide an option to prevent creation of tables
+--echo # without a unique/pk
+--echo # Ensure that a PK-less table cannot be imported when
+--echo # sql_require_primary_key is set
+
+CREATE TABLE t1 (i INT) ENGINE=MYISAM;
+
+FLUSH TABLES WITH READ LOCK;
+--echo # Copy t1 files to export dir
+--copy_files_wildcard $MYSQLD_DATADIR/test/ $EXPORT_DIR t*
+UNLOCK TABLES;
+DROP TABLE t1;
+
+--echo # Copy files back into datadir
+--copy_files_wildcard $EXPORT_DIR $MYSQLD_DATADIR/test/ t*
+
+SET SESSION sql_require_primary_key= ON;
+--error ER_TABLE_WITHOUT_PK
+IMPORT TABLE FROM 't1_*.sdi';
+--remove_files_wildcard $MYSQLD_DATADIR/test/ t*
+
+SET SESSION sql_require_primary_key= OFF;
+--echo # Clean SDI files in \$EXPORT_DIR
+--remove_files_wildcard $EXPORT_DIR t*
+
+--echo #-----------------------------------------------------------------------
+--echo # WL#929 - Check constraint.
+--echo # Test case to verify check constraint import from SDI.
+--echo #-----------------------------------------------------------------------
+CREATE TABLE t1 (f1 INT CHECK (f1 < 10)) ENGINE=MyISAM;
+let $MYSQLD_DATADIR=`SELECT @@datadir`;
+--copy_files_wildcard $MYSQLD_DATADIR/test/ $MYSQL_TMP_DIR/ t*
+DROP TABLE t1;
+--copy_files_wildcard $MYSQL_TMP_DIR/ $MYSQLD_DATADIR/test/ t*
+IMPORT TABLE FROM 'test/t1*.sdi';
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+--remove_files_wildcard $MYSQL_TMP_DIR/ t*
+
+--echo # Remove 'export' folder created at the beginning of test file.
+--force-rmdir $EXPORT_DIR
+
+
 

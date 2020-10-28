@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -56,6 +56,9 @@ template <class Key, class Value>
 class collation_unordered_map;
 
 namespace resourcegroups {
+
+extern const char *SYS_DEFAULT_RESOURCE_GROUP_NAME;
+extern const char *USR_DEFAULT_RESOURCE_GROUP_NAME;
 
 /**
   This is a singleton class that provides various functionalities related to
@@ -253,6 +256,17 @@ class Resource_group_mgr {
   }
 
   /**
+     Get names of SYS_default and USR_default resource groups.
+     Called by thread_create_callback only.
+  */
+  const char *sys_default_resource_group_name() {
+    return SYS_DEFAULT_RESOURCE_GROUP_NAME;
+  }
+  const char *usr_default_resource_group_name() {
+    return USR_DEFAULT_RESOURCE_GROUP_NAME;
+  }
+
+  /**
     Check if a given Resource group is either SYS_default or USR_default.
 
     @return true if resource is USR_default or SYS_default else false.
@@ -296,13 +310,12 @@ class Resource_group_mgr {
     Release the shared MDL lock held on a resource group.
 
     @param thd        THD context.
-    @param ticket     Pointert to lock ticket object.
+    @param ticket     Pointer to lock ticket object.
   */
 
-  void release_shared_mdl_for_resource_group(THD *thd,
-                                             const MDL_ticket *ticket) {
+  void release_shared_mdl_for_resource_group(THD *thd, MDL_ticket *ticket) {
     DBUG_ASSERT(ticket != nullptr);
-    thd->mdl_context.release_lock(const_cast<MDL_ticket *>(ticket));
+    thd->mdl_context.release_lock(ticket);
   }
 
   /**
@@ -377,7 +390,6 @@ class Resource_group_mgr {
           "now "
           "SIGNAL restore_finished";
       DBUG_ASSERT(!debug_sync_set_action(thd, STRING_WITH_LEN(act)));
-
     };);
   }
 
@@ -393,8 +405,8 @@ class Resource_group_mgr {
   */
 
   SERVICE_TYPE(registry) * m_registry_svc;
-  SERVICE_TYPE(pfs_resource_group) * m_resource_group_svc;
-  SERVICE_TYPE(pfs_notification) * m_notify_svc;
+  SERVICE_TYPE(pfs_resource_group_v3) * m_resource_group_svc;
+  SERVICE_TYPE(pfs_notification_v3) * m_notify_svc;
   my_h_service m_h_res_grp_svc;
   my_h_service m_h_notification_svc;
   int m_notify_handle;

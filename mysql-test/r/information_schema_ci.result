@@ -7,9 +7,9 @@ SET SESSION information_schema_stats_expiry=0;
 #
 select table_name, data_type, column_type from information_schema.columns  where column_name = 'numeric_precision' and table_schema = 'information_schema';
 TABLE_NAME	DATA_TYPE	COLUMN_TYPE
-COLUMNS	bigint	bigint(10) unsigned
-PARAMETERS	int	int(10) unsigned
-ROUTINES	int	int(10) unsigned
+COLUMNS	bigint	bigint unsigned
+PARAMETERS	int	int unsigned
+ROUTINES	int	int unsigned
 show variables where variable_name like "skip_show_database";
 Variable_name	Value
 skip_show_database	OFF
@@ -19,12 +19,12 @@ grant select, update on test.* to mysqltest_1@localhost;
 create user mysqltest_3@localhost;
 create user mysqltest_3;
 select * from information_schema.SCHEMATA where schema_name > 'm' ORDER BY SCHEMA_NAME;
-CATALOG_NAME	SCHEMA_NAME	DEFAULT_CHARACTER_SET_NAME	DEFAULT_COLLATION_NAME	SQL_PATH
-def	mtr	utf8mb4	utf8mb4_0900_ai_ci	NULL
-def	mysql	utf8mb4	utf8mb4_0900_ai_ci	NULL
-def	performance_schema	utf8mb4	utf8mb4_0900_ai_ci	NULL
-def	sys	utf8mb4	utf8mb4_0900_ai_ci	NULL
-def	test	utf8mb4	utf8mb4_0900_ai_ci	NULL
+CATALOG_NAME	SCHEMA_NAME	DEFAULT_CHARACTER_SET_NAME	DEFAULT_COLLATION_NAME	SQL_PATH	DEFAULT_ENCRYPTION
+def	mtr	utf8mb4	utf8mb4_0900_ai_ci	NULL	NO
+def	mysql	utf8mb4	utf8mb4_0900_ai_ci	NULL	NO
+def	performance_schema	utf8mb4	utf8mb4_0900_ai_ci	NULL	NO
+def	sys	utf8mb4	utf8mb4_0900_ai_ci	NULL	NO
+def	test	utf8mb4	utf8mb4_0900_ai_ci	NULL	NO
 select schema_name from information_schema.schemata ORDER BY schema_name;
 SCHEMA_NAME
 information_schema
@@ -60,12 +60,17 @@ table_name COLLATE utf8_general_ci not like 'ndb_%' AND
 table_name COLLATE utf8_general_ci not like 'innodb_%';
 select * from v1;
 c
+ADMINISTRABLE_ROLE_AUTHORIZATIONS
+APPLICABLE_ROLES
 CHARACTER_SETS
+CHECK_CONSTRAINTS
 COLLATIONS
 COLLATION_CHARACTER_SET_APPLICABILITY
 COLUMNS
+COLUMNS_EXTENSIONS
 COLUMN_PRIVILEGES
 COLUMN_STATISTICS
+ENABLED_ROLES
 ENGINES
 EVENTS
 FILES
@@ -79,19 +84,30 @@ PROCESSLIST
 PROFILING
 REFERENTIAL_CONSTRAINTS
 RESOURCE_GROUPS
+ROLE_COLUMN_GRANTS
+ROLE_ROUTINE_GRANTS
+ROLE_TABLE_GRANTS
 ROUTINES
 SCHEMATA
+SCHEMATA_EXTENSIONS
 SCHEMA_PRIVILEGES
 STATISTICS
 ST_GEOMETRY_COLUMNS
 ST_SPATIAL_REFERENCE_SYSTEMS
+ST_UNITS_OF_MEASURE
 TABLES
 TABLESPACES
+TABLESPACES_EXTENSIONS
+TABLES_EXTENSIONS
 TABLE_CONSTRAINTS
+TABLE_CONSTRAINTS_EXTENSIONS
 TABLE_PRIVILEGES
 TRIGGERS
+USER_ATTRIBUTES
 USER_PRIVILEGES
 VIEWS
+VIEW_ROUTINE_USAGE
+VIEW_TABLE_USAGE
 columns_priv
 component
 db
@@ -109,6 +125,7 @@ password_history
 plugin
 procs_priv
 proxies_priv
+replication_asynchronous_connection_failover
 role_edges
 server_cost
 servers
@@ -163,11 +180,11 @@ TABLE_NAME
 t1
 t4
 select * from information_schema.STATISTICS where TABLE_SCHEMA = "mysqltest" order by table_name, index_name;
-TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	NON_UNIQUE	INDEX_SCHEMA	INDEX_NAME	SEQ_IN_INDEX	COLUMN_NAME	COLLATION	CARDINALITY	SUB_PART	PACKED	NULLABLE	INDEX_TYPE	COMMENT	INDEX_COMMENT	IS_VISIBLE
-def	mysqltest	t1	1	mysqltest	string_data	1	b	A	0	NULL	NULL	YES	BTREE			YES
+TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	NON_UNIQUE	INDEX_SCHEMA	INDEX_NAME	SEQ_IN_INDEX	COLUMN_NAME	COLLATION	CARDINALITY	SUB_PART	PACKED	NULLABLE	INDEX_TYPE	COMMENT	INDEX_COMMENT	IS_VISIBLE	EXPRESSION
+def	mysqltest	t1	1	mysqltest	string_data	1	b	A	0	NULL	NULL	YES	BTREE			YES	NULL
 show keys from t3 where Key_name = "a_data";
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t3	1	a_data	1	a	A	0	NULL	NULL	YES	BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t3	1	a_data	1	a	A	0	NULL	NULL	YES	BTREE			YES	NULL
 show tables like 't%';
 Tables_in_test (t%)
 t2
@@ -183,10 +200,10 @@ Name	Engine	Version	Row_format	Rows	Avg_row_length	Data_length	Max_data_length	I
 t2	InnoDB	10	Dynamic	0	#	#	#	#	0	NULL	#	#	NULL	utf8mb4_0900_ai_ci	NULL		
 t3	InnoDB	10	Dynamic	0	#	#	#	#	0	NULL	#	#	NULL	utf8mb4_0900_ai_ci	NULL		
 t5	InnoDB	10	Dynamic	1	#	#	#	#	0	11	#	#	NULL	utf8mb4_0900_ai_ci	NULL		
-v1	NULL	NULL	NULL	0	#	#	#	#	0	NULL	#	#	NULL	NULL	NULL	NULL	VIEW
+v1	NULL	NULL	NULL	NULL	#	#	#	#	NULL	NULL	#	#	NULL	NULL	NULL	NULL	VIEW
 show full columns from t3 like "a%";
 Field	Type	Collation	Null	Key	Default	Extra	Privileges	Comment
-a	int(11)	NULL	YES	MUL	NULL		select,insert,update,references	
+a	int	NULL	YES	MUL	NULL		select,insert,update,references	
 show full columns from mysql.db like "Insert%";
 Field	Type	Collation	Null	Key	Default	Extra	Privileges	Comment
 Insert_priv	enum('N','Y')	utf8_general_ci	NO		N		select,insert,update,references	
@@ -196,10 +213,10 @@ c	varchar(64)	utf8_bin	YES		NULL		select,insert,update,references
 select * from information_schema.COLUMNS where table_name="t1"
 and column_name= "a" order by table_name;
 TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	COLUMN_NAME	ORDINAL_POSITION	COLUMN_DEFAULT	IS_NULLABLE	DATA_TYPE	CHARACTER_MAXIMUM_LENGTH	CHARACTER_OCTET_LENGTH	NUMERIC_PRECISION	NUMERIC_SCALE	DATETIME_PRECISION	CHARACTER_SET_NAME	COLLATION_NAME	COLUMN_TYPE	COLUMN_KEY	EXTRA	PRIVILEGES	COLUMN_COMMENT	GENERATION_EXPRESSION	SRS_ID
-def	mysqltest	t1	a	1	NULL	YES	int	NULL	NULL	10	0	NULL	NULL	NULL	int(11)			select,insert,update,references			NULL
+def	mysqltest	t1	a	1	NULL	YES	int	NULL	NULL	10	0	NULL	NULL	NULL	int			select,insert,update,references			NULL
 show columns from mysqltest.t1 where field like "%a%";
 Field	Type	Null	Key	Default	Extra
-a	int(11)	YES		NULL	
+a	int	YES		NULL	
 create view mysqltest.v1 (c) as select a from mysqltest.t1;
 grant select (a) on mysqltest.t1 to mysqltest_2@localhost;
 grant select on mysqltest.v1 to mysqltest_3;
@@ -209,7 +226,7 @@ TABLE_NAME	COLUMN_NAME	PRIVILEGES
 t1	a	select
 show columns from mysqltest.t1;
 Field	Type	Null	Key	Default	Extra
-a	int(11)	YES		NULL	
+a	int	YES		NULL	
 select table_name, column_name, privileges from information_schema.columns
 where table_schema = 'mysqltest' and table_name = 'v1' order by table_name, column_name;
 TABLE_NAME	COLUMN_NAME	PRIVILEGES
@@ -284,7 +301,7 @@ end|
 select parameter_style, sql_data_access, dtd_identifier
 from information_schema.routines where routine_schema='test';
 PARAMETER_STYLE	SQL_DATA_ACCESS	DTD_IDENTIFIER
-SQL	CONTAINS SQL	int(11)
+SQL	CONTAINS SQL	int
 SQL	CONTAINS SQL	NULL
 show procedure status where db='test';
 Db	Name	Type	Definer	Modified	Created	Security_type	Comment	character_set_client	collation_connection	Database Collation
@@ -294,10 +311,11 @@ Db	Name	Type	Definer	Modified	Created	Security_type	Comment	character_set_client
 test	sub1	FUNCTION	root@localhost	#	#	DEFINER		utf8mb4	utf8mb4_0900_ai_ci	utf8mb4_0900_ai_ci
 select a.ROUTINE_NAME from information_schema.ROUTINES a,
 information_schema.SCHEMATA b where
-a.ROUTINE_SCHEMA = b.SCHEMA_NAME AND b.SCHEMA_NAME='test';
+a.ROUTINE_SCHEMA = b.SCHEMA_NAME AND b.SCHEMA_NAME='test'
+ORDER BY a.ROUTINE_NAME;
 ROUTINE_NAME
-sub1
 sel2
+sub1
 select count(*) from information_schema.ROUTINES where routine_schema='test';
 count(*)
 2
@@ -308,26 +326,30 @@ routine_schema	routine_name
 test	sel2
 test	sub1
 drop view v1;
-select ROUTINE_NAME, ROUTINE_DEFINITION from information_schema.ROUTINES WHERE ROUTINE_SCHEMA='test';
+select ROUTINE_NAME, ROUTINE_DEFINITION from information_schema.ROUTINES
+WHERE ROUTINE_SCHEMA='test' ORDER BY ROUTINE_NAME;
 ROUTINE_NAME	ROUTINE_DEFINITION
 show create function sub1;
 ERROR 42000: FUNCTION sub1 does not exist
-select ROUTINE_NAME, ROUTINE_DEFINITION from information_schema.ROUTINES WHERE ROUTINE_SCHEMA='test';
+select ROUTINE_NAME, ROUTINE_DEFINITION from information_schema.ROUTINES
+WHERE ROUTINE_SCHEMA='test' ORDER BY ROUTINE_NAME;
 ROUTINE_NAME	ROUTINE_DEFINITION
-sub1	NULL
 sel2	NULL
+sub1	NULL
 grant all privileges on test.* to mysqltest_1@localhost;
-select ROUTINE_NAME, ROUTINE_DEFINITION from information_schema.ROUTINES WHERE ROUTINE_SCHEMA='test';
+select ROUTINE_NAME, ROUTINE_DEFINITION from information_schema.ROUTINES
+WHERE ROUTINE_SCHEMA='test' ORDER BY ROUTINE_NAME;
 ROUTINE_NAME	ROUTINE_DEFINITION
-sub1	NULL
 sel2	NULL
+sub1	NULL
 create function sub2(i int) returns int
 return i+1;
-select ROUTINE_NAME, ROUTINE_DEFINITION from information_schema.ROUTINES WHERE ROUTINE_SCHEMA='test';
+select ROUTINE_NAME, ROUTINE_DEFINITION from information_schema.ROUTINES
+WHERE ROUTINE_SCHEMA='test' ORDER BY ROUTINE_NAME;
 ROUTINE_NAME	ROUTINE_DEFINITION
+sel2	NULL
 sub1	NULL
 sub2	return i+1
-sel2	NULL
 show create procedure sel2;
 Procedure	sql_mode	Create Procedure	character_set_client	collation_connection	Database Collation
 sel2	ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION	NULL	utf8mb4	utf8mb4_0900_ai_ci	utf8mb4_0900_ai_ci
@@ -336,7 +358,7 @@ Function	sql_mode	Create Function	character_set_client	collation_connection	Data
 sub1	ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION	NULL	utf8mb4	utf8mb4_0900_ai_ci	utf8mb4_0900_ai_ci
 show create function sub2;
 Function	sql_mode	Create Function	character_set_client	collation_connection	Database Collation
-sub2	ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION	CREATE DEFINER=`mysqltest_1`@`localhost` FUNCTION `sub2`(i int) RETURNS int(11)
+sub2	ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION	CREATE DEFINER=`mysqltest_1`@`localhost` FUNCTION `sub2`(i int) RETURNS int
 return i+1	utf8mb4	utf8mb4_0900_ai_ci	utf8mb4_0900_ai_ci
 show function status like "sub2";
 Db	Name	Type	Definer	Modified	Created	Security_type	Comment	character_set_client	collation_connection	Database Collation
@@ -361,7 +383,7 @@ test
 explain select * from v0;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	#	NULL	index	PRIMARY	name	194	NULL	#	#	Using index; Using temporary; Using filesort
-1	SIMPLE	#	NULL	ALL	catalog_id,default_collation_id	NULL	NULL	NULL	#	#	Using where; Using join buffer (Block Nested Loop)
+1	SIMPLE	#	NULL	ALL	catalog_id,default_collation_id	NULL	NULL	NULL	#	#	Using where; Using join buffer (hash join)
 1	SIMPLE	#	NULL	eq_ref	PRIMARY,character_set_id	PRIMARY	8	mysql.sch.default_collation_id	#	#	NULL
 1	SIMPLE	#	NULL	eq_ref	PRIMARY	PRIMARY	8	mysql.col.character_set_id	#	#	Using index
 Warnings:
@@ -394,7 +416,7 @@ latin1_german2_ci
 latin1_spanish_ci
 latin1_swedish_ci
 show keys from v4;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
 select * from information_schema.views where TABLE_SCHEMA != 'sys' and
 TABLE_NAME rlike "v[0-4]{1}$" order by table_name;
 TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	VIEW_DEFINITION	CHECK_OPTION	IS_UPDATABLE	DEFINER	SECURITY_TYPE	CHARACTER_SET_CLIENT	COLLATION_CONNECTION
@@ -459,7 +481,7 @@ Warning	1831	Duplicate index 'key_2' defined on the table 'test.t1'. This is dep
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `a` int(11) NOT NULL,
+  `a` int NOT NULL,
   PRIMARY KEY (`a`),
   UNIQUE KEY `constraint_1` (`a`),
   UNIQUE KEY `key_1` (`a`),
@@ -467,14 +489,11 @@ t1	CREATE TABLE `t1` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 select * from information_schema.TABLE_CONSTRAINTS where
 TABLE_SCHEMA= "test" order by constraint_name;
-CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	CONSTRAINT_NAME	TABLE_SCHEMA	TABLE_NAME	CONSTRAINT_TYPE
-def	test	constraint_1	test	t1	UNIQUE
-def	test	key_1	test	t1	UNIQUE
-def	test	key_2	test	t1	UNIQUE
-def	test	PRIMARY	test	t1	PRIMARY KEY
-Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	CONSTRAINT_NAME	TABLE_SCHEMA	TABLE_NAME	CONSTRAINT_TYPE	ENFORCED
+def	test	constraint_1	test	t1	UNIQUE	YES
+def	test	key_1	test	t1	UNIQUE	YES
+def	test	key_2	test	t1	UNIQUE	YES
+def	test	PRIMARY	test	t1	PRIMARY KEY	YES
 select * from information_schema.key_column_usage where
 TABLE_SCHEMA= "test" order by constraint_name;
 CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	CONSTRAINT_NAME	TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	COLUMN_NAME	ORDINAL_POSITION	POSITION_IN_UNIQUE_CONSTRAINT	REFERENCED_TABLE_SCHEMA	REFERENCED_TABLE_NAME	REFERENCED_COLUMN_NAME
@@ -482,9 +501,6 @@ def	test	constraint_1	def	test	t1	a	1	NULL	NULL	NULL	NULL
 def	test	key_1	def	test	t1	a	1	NULL	NULL	NULL	NULL
 def	test	key_2	def	test	t1	a	1	NULL	NULL	NULL	NULL
 def	test	PRIMARY	def	test	t1	a	1	NULL	NULL	NULL	NULL
-Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 select table_name from information_schema.TABLES where table_schema like "test%" order by table_name;
 TABLE_NAME
 t1
@@ -492,10 +508,11 @@ select table_name,column_name from information_schema.COLUMNS
 where table_schema like "test%" order by table_name, column_name;
 TABLE_NAME	COLUMN_NAME
 t1	a
-select ROUTINE_NAME from information_schema.ROUTINES where ROUTINE_SCHEMA != 'sys';
+SELECT ROUTINE_NAME FROM information_schema.ROUTINES
+WHERE ROUTINE_SCHEMA != 'sys' ORDER BY ROUTINE_NAME;
 ROUTINE_NAME
-sub1
 sel2
+sub1
 delete from mysql.user where user='mysqltest_1';
 drop table t1;
 drop procedure sel2;
@@ -557,14 +574,14 @@ CHARACTER_SET_NAME	DEFAULT_COLLATE_NAME	DESCRIPTION	MAXLEN
 latin1	latin1_swedish_ci	cp1252 West European	1
 alter table t1 default character set utf8;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
   `CHARACTER_SET_NAME` varchar(64) NOT NULL,
   `DEFAULT_COLLATE_NAME` varchar(64) NOT NULL,
   `DESCRIPTION` varchar(2048) NOT NULL,
-  `MAXLEN` int(10) unsigned NOT NULL
+  `MAXLEN` int unsigned NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8
 drop table t1;
 create view v1 as select * from information_schema.TABLES;
@@ -572,6 +589,10 @@ drop view v1;
 create table t1(a NUMERIC(5,3), b NUMERIC(5,1), c float(5,2),
 d NUMERIC(6,4), e float, f DECIMAL(6,3), g int(11), h DOUBLE(10,3),
 i DOUBLE);
+Warnings:
+Warning	1681	Specifying number of digits for floating point data types is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Specifying number of digits for floating point data types is deprecated and will be removed in a future release.
 select COLUMN_NAME,COLUMN_TYPE, CHARACTER_MAXIMUM_LENGTH,
 CHARACTER_OCTET_LENGTH, NUMERIC_PRECISION, NUMERIC_SCALE
 from information_schema.columns where table_name= 't1';
@@ -582,7 +603,7 @@ c	float(5,2)	NULL	NULL	5	2
 d	decimal(6,4)	NULL	NULL	6	4
 e	float	NULL	NULL	12	NULL
 f	decimal(6,3)	NULL	NULL	6	3
-g	int(11)	NULL	NULL	10	0
+g	int	NULL	NULL	10	0
 h	double(10,3)	NULL	NULL	10	3
 i	double	NULL	NULL	22	NULL
 drop table t1;
@@ -599,32 +620,29 @@ user
 drop view v1;
 create view vo as select 'a' union select 'a';
 show index from vo;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
 select * from information_schema.TABLE_CONSTRAINTS where
 TABLE_NAME= "vo";
-CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	CONSTRAINT_NAME	TABLE_SCHEMA	TABLE_NAME	CONSTRAINT_TYPE
-Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	CONSTRAINT_NAME	TABLE_SCHEMA	TABLE_NAME	CONSTRAINT_TYPE	ENFORCED
 select * from information_schema.key_column_usage where
 TABLE_NAME= "vo";
 CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	CONSTRAINT_NAME	TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	COLUMN_NAME	ORDINAL_POSITION	POSITION_IN_UNIQUE_CONSTRAINT	REFERENCED_TABLE_SCHEMA	REFERENCED_TABLE_NAME	REFERENCED_COLUMN_NAME
-Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 drop view vo;
 select TABLE_NAME,TABLE_TYPE,ENGINE
 from information_schema.tables
 where table_schema='information_schema'
 order by table_name collate utf8_general_ci limit 2;
 TABLE_NAME	TABLE_TYPE	ENGINE
-CHARACTER_SETS	SYSTEM VIEW	NULL
-COLLATIONS	SYSTEM VIEW	NULL
+ADMINISTRABLE_ROLE_AUTHORIZATIONS	SYSTEM VIEW	NULL
+APPLICABLE_ROLES	SYSTEM VIEW	NULL
 show tables from information_schema like "T%";
 Tables_in_information_schema (T%)
 TABLES
 TABLESPACES
+TABLESPACES_EXTENSIONS
+TABLES_EXTENSIONS
 TABLE_CONSTRAINTS
+TABLE_CONSTRAINTS_EXTENSIONS
 TABLE_PRIVILEGES
 TRIGGERS
 create database information_schema;
@@ -634,7 +652,10 @@ show full tables like "T%";
 Tables_in_information_schema (T%)	Table_type
 TABLES	SYSTEM VIEW
 TABLESPACES	SYSTEM VIEW
+TABLESPACES_EXTENSIONS	SYSTEM VIEW
+TABLES_EXTENSIONS	SYSTEM VIEW
 TABLE_CONSTRAINTS	SYSTEM VIEW
+TABLE_CONSTRAINTS_EXTENSIONS	SYSTEM VIEW
 TABLE_PRIVILEGES	SYSTEM VIEW
 TRIGGERS	SYSTEM VIEW
 create table t1(a int);
@@ -647,7 +668,10 @@ show tables like "T%";
 Tables_in_information_schema (T%)
 TABLES
 TABLESPACES
+TABLESPACES_EXTENSIONS
+TABLES_EXTENSIONS
 TABLE_CONSTRAINTS
+TABLE_CONSTRAINTS_EXTENSIONS
 TABLE_PRIVILEGES
 TRIGGERS
 select table_name from tables where table_name='user';
@@ -671,6 +695,7 @@ max_user_connections	select,insert,update,references
 password_expired	select,insert,update,references
 password_last_changed	select,insert,update,references
 password_lifetime	select,insert,update,references
+Password_require_current	select,insert,update,references
 Password_reuse_history	select,insert,update,references
 Password_reuse_time	select,insert,update,references
 Process_priv	select,insert,update,references
@@ -710,10 +735,7 @@ INDEX_NAME
 f1_key
 select constraint_name from information_schema.table_constraints
 where table_schema='test' order by constraint_name;
-constraint_name
-Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+CONSTRAINT_NAME
 show create view v2;
 View	Create View	character_set_client	collation_connection
 v2	CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `v2` (`c`) AS select `t1`.`f1` AS `f1` from `t1`	latin1	latin1_swedish_ci
@@ -772,6 +794,7 @@ select table_schema, table_name, column_name from information_schema.columns
 where table_schema not in ('performance_schema', 'sys', 'mysql')
 and data_type = 'longtext' order by table_name, column_name;
 TABLE_SCHEMA	TABLE_NAME	COLUMN_NAME
+information_schema	CHECK_CONSTRAINTS	CHECK_CLAUSE
 information_schema	COLUMNS	DATA_TYPE
 information_schema	COLUMNS	GENERATION_EXPRESSION
 information_schema	EVENTS	EVENT_DEFINITION
@@ -780,7 +803,9 @@ information_schema	ROUTINES	DATA_TYPE
 information_schema	ROUTINES	DTD_IDENTIFIER
 information_schema	ROUTINES	ROUTINE_DEFINITION
 information_schema	ST_GEOMETRY_COLUMNS	GEOMETRY_TYPE_NAME
+information_schema	STATISTICS	EXPRESSION
 information_schema	TRIGGERS	ACTION_STATEMENT
+information_schema	USER_ATTRIBUTES	ATTRIBUTE
 information_schema	VIEWS	VIEW_DEFINITION
 select table_name, column_name, data_type from information_schema.columns
 where table_schema not in ('performance_schema', 'sys')
@@ -830,6 +855,7 @@ SELECT TABLE_NAME, COLUMN_NAME, PRIVILEGES FROM INFORMATION_SCHEMA.COLUMNS
 where COLUMN_NAME='TABLE_NAME' ORDER BY TABLE_NAME COLLATE UTF8_GENERAL_CI;
 TABLE_NAME	COLUMN_NAME	PRIVILEGES
 COLUMNS	TABLE_NAME	select
+COLUMNS_EXTENSIONS	TABLE_NAME	select
 COLUMN_PRIVILEGES	TABLE_NAME	select
 COLUMN_STATISTICS	TABLE_NAME	select
 FILES	TABLE_NAME	select
@@ -840,12 +866,18 @@ INNODB_CMP_PER_INDEX_RESET	table_name	select
 KEY_COLUMN_USAGE	TABLE_NAME	select
 PARTITIONS	TABLE_NAME	select
 REFERENTIAL_CONSTRAINTS	TABLE_NAME	select
+ROLE_COLUMN_GRANTS	TABLE_NAME	select
+ROLE_TABLE_GRANTS	TABLE_NAME	select
 STATISTICS	TABLE_NAME	select
 ST_GEOMETRY_COLUMNS	TABLE_NAME	select
 TABLES	TABLE_NAME	select
+TABLES_EXTENSIONS	TABLE_NAME	select
 TABLE_CONSTRAINTS	TABLE_NAME	select
+TABLE_CONSTRAINTS_EXTENSIONS	TABLE_NAME	select
 TABLE_PRIVILEGES	TABLE_NAME	select
 VIEWS	TABLE_NAME	select
+VIEW_ROUTINE_USAGE	TABLE_NAME	select
+VIEW_TABLE_USAGE	TABLE_NAME	select
 delete from mysql.user where user='mysqltest_4';
 delete from mysql.db where user='mysqltest_4';
 flush privileges;
@@ -854,8 +886,8 @@ table_schema IN ('mysql', 'information_schema', 'test', 'mysqltest')
 AND table_name not like 'ndb%' AND table_name COLLATE utf8_general_ci not like 'innodb_%'
 GROUP BY TABLE_SCHEMA;
 TABLE_SCHEMA	count(*)
-information_schema	32
-mysql	31
+information_schema	48
+mysql	32
 create table t1 (i int, j int);
 create trigger trg1 before insert on t1 for each row
 begin
@@ -892,7 +924,8 @@ if new.j = -1 then
 set @fired:= "Yes";
 end if;
 end	AFTER	#	ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION	root@localhost	latin1	latin1_swedish_ci	utf8mb4_0900_ai_ci
-select * from information_schema.triggers where trigger_schema in ('mysql', 'information_schema', 'test', 'mysqltest');
+select * from information_schema.triggers where trigger_schema in ('mysql', 'information_schema', 'test', 'mysqltest')
+order by trigger_name;
 TRIGGER_CATALOG	TRIGGER_SCHEMA	TRIGGER_NAME	EVENT_MANIPULATION	EVENT_OBJECT_CATALOG	EVENT_OBJECT_SCHEMA	EVENT_OBJECT_TABLE	ACTION_ORDER	ACTION_CONDITION	ACTION_STATEMENT	ACTION_ORIENTATION	ACTION_TIMING	ACTION_REFERENCE_OLD_TABLE	ACTION_REFERENCE_NEW_TABLE	ACTION_REFERENCE_OLD_ROW	ACTION_REFERENCE_NEW_ROW	CREATED	SQL_MODE	DEFINER	CHARACTER_SET_CLIENT	COLLATION_CONNECTION	DATABASE_COLLATION
 def	test	trg1	INSERT	def	test	t1	1	NULL	begin
 if new.j > 10 then
@@ -1001,7 +1034,7 @@ drop procedure p1;
 drop procedure p2;
 show create database information_schema;
 Database	Create Database
-information_schema	CREATE DATABASE `information_schema` /*!40100 DEFAULT CHARACTER SET utf8 */
+information_schema	CREATE DATABASE `information_schema` /*!40100 DEFAULT CHARACTER SET utf8 */ /*!80016 DEFAULT ENCRYPTION='N' */
 create table t1(f1 LONGBLOB, f2 LONGTEXT);
 select column_name,data_type,CHARACTER_OCTET_LENGTH,
 CHARACTER_MAXIMUM_LENGTH
@@ -1044,8 +1077,8 @@ b	NULL
 use test;
 show columns from t1;
 Field	Type	Null	Key	Default	Extra
-a	int(11)	NO		NULL	
-b	int(11)	YES		NULL	
+a	int	NO		NULL	
+b	int	YES		NULL	
 drop table t1;
 CREATE TABLE t1 (a int);
 CREATE TABLE t2 (b int);
@@ -1067,7 +1100,7 @@ database()
 NULL
 show fields from test.v1;
 Field	Type	Null	Key	Default	Extra
-c	int(11)	YES		NULL	
+c	int	YES		NULL	
 drop view v1;
 drop table t1;
 alter database information_schema;
@@ -1105,6 +1138,8 @@ select 1 from (select 1 from test.t1) a;
 use test;
 drop table t1;
 create table t1 (f1 int(11));
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 create view v1 as select * from t1;
 drop table t1;
 select table_type from information_schema.tables
@@ -1115,13 +1150,13 @@ drop view v1;
 create temporary table t1(f1 int, index(f1));
 show columns from t1;
 Field	Type	Null	Key	Default	Extra
-f1	int(11)	YES	MUL	NULL	NULL
+f1	int	YES	MUL	NULL	NULL
 describe t1;
 Field	Type	Null	Key	Default	Extra
-f1	int(11)	YES	MUL	NULL	NULL
+f1	int	YES	MUL	NULL	NULL
 show indexes from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	f1	1	f1	A	0	NULL	NULL	YES	BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	f1	1	f1	A	0	NULL	NULL	YES	BTREE			YES	NULL
 drop table t1;
 create table t1(f1 binary(32), f2 varbinary(64));
 select character_maximum_length, character_octet_length
@@ -1152,15 +1187,15 @@ FROM information_schema.columns WHERE
 table_schema='information_schema' AND
 (column_type = 'varchar(7)' OR column_type = 'varchar(20)'
  OR column_type = 'varchar(30)')
-GROUP BY column_type ORDER BY num;
+GROUP BY column_type ORDER BY num, column_type;
 COLUMN_TYPE	GROUP_CONCAT(table_schema, '.', table_name ORDER BY table_name)	num
 varchar(30)	information_schema.PROFILING,information_schema.PROFILING	2
-varchar(7)	information_schema.INNODB_TABLESPACES_BRIEF,information_schema.VIEWS	2
+varchar(7)	information_schema.INNODB_TABLESPACES_BRIEF,information_schema.ST_UNITS_OF_MEASURE,information_schema.VIEWS	3
 varchar(20)	information_schema.PLUGINS,information_schema.PLUGINS,information_schema.PLUGINS,information_schema.PROFILING	4
 create table t1(f1 char(1) not null, f2 char(9) not null)
 default character set utf8;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 select CHARACTER_MAXIMUM_LENGTH, CHARACTER_OCTET_LENGTH from
 information_schema.columns where table_schema='test' and table_name = 't1';
 CHARACTER_MAXIMUM_LENGTH	CHARACTER_OCTET_LENGTH
@@ -1197,7 +1232,8 @@ CREATE FUNCTION f1() RETURNS INT RETURN @a + 1;
 CREATE USER mysql_bug20230@localhost;
 GRANT EXECUTE ON PROCEDURE p1 TO mysql_bug20230@localhost;
 GRANT EXECUTE ON FUNCTION f1 TO mysql_bug20230@localhost;
-SELECT ROUTINE_NAME, ROUTINE_DEFINITION FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_SCHEMA='test';
+SELECT ROUTINE_NAME, ROUTINE_DEFINITION FROM INFORMATION_SCHEMA.ROUTINES
+WHERE ROUTINE_SCHEMA='test' ORDER BY ROUTINE_NAME;
 ROUTINE_NAME	ROUTINE_DEFINITION
 f1	RETURN @a + 1
 p1	SET @a= 1
@@ -1207,9 +1243,10 @@ p1	ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR
 SET @a= 1	latin1	latin1_swedish_ci	utf8mb4_0900_ai_ci
 SHOW CREATE FUNCTION f1;
 Function	sql_mode	Create Function	character_set_client	collation_connection	Database Collation
-f1	ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION	CREATE DEFINER=`root`@`localhost` FUNCTION `f1`() RETURNS int(11)
+f1	ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION	CREATE DEFINER=`root`@`localhost` FUNCTION `f1`() RETURNS int
 RETURN @a + 1	latin1	latin1_swedish_ci	utf8mb4_0900_ai_ci
-SELECT ROUTINE_NAME, ROUTINE_DEFINITION FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_SCHEMA='test';
+SELECT ROUTINE_NAME, ROUTINE_DEFINITION FROM INFORMATION_SCHEMA.ROUTINES
+WHERE ROUTINE_SCHEMA='test' ORDER BY ROUTINE_NAME;
 ROUTINE_NAME	ROUTINE_DEFINITION
 f1	NULL
 p1	NULL
@@ -1264,7 +1301,12 @@ explain select * from v1;
 explain select * from (select table_name from information_schema.tables) as a;
 drop view v1;
 create table t1 (f1 int(11));
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 create table t2 (f1 int(11), f2 int(11));
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 select table_name from information_schema.tables
 where table_schema = 'test' and table_name not in
 (select table_name from information_schema.columns
@@ -1295,16 +1337,19 @@ group by c2.column_type order by num limit 1)
 and t.table_name not like 'INNODB_%'
 group by t.table_name order by num1, t.table_name COLLATE utf8_general_ci;
 TABLE_NAME	group_concat(t.table_schema, '.', t.table_name)	num1
+ADMINISTRABLE_ROLE_AUTHORIZATIONS	information_schema.ADMINISTRABLE_ROLE_AUTHORIZATIONS	1
+APPLICABLE_ROLES	information_schema.APPLICABLE_ROLES	1
 CHARACTER_SETS	information_schema.CHARACTER_SETS	1
+CHECK_CONSTRAINTS	information_schema.CHECK_CONSTRAINTS	1
 COLLATIONS	information_schema.COLLATIONS	1
-COLLATION_CHARACTER_SET_APPLICABILITY	information_schema.COLLATION_CHARACTER_SET_APPLICABILITY	1
 COLUMNS	information_schema.COLUMNS	1
+COLUMNS_EXTENSIONS	information_schema.COLUMNS_EXTENSIONS	1
 COLUMN_PRIVILEGES	information_schema.COLUMN_PRIVILEGES	1
 COLUMN_STATISTICS	information_schema.COLUMN_STATISTICS	1
+ENABLED_ROLES	information_schema.ENABLED_ROLES	1
 ENGINES	information_schema.ENGINES	1
 EVENTS	information_schema.EVENTS	1
 FILES	information_schema.FILES	1
-KEYWORDS	information_schema.KEYWORDS	1
 KEY_COLUMN_USAGE	information_schema.KEY_COLUMN_USAGE	1
 OPTIMIZER_TRACE	information_schema.OPTIMIZER_TRACE	1
 PARAMETERS	information_schema.PARAMETERS	1
@@ -1314,19 +1359,29 @@ PROCESSLIST	information_schema.PROCESSLIST	1
 PROFILING	information_schema.PROFILING	1
 REFERENTIAL_CONSTRAINTS	information_schema.REFERENTIAL_CONSTRAINTS	1
 RESOURCE_GROUPS	information_schema.RESOURCE_GROUPS	1
+ROLE_COLUMN_GRANTS	information_schema.ROLE_COLUMN_GRANTS	1
+ROLE_ROUTINE_GRANTS	information_schema.ROLE_ROUTINE_GRANTS	1
+ROLE_TABLE_GRANTS	information_schema.ROLE_TABLE_GRANTS	1
 ROUTINES	information_schema.ROUTINES	1
 SCHEMATA	information_schema.SCHEMATA	1
+SCHEMATA_EXTENSIONS	information_schema.SCHEMATA_EXTENSIONS	1
 SCHEMA_PRIVILEGES	information_schema.SCHEMA_PRIVILEGES	1
 STATISTICS	information_schema.STATISTICS	1
 ST_GEOMETRY_COLUMNS	information_schema.ST_GEOMETRY_COLUMNS	1
 ST_SPATIAL_REFERENCE_SYSTEMS	information_schema.ST_SPATIAL_REFERENCE_SYSTEMS	1
+ST_UNITS_OF_MEASURE	information_schema.ST_UNITS_OF_MEASURE	1
 TABLES	information_schema.TABLES	1
 TABLESPACES	information_schema.TABLESPACES	1
+TABLES_EXTENSIONS	information_schema.TABLES_EXTENSIONS	1
 TABLE_CONSTRAINTS	information_schema.TABLE_CONSTRAINTS	1
+TABLE_CONSTRAINTS_EXTENSIONS	information_schema.TABLE_CONSTRAINTS_EXTENSIONS	1
 TABLE_PRIVILEGES	information_schema.TABLE_PRIVILEGES	1
 TRIGGERS	information_schema.TRIGGERS	1
+USER_ATTRIBUTES	information_schema.USER_ATTRIBUTES	1
 USER_PRIVILEGES	information_schema.USER_PRIVILEGES	1
 VIEWS	information_schema.VIEWS	1
+VIEW_ROUTINE_USAGE	information_schema.VIEW_ROUTINE_USAGE	1
+VIEW_TABLE_USAGE	information_schema.VIEW_TABLE_USAGE	1
 create table t1(f1 int);
 create view v1 as select f1+1 as a from t1;
 create table t2 (f1 int, f2 int);
@@ -1357,7 +1412,7 @@ Trigger	Event	Table	Statement	Timing	Created	sql_mode	Definer	character_set_clie
 t1_ai	INSERT	t1	set @a = new.a + new.b + new.c	AFTER	#	ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION	root@localhost	latin1	latin1_swedish_ci	utf8mb4_0900_ai_ci
 show columns from t1;
 Field	Type	Null	Key	Default	Extra
-b	int(11)	YES		NULL	
+b	int	YES		NULL	
 select column_name from information_schema.columns where table_name='t1' order by column_name;
 COLUMN_NAME
 b
@@ -1394,8 +1449,8 @@ f1	varchar(50)	YES		NULL
 f2	varchar(50)	NO		NULL	
 f3	varchar(50)	YES			
 f4	varchar(50)	YES		NULL	
-f5	bigint(20)	NO		NULL	
-f6	bigint(20)	NO		10	
+f5	bigint	NO		NULL	
+f6	bigint	NO		10	
 f7	datetime	NO		NULL	
 f8	datetime	YES		2006-01-01 00:00:00	
 drop table t1;
@@ -1412,8 +1467,8 @@ JOIN collations co ON ( co.collation_name = CONVERT(ta.table_catalog using utf8)
 JOIN character_sets cs ON ( cs.character_set_name = CONVERT(ta.table_catalog using utf8));
 TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	TABLE_TYPE	ENGINE	VERSION	ROW_FORMAT	TABLE_ROWS	AVG_ROW_LENGTH	DATA_LENGTH	MAX_DATA_LENGTH	INDEX_LENGTH	DATA_FREE	AUTO_INCREMENT	CREATE_TIME	UPDATE_TIME	CHECK_TIME	TABLE_COLLATION	CHECKSUM	CREATE_OPTIONS	TABLE_COMMENT	COLLATION_NAME	CHARACTER_SET_NAME	ID	IS_DEFAULT	IS_COMPILED	SORTLEN	PAD_ATTRIBUTE	CHARACTER_SET_NAME	DEFAULT_COLLATE_NAME	DESCRIPTION	MAXLEN
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 DROP TABLE test.t1;
 SET max_heap_table_size = DEFAULT;
 USE test;
@@ -1421,6 +1476,12 @@ End of 5.0 tests.
 select * from information_schema.engines WHERE ENGINE="MyISAM";
 ENGINE	SUPPORT	COMMENT	TRANSACTIONS	XA	SAVEPOINTS
 MyISAM	YES	MyISAM storage engine	NO	NO	NO
+explain format=tree select * from information_schema.engines WHERE ENGINE="MyISAM";
+EXPLAIN
+-> Filter: (information_schema.`engines`.`ENGINE` = 'MyISAM')
+    -> Table scan on engines  (cost=0.00 rows=0)
+        -> Fill information schema table engines
+
 create user user3148@localhost;
 grant select on *.* to user3148@localhost;
 select user,db from information_schema.processlist;
@@ -1451,14 +1512,14 @@ Binlog_cache_disk_use
 DROP TABLE server_status;
 SELECT * FROM INFORMATION_SCHEMA.SCHEMATA
 WHERE SCHEMA_NAME = 'mysqltest';
-CATALOG_NAME	SCHEMA_NAME	DEFAULT_CHARACTER_SET_NAME	DEFAULT_COLLATION_NAME	SQL_PATH
+CATALOG_NAME	SCHEMA_NAME	DEFAULT_CHARACTER_SET_NAME	DEFAULT_COLLATION_NAME	SQL_PATH	DEFAULT_ENCRYPTION
 SELECT * FROM INFORMATION_SCHEMA.SCHEMATA
 WHERE SCHEMA_NAME = '';
-CATALOG_NAME	SCHEMA_NAME	DEFAULT_CHARACTER_SET_NAME	DEFAULT_COLLATION_NAME	SQL_PATH
+CATALOG_NAME	SCHEMA_NAME	DEFAULT_CHARACTER_SET_NAME	DEFAULT_COLLATION_NAME	SQL_PATH	DEFAULT_ENCRYPTION
 SELECT * FROM INFORMATION_SCHEMA.SCHEMATA
 WHERE SCHEMA_NAME = 'test';
-CATALOG_NAME	SCHEMA_NAME	DEFAULT_CHARACTER_SET_NAME	DEFAULT_COLLATION_NAME	SQL_PATH
-def	test	utf8mb4	utf8mb4_0900_ai_ci	NULL
+CATALOG_NAME	SCHEMA_NAME	DEFAULT_CHARACTER_SET_NAME	DEFAULT_COLLATION_NAME	SQL_PATH	DEFAULT_ENCRYPTION
+def	test	utf8mb4	utf8mb4_0900_ai_ci	NULL	NO
 select count(*) from INFORMATION_SCHEMA.TABLES where TABLE_SCHEMA='mysql' AND TABLE_NAME='nonexisting';
 count(*)
 0
@@ -1476,7 +1537,7 @@ AS SELECT *
 FROM information_schema.TABLES;
 SELECT VIEW_DEFINITION FROM INFORMATION_SCHEMA.VIEWS where TABLE_NAME = 'v1';
 VIEW_DEFINITION
-select `TABLES`.`TABLE_CATALOG` AS `TABLE_CATALOG`,`TABLES`.`TABLE_SCHEMA` AS `TABLE_SCHEMA`,`TABLES`.`TABLE_NAME` AS `TABLE_NAME`,`TABLES`.`TABLE_TYPE` AS `TABLE_TYPE`,`TABLES`.`ENGINE` AS `ENGINE`,`TABLES`.`VERSION` AS `VERSION`,`TABLES`.`ROW_FORMAT` AS `ROW_FORMAT`,`TABLES`.`TABLE_ROWS` AS `TABLE_ROWS`,`TABLES`.`AVG_ROW_LENGTH` AS `AVG_ROW_LENGTH`,`TABLES`.`DATA_LENGTH` AS `DATA_LENGTH`,`TABLES`.`MAX_DATA_LENGTH` AS `MAX_DATA_LENGTH`,`TABLES`.`INDEX_LENGTH` AS `INDEX_LENGTH`,`TABLES`.`DATA_FREE` AS `DATA_FREE`,`TABLES`.`AUTO_INCREMENT` AS `AUTO_INCREMENT`,`TABLES`.`CREATE_TIME` AS `CREATE_TIME`,`TABLES`.`UPDATE_TIME` AS `UPDATE_TIME`,`TABLES`.`CHECK_TIME` AS `CHECK_TIME`,`TABLES`.`TABLE_COLLATION` AS `TABLE_COLLATION`,`TABLES`.`CHECKSUM` AS `CHECKSUM`,`TABLES`.`CREATE_OPTIONS` AS `CREATE_OPTIONS`,`TABLES`.`TABLE_COMMENT` AS `TABLE_COMMENT` from `information_schema`.`TABLES`
+select `information_schema`.`TABLES`.`TABLE_CATALOG` AS `TABLE_CATALOG`,`information_schema`.`TABLES`.`TABLE_SCHEMA` AS `TABLE_SCHEMA`,`information_schema`.`TABLES`.`TABLE_NAME` AS `TABLE_NAME`,`information_schema`.`TABLES`.`TABLE_TYPE` AS `TABLE_TYPE`,`information_schema`.`TABLES`.`ENGINE` AS `ENGINE`,`information_schema`.`TABLES`.`VERSION` AS `VERSION`,`information_schema`.`TABLES`.`ROW_FORMAT` AS `ROW_FORMAT`,`information_schema`.`TABLES`.`TABLE_ROWS` AS `TABLE_ROWS`,`information_schema`.`TABLES`.`AVG_ROW_LENGTH` AS `AVG_ROW_LENGTH`,`information_schema`.`TABLES`.`DATA_LENGTH` AS `DATA_LENGTH`,`information_schema`.`TABLES`.`MAX_DATA_LENGTH` AS `MAX_DATA_LENGTH`,`information_schema`.`TABLES`.`INDEX_LENGTH` AS `INDEX_LENGTH`,`information_schema`.`TABLES`.`DATA_FREE` AS `DATA_FREE`,`information_schema`.`TABLES`.`AUTO_INCREMENT` AS `AUTO_INCREMENT`,`information_schema`.`TABLES`.`CREATE_TIME` AS `CREATE_TIME`,`information_schema`.`TABLES`.`UPDATE_TIME` AS `UPDATE_TIME`,`information_schema`.`TABLES`.`CHECK_TIME` AS `CHECK_TIME`,`information_schema`.`TABLES`.`TABLE_COLLATION` AS `TABLE_COLLATION`,`information_schema`.`TABLES`.`CHECKSUM` AS `CHECKSUM`,`information_schema`.`TABLES`.`CREATE_OPTIONS` AS `CREATE_OPTIONS`,`information_schema`.`TABLES`.`TABLE_COMMENT` AS `TABLE_COMMENT` from `information_schema`.`TABLES`
 DROP VIEW v1;
 SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA
 WHERE SCHEMA_NAME ='information_schema';
@@ -1492,14 +1553,8 @@ select * from `information_schema`.`COLUMNS` where `TABLE_NAME` = NULL;
 TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	COLUMN_NAME	ORDINAL_POSITION	COLUMN_DEFAULT	IS_NULLABLE	DATA_TYPE	CHARACTER_MAXIMUM_LENGTH	CHARACTER_OCTET_LENGTH	NUMERIC_PRECISION	NUMERIC_SCALE	DATETIME_PRECISION	CHARACTER_SET_NAME	COLLATION_NAME	COLUMN_TYPE	COLUMN_KEY	EXTRA	PRIVILEGES	COLUMN_COMMENT	GENERATION_EXPRESSION	SRS_ID
 select * from `information_schema`.`key_column_usage` where `TABLE_SCHEMA` = NULL;
 CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	CONSTRAINT_NAME	TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	COLUMN_NAME	ORDINAL_POSITION	POSITION_IN_UNIQUE_CONSTRAINT	REFERENCED_TABLE_SCHEMA	REFERENCED_TABLE_NAME	REFERENCED_COLUMN_NAME
-Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 select * from `information_schema`.`key_column_usage` where `TABLE_NAME` = NULL;
 CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	CONSTRAINT_NAME	TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	COLUMN_NAME	ORDINAL_POSITION	POSITION_IN_UNIQUE_CONSTRAINT	REFERENCED_TABLE_SCHEMA	REFERENCED_TABLE_NAME	REFERENCED_COLUMN_NAME
-Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 select * from `information_schema`.`PARTITIONS` where `TABLE_SCHEMA` = NULL;
 TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	PARTITION_NAME	SUBPARTITION_NAME	PARTITION_ORDINAL_POSITION	SUBPARTITION_ORDINAL_POSITION	PARTITION_METHOD	SUBPARTITION_METHOD	PARTITION_EXPRESSION	SUBPARTITION_EXPRESSION	PARTITION_DESCRIPTION	TABLE_ROWS	AVG_ROW_LENGTH	DATA_LENGTH	MAX_DATA_LENGTH	INDEX_LENGTH	DATA_FREE	CREATE_TIME	UPDATE_TIME	CHECK_TIME	CHECKSUM	PARTITION_COMMENT	NODEGROUP	TABLESPACE_NAME
 select * from `information_schema`.`PARTITIONS` where `TABLE_NAME` = NULL;
@@ -1509,11 +1564,11 @@ CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	CONSTRAINT_NAME	UNIQUE_CONSTRAINT_CATALOG	U
 select * from `information_schema`.`REFERENTIAL_CONSTRAINTS` where `TABLE_NAME` = NULL;
 CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	CONSTRAINT_NAME	UNIQUE_CONSTRAINT_CATALOG	UNIQUE_CONSTRAINT_SCHEMA	UNIQUE_CONSTRAINT_NAME	MATCH_OPTION	UPDATE_RULE	DELETE_RULE	TABLE_NAME	REFERENCED_TABLE_NAME
 select * from information_schema.schemata where schema_name = NULL;
-CATALOG_NAME	SCHEMA_NAME	DEFAULT_CHARACTER_SET_NAME	DEFAULT_COLLATION_NAME	SQL_PATH
+CATALOG_NAME	SCHEMA_NAME	DEFAULT_CHARACTER_SET_NAME	DEFAULT_COLLATION_NAME	SQL_PATH	DEFAULT_ENCRYPTION
 select * from `information_schema`.`STATISTICS` where `TABLE_SCHEMA` = NULL;
-TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	NON_UNIQUE	INDEX_SCHEMA	INDEX_NAME	SEQ_IN_INDEX	COLUMN_NAME	COLLATION	CARDINALITY	SUB_PART	PACKED	NULLABLE	INDEX_TYPE	COMMENT	INDEX_COMMENT	IS_VISIBLE
+TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	NON_UNIQUE	INDEX_SCHEMA	INDEX_NAME	SEQ_IN_INDEX	COLUMN_NAME	COLLATION	CARDINALITY	SUB_PART	PACKED	NULLABLE	INDEX_TYPE	COMMENT	INDEX_COMMENT	IS_VISIBLE	EXPRESSION
 select * from `information_schema`.`STATISTICS` where `TABLE_NAME` = NULL;
-TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	NON_UNIQUE	INDEX_SCHEMA	INDEX_NAME	SEQ_IN_INDEX	COLUMN_NAME	COLLATION	CARDINALITY	SUB_PART	PACKED	NULLABLE	INDEX_TYPE	COMMENT	INDEX_COMMENT	IS_VISIBLE
+TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	NON_UNIQUE	INDEX_SCHEMA	INDEX_NAME	SEQ_IN_INDEX	COLUMN_NAME	COLLATION	CARDINALITY	SUB_PART	PACKED	NULLABLE	INDEX_TYPE	COMMENT	INDEX_COMMENT	IS_VISIBLE	EXPRESSION
 select * from information_schema.tables where table_schema = NULL;
 TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	TABLE_TYPE	ENGINE	VERSION	ROW_FORMAT	TABLE_ROWS	AVG_ROW_LENGTH	DATA_LENGTH	MAX_DATA_LENGTH	INDEX_LENGTH	DATA_FREE	AUTO_INCREMENT	CREATE_TIME	UPDATE_TIME	CHECK_TIME	TABLE_COLLATION	CHECKSUM	CREATE_OPTIONS	TABLE_COMMENT
 select * from information_schema.tables where table_catalog = NULL;
@@ -1521,15 +1576,9 @@ TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	TABLE_TYPE	ENGINE	VERSION	ROW_FORMAT	TABLE
 select * from information_schema.tables where table_name = NULL;
 TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	TABLE_TYPE	ENGINE	VERSION	ROW_FORMAT	TABLE_ROWS	AVG_ROW_LENGTH	DATA_LENGTH	MAX_DATA_LENGTH	INDEX_LENGTH	DATA_FREE	AUTO_INCREMENT	CREATE_TIME	UPDATE_TIME	CHECK_TIME	TABLE_COLLATION	CHECKSUM	CREATE_OPTIONS	TABLE_COMMENT
 select * from `information_schema`.`TABLE_CONSTRAINTS` where `TABLE_SCHEMA` = NULL;
-CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	CONSTRAINT_NAME	TABLE_SCHEMA	TABLE_NAME	CONSTRAINT_TYPE
-Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	CONSTRAINT_NAME	TABLE_SCHEMA	TABLE_NAME	CONSTRAINT_TYPE	ENFORCED
 select * from `information_schema`.`TABLE_CONSTRAINTS` where `TABLE_NAME` = NULL;
-CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	CONSTRAINT_NAME	TABLE_SCHEMA	TABLE_NAME	CONSTRAINT_TYPE
-Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	CONSTRAINT_NAME	TABLE_SCHEMA	TABLE_NAME	CONSTRAINT_TYPE	ENFORCED
 select * from `information_schema`.`TRIGGERS` where `EVENT_OBJECT_SCHEMA` = NULL;
 TRIGGER_CATALOG	TRIGGER_SCHEMA	TRIGGER_NAME	EVENT_MANIPULATION	EVENT_OBJECT_CATALOG	EVENT_OBJECT_SCHEMA	EVENT_OBJECT_TABLE	ACTION_ORDER	ACTION_CONDITION	ACTION_STATEMENT	ACTION_ORIENTATION	ACTION_TIMING	ACTION_REFERENCE_OLD_TABLE	ACTION_REFERENCE_NEW_TABLE	ACTION_REFERENCE_OLD_ROW	ACTION_REFERENCE_NEW_ROW	CREATED	SQL_MODE	DEFINER	CHARACTER_SET_CLIENT	COLLATION_CONNECTION	DATABASE_COLLATION
 select * from `information_schema`.`TRIGGERS` where `EVENT_OBJECT_TABLE` = NULL;
@@ -1679,11 +1728,13 @@ End of 5.1 tests.
 create function f1 (p1 int, p2 datetime, p3 decimal(10,2))
 returns char(10) return null;
 create procedure p1 (p1 float(8,5), p2 char(32), p3 varchar(10)) begin end;
+Warnings:
+Warning	1681	Specifying number of digits for floating point data types is deprecated and will be removed in a future release.
 create procedure p2 (p1 enum('c', 's'), p2 blob, p3 text) begin end;
 select * from information_schema.parameters where specific_schema='test';
 SPECIFIC_CATALOG	SPECIFIC_SCHEMA	SPECIFIC_NAME	ORDINAL_POSITION	PARAMETER_MODE	PARAMETER_NAME	DATA_TYPE	CHARACTER_MAXIMUM_LENGTH	CHARACTER_OCTET_LENGTH	NUMERIC_PRECISION	NUMERIC_SCALE	DATETIME_PRECISION	CHARACTER_SET_NAME	COLLATION_NAME	DTD_IDENTIFIER	ROUTINE_TYPE
 def	test	f1	0	NULL	NULL	char	10	40	NULL	NULL	NULL	utf8mb4	utf8mb4_0900_ai_ci	char(10)	FUNCTION
-def	test	f1	1	IN	p1	int	NULL	NULL	10	0	NULL	NULL	NULL	int(11)	FUNCTION
+def	test	f1	1	IN	p1	int	NULL	NULL	10	0	NULL	NULL	NULL	int	FUNCTION
 def	test	f1	2	IN	p2	datetime	NULL	NULL	NULL	NULL	0	NULL	NULL	datetime	FUNCTION
 def	test	f1	3	IN	p3	decimal	NULL	NULL	10	2	NULL	NULL	NULL	decimal(10,2)	FUNCTION
 def	test	p1	1	IN	p1	float	NULL	NULL	8	5	NULL	NULL	NULL	float(8,5)	PROCEDURE
@@ -1792,9 +1843,6 @@ USING (TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME)
 WHERE COLUMNS.TABLE_SCHEMA = 'test'
 AND COLUMNS.TABLE_NAME = 't1';
 TABLE_SCHEMA	TABLE_NAME	COLUMN_NAME	CONSTRAINT_CATALOG	CONSTRAINT_SCHEMA	CONSTRAINT_NAME	TABLE_CATALOG	ORDINAL_POSITION	POSITION_IN_UNIQUE_CONSTRAINT	REFERENCED_TABLE_SCHEMA	REFERENCED_TABLE_NAME	REFERENCED_COLUMN_NAME	TABLE_CATALOG	ORDINAL_POSITION	COLUMN_DEFAULT	IS_NULLABLE	DATA_TYPE	CHARACTER_MAXIMUM_LENGTH	CHARACTER_OCTET_LENGTH	NUMERIC_PRECISION	NUMERIC_SCALE	DATETIME_PRECISION	CHARACTER_SET_NAME	COLLATION_NAME	COLUMN_TYPE	COLUMN_KEY	EXTRA	PRIVILEGES	COLUMN_COMMENT	GENERATION_EXPRESSION	SRS_ID
-Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 #
 # A test case for Bug#56540 "Exception (crash) in sql_show.cc
 # during rqg_info_schema test on Windows"
@@ -2022,28 +2070,6 @@ ARCHIVE	YES	NO
 # End of 5.6 tests
 #
 #
-# Bug#19307777 ASSERTION `QEP_TAB->CONDITION() == QEP_TAB->CONDITION_OPTIM()' FAILED
-#
-CREATE TABLE mysql.procs_priv_copy ENGINE=MyISAM AS SELECT * FROM mysql.procs_priv;
-EXPLAIN select * from
-information_schema . innodb_cmp as table1
-left outer join mysql . procs_priv_copy as table2
-on ( table2 . routine_name = table1 . compress_time )
-where not table1 . compress_time <> '2006-09-03 10:11:37.046313'
-having  table2 . grantor <> '2008-02-28 22:17:05.025739' limit 9;
-id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	Impossible HAVING noticed after reading const tables
-Warnings:
-Note	1003	/* select#1 */ select `table1`.`page_size` AS `page_size`,`table1`.`compress_ops` AS `compress_ops`,`table1`.`compress_ops_ok` AS `compress_ops_ok`,`table1`.`compress_time` AS `compress_time`,`table1`.`uncompress_ops` AS `uncompress_ops`,`table1`.`uncompress_time` AS `uncompress_time`,NULL AS `Host`,NULL AS `Db`,NULL AS `User`,NULL AS `Routine_name`,NULL AS `Routine_type`,NULL AS `Grantor`,NULL AS `Proc_priv`,NULL AS `Timestamp` from `information_schema`.`INNODB_CMP` `table1` where (`table1`.`compress_time` = '2006-09-03 10:11:37.046313') having 0 limit 9
-select * from
-information_schema . innodb_cmp as table1
-left outer join mysql . procs_priv_copy as table2
-on ( table2 . routine_name = table1 . compress_time )
-where not table1 . compress_time <> '2006-09-03 10:11:37.046313'
-having  table2 . grantor <> '2008-02-28 22:17:05.025739' limit 9;
-page_size	compress_ops	compress_ops_ok	compress_time	uncompress_ops	uncompress_time	Host	Db	User	Routine_name	Routine_type	Grantor	Proc_priv	Timestamp
-DROP TABLE mysql.procs_priv_copy;
-#
 # Bug#20665051 SQL_SHOW.CC:7764: ASSERTION `QEP_TAB->CONDITION() == QEP_TAB->CONDITION_OPTIM()
 #
 EXPLAIN SELECT 1
@@ -2079,7 +2105,7 @@ F1
 #
 set names utf8;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 CREATE USER user_name_len_22_01234@localhost;
 GRANT SELECT ON *.* TO user_name_len_22_01234@localhost;
 SELECT user,db FROM information_schema.processlist;
@@ -2138,7 +2164,6 @@ c5 CHAR(255),
 c6 POINT NOT NULL,
 c7 GEOMETRY NOT NULL SRID 0,
 SPATIAL INDEX(c7),
-PRIMARY KEY (c1, c6),
 KEY c2_key (c2),
 FULLTEXT KEY c3_fts (c3),
 FULLTEXT KEY c4_fts (c4, c5));
@@ -2147,21 +2172,21 @@ DATA_TYPE, COLLATION_NAME, COLUMN_KEY
 FROM INFORMATION_SCHEMA.COLUMNS
 WHERE TABLE_SCHEMA='test' ORDER BY COLUMN_NAME;
 COLUMN_NAME	IS_NULLABLE	DATA_TYPE	COLLATION_NAME	COLUMN_KEY
-c1	NO	int	NULL	PRI
+c1	YES	int	NULL	
 c2	YES	int	NULL	MUL
 c3	YES	char	utf8mb4_0900_ai_ci	MUL
 c4	YES	char	utf8mb4_0900_ai_ci	MUL
 c5	YES	char	utf8mb4_0900_ai_ci	
-c6	NO	point	NULL	PRI
+c6	NO	point	NULL	
 c7	NO	geometry	NULL	MUL
 SHOW COLUMNS FROM t1;
 Field	Type	Null	Key	Default	Extra
-c1	int(11)	NO	PRI	NULL	
-c2	int(11)	YES	MUL	NULL	
+c1	int	YES		NULL	
+c2	int	YES	MUL	NULL	
 c3	char(255)	YES	MUL	NULL	
 c4	char(255)	YES	MUL	NULL	
 c5	char(255)	YES		NULL	
-c6	point	NO	PRI	NULL	
+c6	point	NO		NULL	
 c7	geometry	NO	MUL	NULL	
 DROP TABLE t1;
 #
@@ -2232,6 +2257,8 @@ SELECT CAN_ACCESS_TABLE("test", "t1") AS f1, COLUMN_NAME AS F2  FROM INFORMATION
 ERROR HY000: Access to native function 'CAN_ACCESS_TABLE' is rejected.
 PREPARE stmt FROM 'SELECT CAN_ACCESS_TABLE("test", "t1") AS f1, COLUMN_NAME AS F2  FROM INFORMATION_SCHEMA.COLUMNS';
 ERROR HY000: Access to native function 'CAN_ACCESS_TABLE' is rejected.
+SELECT CAN_ACCESS_USER(NULL, NULL);
+ERROR HY000: Access to native function 'CAN_ACCESS_USER' is rejected.
 # Case 2: Invoking I_S native methods should be allowed through I_S queries.
 SELECT * FROM INFORMATION_SCHEMA.TABLES where table_name='t1';
 TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	TABLE_TYPE	ENGINE	VERSION	ROW_FORMAT	TABLE_ROWS	AVG_ROW_LENGTH	DATA_LENGTH	MAX_DATA_LENGTH	INDEX_LENGTH	DATA_FREE	AUTO_INCREMENT	CREATE_TIME	UPDATE_TIME	CHECK_TIME	TABLE_COLLATION	CHECKSUM	CREATE_OPTIONS	TABLE_COMMENT
@@ -2253,7 +2280,7 @@ AND t.table_name = c.table_name
 AND t.table_name = 't1' limit 1;
 SHOW CREATE VIEW v1;
 View	Create View	character_set_client	collation_connection
-v1	CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `v1` AS select `t`.`TABLE_SCHEMA` AS `table_schema`,`t`.`TABLE_NAME` AS `table_name`,`c`.`COLUMN_NAME` AS `column_name` from (`information_schema`.`TABLES` `t` join `information_schema`.`COLUMNS` `c`) where ((`t`.`TABLE_SCHEMA` = `c`.`TABLE_SCHEMA`) and (`t`.`TABLE_NAME` = `c`.`TABLE_NAME`) and (`t`.`TABLE_NAME` = 't1')) limit 1	utf8mb4	utf8mb4_0900_ai_ci
+v1	CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `v1` AS select `information_schema`.`t`.`TABLE_SCHEMA` AS `table_schema`,`information_schema`.`t`.`TABLE_NAME` AS `table_name`,`information_schema`.`c`.`COLUMN_NAME` AS `column_name` from (`information_schema`.`TABLES` `t` join `information_schema`.`COLUMNS` `c`) where ((`information_schema`.`t`.`TABLE_SCHEMA` = `information_schema`.`c`.`TABLE_SCHEMA`) and (`information_schema`.`t`.`TABLE_NAME` = `information_schema`.`c`.`TABLE_NAME`) and (`information_schema`.`t`.`TABLE_NAME` = 't1')) limit 1	utf8mb4	utf8mb4_0900_ai_ci
 CREATE TABLE t2 AS
 SELECT t.table_schema, t.table_name, c.column_name
 FROM INFORMATION_SCHEMA.TABLES t,
@@ -2375,7 +2402,7 @@ CREATE TABLE t1 (a INT);
 SET SESSION optimizer_switch='derived_merge=off';
 SHOW FIELDS FROM t1;
 Field	Type	Null	Key	Default	Extra
-a	int(11)	YES		NULL	
+a	int	YES		NULL	
 SET SESSION optimizer_switch=DEFAULT;
 DROP TABLE t1;
 #
@@ -2439,12 +2466,17 @@ AND t.table_name NOT LIKE 'ndb%'
   ORDER BY t.table_name COLLATE utf8_general_ci,
 c1.column_name COLLATE utf8_general_ci;
 TABLE_NAME	COLUMN_NAME
+ADMINISTRABLE_ROLE_AUTHORIZATIONS	USER
+APPLICABLE_ROLES	USER
 CHARACTER_SETS	CHARACTER_SET_NAME
+CHECK_CONSTRAINTS	CONSTRAINT_SCHEMA
 COLLATIONS	COLLATION_NAME
 COLLATION_CHARACTER_SET_APPLICABILITY	COLLATION_NAME
 COLUMNS	TABLE_SCHEMA
+COLUMNS_EXTENSIONS	TABLE_SCHEMA
 COLUMN_PRIVILEGES	TABLE_SCHEMA
 COLUMN_STATISTICS	SCHEMA_NAME
+ENABLED_ROLES	ROLE_NAME
 ENGINES	ENGINE
 EVENTS	EVENT_SCHEMA
 FILES	TABLE_SCHEMA
@@ -2458,19 +2490,30 @@ PROCESSLIST	ID
 PROFILING	QUERY_ID
 REFERENTIAL_CONSTRAINTS	CONSTRAINT_SCHEMA
 RESOURCE_GROUPS	RESOURCE_GROUP_NAME
+ROLE_COLUMN_GRANTS	TABLE_SCHEMA
+ROLE_ROUTINE_GRANTS	SPECIFIC_SCHEMA
+ROLE_TABLE_GRANTS	TABLE_SCHEMA
 ROUTINES	ROUTINE_SCHEMA
 SCHEMATA	SCHEMA_NAME
+SCHEMATA_EXTENSIONS	SCHEMA_NAME
 SCHEMA_PRIVILEGES	TABLE_SCHEMA
 STATISTICS	TABLE_SCHEMA
 ST_GEOMETRY_COLUMNS	TABLE_SCHEMA
 ST_SPATIAL_REFERENCE_SYSTEMS	SRS_NAME
+ST_UNITS_OF_MEASURE	UNIT_NAME
 TABLES	TABLE_SCHEMA
 TABLESPACES	TABLESPACE_NAME
+TABLESPACES_EXTENSIONS	TABLESPACE_NAME
+TABLES_EXTENSIONS	TABLE_SCHEMA
 TABLE_CONSTRAINTS	CONSTRAINT_SCHEMA
+TABLE_CONSTRAINTS_EXTENSIONS	CONSTRAINT_SCHEMA
 TABLE_PRIVILEGES	TABLE_SCHEMA
 TRIGGERS	TRIGGER_SCHEMA
+USER_ATTRIBUTES	USER
 USER_PRIVILEGES	GRANTEE
 VIEWS	TABLE_SCHEMA
+VIEW_ROUTINE_USAGE	TABLE_SCHEMA
+VIEW_TABLE_USAGE	VIEW_SCHEMA
 SELECT t.table_name, c1.column_name
 FROM information_schema.tables t
 INNER JOIN
@@ -2490,12 +2533,17 @@ AND t.table_name NOT LIKE 'ndb%'
   ORDER BY t.table_name COLLATE utf8_general_ci,
 c1.column_name COLLATE utf8_general_ci;
 TABLE_NAME	COLUMN_NAME
+ADMINISTRABLE_ROLE_AUTHORIZATIONS	USER
+APPLICABLE_ROLES	USER
 CHARACTER_SETS	CHARACTER_SET_NAME
+CHECK_CONSTRAINTS	CONSTRAINT_SCHEMA
 COLLATIONS	COLLATION_NAME
 COLLATION_CHARACTER_SET_APPLICABILITY	COLLATION_NAME
 COLUMNS	TABLE_SCHEMA
+COLUMNS_EXTENSIONS	TABLE_SCHEMA
 COLUMN_PRIVILEGES	TABLE_SCHEMA
 COLUMN_STATISTICS	SCHEMA_NAME
+ENABLED_ROLES	ROLE_NAME
 ENGINES	ENGINE
 EVENTS	EVENT_SCHEMA
 FILES	TABLE_SCHEMA
@@ -2509,19 +2557,30 @@ PROCESSLIST	ID
 PROFILING	QUERY_ID
 REFERENTIAL_CONSTRAINTS	CONSTRAINT_SCHEMA
 RESOURCE_GROUPS	RESOURCE_GROUP_NAME
+ROLE_COLUMN_GRANTS	TABLE_SCHEMA
+ROLE_ROUTINE_GRANTS	SPECIFIC_SCHEMA
+ROLE_TABLE_GRANTS	TABLE_SCHEMA
 ROUTINES	ROUTINE_SCHEMA
 SCHEMATA	SCHEMA_NAME
+SCHEMATA_EXTENSIONS	SCHEMA_NAME
 SCHEMA_PRIVILEGES	TABLE_SCHEMA
 STATISTICS	TABLE_SCHEMA
 ST_GEOMETRY_COLUMNS	TABLE_SCHEMA
 ST_SPATIAL_REFERENCE_SYSTEMS	SRS_NAME
+ST_UNITS_OF_MEASURE	UNIT_NAME
 TABLES	TABLE_SCHEMA
 TABLESPACES	TABLESPACE_NAME
+TABLESPACES_EXTENSIONS	TABLESPACE_NAME
+TABLES_EXTENSIONS	TABLE_SCHEMA
 TABLE_CONSTRAINTS	CONSTRAINT_SCHEMA
+TABLE_CONSTRAINTS_EXTENSIONS	CONSTRAINT_SCHEMA
 TABLE_PRIVILEGES	TABLE_SCHEMA
 TRIGGERS	TRIGGER_SCHEMA
+USER_ATTRIBUTES	USER
 USER_PRIVILEGES	GRANTEE
 VIEWS	TABLE_SCHEMA
+VIEW_ROUTINE_USAGE	TABLE_SCHEMA
+VIEW_TABLE_USAGE	VIEW_SCHEMA
 #
 # BUG#24679166: TABLE CREATION WITH BINARY TYPE COLUMN IS RESULTING IN
 #               ASSERT CONDITION FAILURE.
@@ -2562,6 +2621,9 @@ DROP TABLE t1;
 # BUG#25185947 -- issues with renaming root user
 #
 RENAME USER root@localhost TO master@localhost;
+Warnings:
+Warning	4005	User 'root'@'localhost' is referenced as a definer account in a stored routine.
+Warning	4005	User 'root'@'localhost' is referenced as a definer account in a trigger.
 FLUSH PRIVILEGES;
 # Without patch, SHOW DATABASES returns error ERROR 1449 (HY000):
 # The user specified as a definer ('root'@'localhost') does not exist
@@ -2574,6 +2636,9 @@ performance_schema
 sys
 test
 RENAME USER master@localhost TO root@localhost;
+Warnings:
+Warning	4005	User 'root'@'localhost' is referenced as a definer account in a stored routine.
+Warning	4005	User 'root'@'localhost' is referenced as a definer account in a trigger.
 FLUSH PRIVILEGES;
 #
 # Bug#27041452 assertion
@@ -2643,7 +2708,250 @@ Name	Engine	Version	Row_format	Rows	Avg_row_length	Data_length	Max_data_length	I
 t1	InnoDB	10	Dynamic	0	0	#	#	0	0	NULL	#	#	NULL	utf8mb4_0900_ai_ci	NULL		abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghi
 jabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefg
 hijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcde
-fghijabcdefghijabcdefghijabc
+fghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabc
+defghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghija
+bcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghi
+jabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefg
+hijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcde
+fghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabc
+defghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghija
+bcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghi
+jabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefg
+hijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcde
+fghijabcdefghijabcde
 SET big_tables=default;
 SET character_set_connection=default;
+DROP TABLE t1;
+#
+# Bug#27945704 UNABLE TO JOIN TABLE_CONSTRAINTS AND REFERENTIAL_CONSTRAINTS
+#
+SELECT COUNT(*) = 0
+FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS AS rcons
+LEFT OUTER JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS tcons
+ON tcons.constraint_catalog = rcons.constraint_catalog AND
+tcons.constraint_schema = rcons.constraint_schema AND
+tcons.constraint_name = rcons.unique_constraint_name;
+COUNT(*) = 0
+1
+#
+# Bug#27729859 QUERYING THE KEYWORDS TABLE FAILS UNLESS THERE IS A
+#              DEFAULT DATABASE
+#
+# Connect without a schema name, and see that we can query the KEYWORDS
+# view.
+SELECT COUNT(*) > 0 FROM INFORMATION_SCHEMA.KEYWORDS;
+COUNT(*) > 0
+1
+#
+# Bug#28499603 SHOW INDEXES PRINTS WRONG OUTPUT FOR PREFIX INDEXES
+#
+CREATE TABLE t1 (col1 BLOB(33), INDEX (col1(8)));
+SHOW INDEXES FROM t1;
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	col1	1	col1	A	0	8	NULL	YES	BTREE			YES	NULL
+SELECT SUB_PART FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_NAME = "t1";
+SUB_PART
+8
+DROP TABLE t1;
+CREATE TABLE t1 (col1 TEXT(33) CHARACTER SET utf8mb4, INDEX (col1(2)));
+SHOW INDEXES FROM t1;
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	col1	1	col1	A	0	2	NULL	YES	BTREE			YES	NULL
+SELECT SUB_PART FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_NAME = "t1";
+SUB_PART
+2
+DROP TABLE t1;
+CREATE TABLE t1 (col1 BLOB(33), INDEX (col1(33)));
+SHOW INDEXES FROM t1;
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	col1	1	col1	A	0	33	NULL	YES	BTREE			YES	NULL
+SELECT SUB_PART FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_NAME = "t1";
+SUB_PART
+33
+DROP TABLE t1;
+CREATE TABLE t1 (col1 TEXT(2) CHARACTER SET utf8mb4, INDEX (col1(2)));
+SHOW INDEXES FROM t1;
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	col1	1	col1	A	0	2	NULL	YES	BTREE			YES	NULL
+SELECT SUB_PART FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_NAME = "t1";
+SUB_PART
+2
+DROP TABLE t1;
+#
+# Bug#29014272  THE TABLE COMMENT IS CUT DOWN ON SELECTING WITH ORDER BY
+#
+CREATE DATABASE db1;
+CREATE TABLE db1.t1 ( id int(11) DEFAULT NULL) ENGINE = INNODB COMMENT =
+'123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__100_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__200_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__300_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__400_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__500_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__600_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__700_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__800_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__900_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1000_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1100_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1200_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1300_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1400_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1500_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1600_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1700_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1800_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1900_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_2000_123456789_123456789_123456789_123456789_123_2048';
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+# This query would show just 256 characters of comments, without the fix.
+SELECT TABLE_COMMENT FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_NAME = 't1' ORDER BY TABLE_SCHEMA;
+TABLE_COMMENT
+123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__100_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__200_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__300_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__400_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__500_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__600_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__700_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__800_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234__900_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1000_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1100_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1200_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1300_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1400_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1500_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1600_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1700_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1800_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_1900_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_123456789_1234_2000_123456789_123456789_123456789_123456789_123_2048
+DROP DATABASE db1;
+#
+# Bug#29031684 HANDLE_FATAL_SIGNAL (SIG=11) IN
+# SQL_CONDITION::MESSAGE_TEXT
+#
+# Create a invalid view.
+CREATE TABLE t1 (f1 TIMESTAMP);
+CREATE VIEW v1 AS SELECT 1 FROM t1 WHERE f1;
+ALTER TABLE t1 CHANGE COLUMN f1 f0 BINARY;
+# Check warning from information_schema.
+SELECT TABLE_NAME, LENGTH(VIEW_DEFINITION) > 0
+FROM INFORMATION_SCHEMA.VIEWS
+WHERE TABLE_SCHEMA='test';
+TABLE_NAME	LENGTH(VIEW_DEFINITION) > 0
+v1	1
+Warnings:
+Warning	1356	View 'test.v1' references invalid table(s) or column(s) or function(s) or definer/invoker of view lack rights to use them
+# The SELECT causes unexpected error without the fix.
+SET SESSION max_error_count=0;
+SELECT TABLE_NAME, LENGTH(VIEW_DEFINITION) > 0
+FROM INFORMATION_SCHEMA.VIEWS
+WHERE TABLE_SCHEMA='test';
+TABLE_NAME	LENGTH(VIEW_DEFINITION) > 0
+v1	1
+SHOW WARNINGS;
+Level	Code	Message
+SET SESSION max_error_count=default;
+DROP VIEW v1;
+DROP TABLE t1;
+#
+# Bug#28901919 INFORMATION_SCHEMA.TABLES COPIES
+# TABLE_COMMENTS TO OTHER TABLES
+#
+# Create a invalid view.
+CREATE TABLE t1 (f1 TIMESTAMP);
+CREATE VIEW v1 AS SELECT 1 FROM t1 WHERE f1;
+CREATE VIEW v2 AS SELECT 1 FROM t1 WHERE f1;
+ALTER TABLE t1 CHANGE COLUMN f1 f0 BINARY;
+# The TABLE_COMMENT shows error message with view name 'v1'
+# for view 'v2' without the fix.
+SELECT TABLE_NAME, TABLE_COMMENT
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA='test';
+TABLE_NAME	TABLE_COMMENT
+t1	
+v1	View 'test.v1' references invalid table(s) or column(s) or function(s) or definer/invoker of view lack rights to use them
+v2	View 'test.v2' references invalid table(s) or column(s) or function(s) or definer/invoker of view lack rights to use them
+Warnings:
+Warning	1356	View 'test.v1' references invalid table(s) or column(s) or function(s) or definer/invoker of view lack rights to use them
+Warning	1356	View 'test.v2' references invalid table(s) or column(s) or function(s) or definer/invoker of view lack rights to use them
+# The behavior with max_error_count=0 should be unchanged after fix.
+SET SESSION max_error_count=0;
+SELECT TABLE_NAME, TABLE_COMMENT
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA='test';
+TABLE_NAME	TABLE_COMMENT
+t1	
+v1	View 'test.v1' references invalid table(s) or column(s) or function(s) or definer/invoker of view lack rights to use them
+v2	View 'test.v2' references invalid table(s) or column(s) or function(s) or definer/invoker of view lack rights to use them
+SHOW WARNINGS;
+Level	Code	Message
+SET SESSION max_error_count=default;
+DROP VIEW v1, v2;
+DROP TABLE t1;
+#
+# WL#12984 INFORMATION_SCHEMA and metadata related to secondary engine.
+#
+# Verify that I_S.COLUMNS.EXTRA shows the 'NOT SECONDARY' clause.
+CREATE TABLE t1 (f1 DATE NOT SECONDARY);
+SELECT TABLE_NAME, COLUMN_NAME, EXTRA FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME='t1';
+TABLE_NAME	COLUMN_NAME	EXTRA
+t1	f1	NOT SECONDARY
+DROP TABLE t1;
+CREATE TABLE t1 (f1 DATE);
+SELECT TABLE_NAME, COLUMN_NAME, EXTRA FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME='t1';
+TABLE_NAME	COLUMN_NAME	EXTRA
+t1	f1	
+ALTER TABLE  t1 MODIFY f1 DATE NOT SECONDARY;
+SELECT TABLE_NAME, COLUMN_NAME, EXTRA FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME='t1';
+TABLE_NAME	COLUMN_NAME	EXTRA
+t1	f1	NOT SECONDARY
+DROP TABLE t1;
+# Verify that I_S.TABLES.CREATE_OPTIONS shows 'SECONDARY_ENGINE' clause.
+CREATE TABLE t1 (f1 INT) SECONDARY_ENGINE=myisam;
+SELECT TABLE_NAME, CREATE_OPTIONS
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_NAME = 't1';
+TABLE_NAME	CREATE_OPTIONS
+t1	SECONDARY_ENGINE="myisam"
+DROP TABLE t1;
+CREATE TABLE t1 (f1 INT);
+SELECT TABLE_NAME, CREATE_OPTIONS FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_NAME = 't1';
+TABLE_NAME	CREATE_OPTIONS
+t1	
+ALTER TABLE t1 SECONDARY_ENGINE=myisam;
+SELECT TABLE_NAME, CREATE_OPTIONS FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_NAME = 't1';
+TABLE_NAME	CREATE_OPTIONS
+t1	SECONDARY_ENGINE="myisam"
+DROP TABLE t1;
+#
+# BUG#29406053: OPTIMIZER_SWITCH DERIVED_MERGE=OFF CAUSES TABLE COMMENTS
+#               "... IS NOT BASE TABLE"
+#
+SET OPTIMIZER_SWITCH='DERIVED_MERGE=ON';
+SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE, TABLE_COMMENT
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = 'sys' AND TABLE_NAME = 'sys_config';
+TABLE_SCHEMA	TABLE_NAME	TABLE_TYPE	TABLE_COMMENT
+sys	sys_config	BASE TABLE	
+SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE, TABLE_COMMENT
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = 'sys' AND TABLE_NAME = 'sys_config';
+TABLE_SCHEMA	TABLE_NAME	TABLE_TYPE	TABLE_COMMENT
+sys	sys_config	BASE TABLE	
+SET OPTIMIZER_SWITCH='DERIVED_MERGE=OFF';
+SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE, TABLE_COMMENT
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = 'sys' AND TABLE_NAME = 'sys_config';
+TABLE_SCHEMA	TABLE_NAME	TABLE_TYPE	TABLE_COMMENT
+sys	sys_config	BASE TABLE	
+# Without the patch, TABLE_COMMENT field in INFORMATION_SCHEMA.TABLES will
+# contain error information mentioning that one of the views in sys schema
+# is not a BASE TABLE.
+SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE, TABLE_COMMENT
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = 'sys' AND TABLE_NAME = 'sys_config';
+TABLE_SCHEMA	TABLE_NAME	TABLE_TYPE	TABLE_COMMENT
+sys	sys_config	BASE TABLE	
+CREATE TABLE t1(a INT);
+INSERT INTO t1 VALUES(1);
+CREATE VIEW v1 AS SELECT * FROM t1;
+ANALYZE TABLE t1;
+Table	Op	Msg_type	Msg_text
+test.t1	analyze	status	OK
+SELECT * FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = 'test' AND TABLE_NAME = 'v1';
+TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	TABLE_TYPE	ENGINE	VERSION	ROW_FORMAT	TABLE_ROWS	AVG_ROW_LENGTH	DATA_LENGTH	MAX_DATA_LENGTH	INDEX_LENGTH	DATA_FREE	AUTO_INCREMENT	CREATE_TIME	UPDATE_TIME	CHECK_TIME	TABLE_COLLATION	CHECKSUM	CREATE_OPTIONS	TABLE_COMMENT
+def	test	v1	VIEW	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	#	NULL	NULL	NULL	NULL	NULL	VIEW
+SET OPTIMIZER_SWITCH=default;
+DROP VIEW v1;
+DROP TABLE t1;
+#
+# Bug#30476213 ASSERTION TEMPTABLE..HANDLER..GET_ERROR_MESSAGE
+#
+SET @@SESSION.optimizer_switch="derived_merge=off";
+LOCK TABLE mysql.user READ;
+# Without the fix, this statement fails.
+SELECT * FROM information_schema.ST_GEOMETRY_COLUMNS;
+TABLE_CATALOG	TABLE_SCHEMA	TABLE_NAME	COLUMN_NAME	SRS_NAME	SRS_ID	GEOMETRY_TYPE_NAME
+UNLOCK TABLES;
+#
+# Bug#30764651 ASSERTION "TEMPTABLE..HANDLER..INIT_TABLE_HANDLE_FOR_HANDLER"
+#
+CREATE TABLE t1 (f1 INT);
+FLUSH TABLES t1 FOR EXPORT;
+# Without the fix, this statement fails in debug build.
+SELECT * FROM INFORMATION_SCHEMA.APPLICABLE_ROLES;
+USER	HOST	GRANTEE	GRANTEE_HOST	ROLE_NAME	ROLE_HOST	IS_GRANTABLE	IS_DEFAULT	IS_MANDATORY
+UNLOCK TABLES;
 DROP TABLE t1;

@@ -1,6 +1,6 @@
 /***********************************************************************
 
-Copyright (c) 2010, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2010, 2020, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2012, Facebook Inc.
 
 This program is free software; you can redistribute it and/or modify
@@ -93,11 +93,11 @@ enum monitor_type_t {
   MONITOR_NO_AVERAGE = 4,      /*!< Set this status if we don't want to
                                calculate the average value for the counter */
   MONITOR_DISPLAY_CURRENT = 8, /*!< Display current value of the
-                          counter, rather than incremental value
-                          over the period. Mostly for counters
-                          displaying current resource usage */
+                               counter, rather than incremental value
+                               over the period. Mostly for counters
+                               displaying current resource usage */
   MONITOR_GROUP_MODULE = 16,   /*!< Monitor can be turned on/off
-                            only as a module, but not individually */
+                               only as a module, but not individually */
   MONITOR_DEFAULT_ON = 32,     /*!< Monitor will be turned on by default at
                                server start up */
   MONITOR_SET_OWNER = 64,      /*!< Owner of "monitor set", a set of
@@ -139,10 +139,15 @@ enum monitor_id_t {
   /* Lock manager related counters */
   MONITOR_MODULE_LOCK,
   MONITOR_DEADLOCK,
+  MONITOR_DEADLOCK_FALSE_POSITIVES,
+  MONITOR_DEADLOCK_ROUNDS,
+  MONITOR_LOCK_THREADS_WAITING,
   MONITOR_TIMEOUT,
   MONITOR_LOCKREC_WAIT,
   MONITOR_TABLELOCK_WAIT,
   MONITOR_NUM_RECLOCK_REQ,
+  MONITOR_RECLOCK_RELEASE_ATTEMPTS,
+  MONITOR_RECLOCK_GRANT_ATTEMPTS,
   MONITOR_RECLOCK_CREATED,
   MONITOR_RECLOCK_REMOVED,
   MONITOR_NUM_RECLOCK,
@@ -154,6 +159,7 @@ enum monitor_id_t {
   MONITOR_OVLD_LOCK_MAX_WAIT_TIME,
   MONITOR_OVLD_ROW_LOCK_WAIT,
   MONITOR_OVLD_LOCK_AVG_WAIT_TIME,
+  MONITOR_SCHEDULE_REFRESHES,
 
   /* Buffer and I/O realted counters. */
   MONITOR_MODULE_BUFFER,
@@ -186,6 +192,7 @@ enum monitor_id_t {
   MONITOR_FLUSH_NEIGHBOR_COUNT,
   MONITOR_FLUSH_NEIGHBOR_PAGES,
   MONITOR_FLUSH_N_TO_FLUSH_REQUESTED,
+  MONITOR_FLUSH_N_TO_FLUSH_BY_DIRTY_PAGE,
 
   MONITOR_FLUSH_N_TO_FLUSH_BY_AGE,
   MONITOR_FLUSH_ADAPTIVE_AVG_TIME_SLOT,
@@ -301,6 +308,7 @@ enum monitor_id_t {
   MONITOR_TRX_ROLLBACK_SAVEPOINT,
   MONITOR_TRX_ROLLBACK_ACTIVE,
   MONITOR_TRX_ACTIVE,
+  MONITOR_TRX_ALLOCATIONS,
   MONITOR_TRX_ON_LOG_NO_WAITS,
   MONITOR_TRX_ON_LOG_WAITS,
   MONITOR_TRX_ON_LOG_WAIT_LOOPS,
@@ -318,14 +326,26 @@ enum monitor_id_t {
   MONITOR_DML_PURGE_DELAY,
   MONITOR_PURGE_STOP_COUNT,
   MONITOR_PURGE_RESUME_COUNT,
+  MONITOR_PURGE_TRUNCATE_HISTORY_COUNT,
+  MONITOR_PURGE_TRUNCATE_HISTORY_MICROSECOND,
+
+  /* Undo tablespace truncation */
+  MONITOR_UNDO_TRUNCATE,
+  MONITOR_UNDO_TRUNCATE_COUNT,
+  MONITOR_UNDO_TRUNCATE_START_LOGGING_COUNT,
+  MONITOR_UNDO_TRUNCATE_DONE_LOGGING_COUNT,
+  MONITOR_UNDO_TRUNCATE_MICROSECOND,
 
   /* Recovery related counters */
   MONITOR_MODULE_REDO_LOG,
   MONITOR_OVLD_LSN_FLUSHDISK,
   MONITOR_OVLD_LSN_CHECKPOINT,
   MONITOR_OVLD_LSN_CURRENT,
+  MONITOR_OVLD_LSN_ARCHIVED,
   MONITOR_OVLD_LSN_CHECKPOINT_AGE,
+  MONITOR_OVLD_LSN_BUF_DIRTY_PAGES_ADDED,
   MONITOR_OVLD_BUF_OLDEST_LSN_APPROX,
+  MONITOR_OVLD_BUF_OLDEST_LSN_LWM,
   MONITOR_OVLD_MAX_AGE_ASYNC,
   MONITOR_OVLD_MAX_AGE_SYNC,
   MONITOR_OVLD_LOG_WAITS,
@@ -342,10 +362,14 @@ enum monitor_id_t {
   MONITOR_LOG_PADDED,
   MONITOR_LOG_NEXT_FILE,
   MONITOR_LOG_CHECKPOINTS,
+  MONITOR_LOG_FREE_SPACE,
+  MONITOR_LOG_CONCURRENCY_MARGIN,
 
   MONITOR_LOG_WRITER_NO_WAITS,
   MONITOR_LOG_WRITER_WAITS,
   MONITOR_LOG_WRITER_WAIT_LOOPS,
+  MONITOR_LOG_WRITER_ON_FREE_SPACE_WAITS,
+  MONITOR_LOG_WRITER_ON_ARCHIVER_WAITS,
 
   MONITOR_LOG_FLUSHER_NO_WAITS,
   MONITOR_LOG_FLUSHER_WAITS,
@@ -358,6 +382,8 @@ enum monitor_id_t {
   MONITOR_LOG_FLUSH_NOTIFIER_NO_WAITS,
   MONITOR_LOG_FLUSH_NOTIFIER_WAITS,
   MONITOR_LOG_FLUSH_NOTIFIER_WAIT_LOOPS,
+
+  MONITOR_LOG_WRITE_TO_FILE_REQUESTS_INTERVAL,
 
   MONITOR_LOG_ON_WRITE_NO_WAITS,
   MONITOR_LOG_ON_WRITE_WAITS,
@@ -447,6 +473,15 @@ enum monitor_id_t {
   MONITOR_OLVD_ROW_INSERTED,
   MONITOR_OLVD_ROW_DELETED,
   MONITOR_OLVD_ROW_UPDTATED,
+  MONITOR_OLVD_SYSTEM_ROW_READ,
+  MONITOR_OLVD_SYSTEM_ROW_INSERTED,
+  MONITOR_OLVD_SYSTEM_ROW_DELETED,
+  MONITOR_OLVD_SYSTEM_ROW_UPDATED,
+
+  /* Sampling related counters */
+  MONITOR_MODULE_SAMPLING_STATS,
+  MONITOR_SAMPLED_PAGES_READ,
+  MONITOR_SAMPLED_PAGES_SKIPPED,
 
   /* Data DDL related counters */
   MONITOR_MODULE_DDL_STATS,
@@ -473,6 +508,18 @@ enum monitor_id_t {
   MONITOR_CPU_UTIME_PCT,
   MONITOR_CPU_STIME_PCT,
   MONITOR_CPU_N,
+
+  MONITOR_MODULE_PAGE_TRACK,
+  MONITOR_PAGE_TRACK_RESETS,
+  MONITOR_PAGE_TRACK_PARTIAL_BLOCK_WRITES,
+  MONITOR_PAGE_TRACK_FULL_BLOCK_WRITES,
+  MONITOR_PAGE_TRACK_CHECKPOINT_PARTIAL_FLUSH_REQUEST,
+
+  MONITOR_MODULE_DBLWR,
+  MONITOR_DBLWR_ASYNC_REQUESTS,
+  MONITOR_DBLWR_SYNC_REQUESTS,
+  MONITOR_DBLWR_FLUSH_REQUESTS,
+  MONITOR_DBLWR_FLUSH_WAIT_EVENTS,
 
   /* This is used only for control system to turn
   on/off and reset all monitor counters */
@@ -725,7 +772,7 @@ monitor counter
   MONITOR_CHECK_DEFINED(value);                               \
   if (MONITOR_IS_ON(monitor)) {                               \
     uintmax_t old_time = (value);                             \
-    value = ut_time_us(NULL);                                 \
+    value = ut_time_monotonic_us();                           \
     MONITOR_VALUE(monitor) += (mon_type_t)(value - old_time); \
   }
 

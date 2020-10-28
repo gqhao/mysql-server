@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -26,6 +26,7 @@
 #include "ProcessInfo.hpp"
 #include "OwnProcessInfo.hpp"
 #include <NdbMutex.h>
+#include <ndb_socket.h>
 
 const char * ndb_basename(const char *path);
 
@@ -45,10 +46,11 @@ void setOwnProcessInfoAngelPid(Uint32 pid)
   theApiMutex.unlock();
 }
 
-void setOwnProcessInfoServerAddress(struct in_addr * addr)
+void setOwnProcessInfoServerAddress(struct sockaddr * addr)
 {
   theApiMutex.lock();
-  singletonInfo.setHostAddress(addr);
+  sockaddr_in6 *addr_in6 = (sockaddr_in6 *)addr;
+  singletonInfo.setHostAddress(&addr_in6->sin6_addr);
   theApiMutex.unlock();
 }
 
@@ -86,12 +88,20 @@ void getNameFromEnvironment()
 #endif
 
 
-/* On unix only, if we are not a daemon, and also not a process group leader,
+/* Return angel pid, or zero if no angel.
+   On unix, if we are not a daemon, and also not a process group leader,
    set parent pid as angel pid.
+   On Windows, return MYSQLD_PARENT_PID if set in the environment.
 */
 static Uint32 getParentPidAsAngel()
 {
-#ifndef WIN32
+#ifdef WIN32
+  const char * monitor_pid = getenv("MYSQLD_PARENT_PID");
+  if(monitor_pid)
+  {
+    return atoi(monitor_pid);
+  }
+#else
   pid_t parent_process_id = getppid();
   if((parent_process_id != 1)  && (getpgrp() != singletonInfo.getPid()))
   {

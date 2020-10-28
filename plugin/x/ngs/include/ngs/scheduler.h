@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,16 +22,20 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-#ifndef _NGS_SCHEDULER_H_
-#define _NGS_SCHEDULER_H_
+#ifndef PLUGIN_X_NGS_INCLUDE_NGS_SCHEDULER_H_
+#define PLUGIN_X_NGS_INCLUDE_NGS_SCHEDULER_H_
 
 #include <atomic>
+#include <functional>
 #include <list>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "plugin/x/ngs/include/ngs/memory.h"
 #include "plugin/x/ngs/include/ngs/thread.h"
+#include "plugin/x/src/helper/multithread/cond.h"
+#include "plugin/x/src/helper/multithread/mutex.h"
 
 namespace ngs {
 // Scheduler with dynamic thread pool.
@@ -47,10 +51,10 @@ class Scheduler_dynamic {
     virtual void on_task_end() = 0;
   };
 
-  typedef ngs::function<void()> Task;
+  typedef std::function<void()> Task;
 
-  Scheduler_dynamic(const char *name,
-                    PSI_thread_key thread_key = PSI_NOT_INSTRUMENTED);
+  Scheduler_dynamic(const char *name, PSI_thread_key thread_key,
+                    std::unique_ptr<Monitor_interface> monitor = {});
   virtual ~Scheduler_dynamic();
 
   virtual void launch();
@@ -59,12 +63,9 @@ class Scheduler_dynamic {
   void set_idle_worker_timeout(unsigned long long milliseconds);
   bool post(Task *task);
   bool post(const Task &task);
-  bool post_and_wait(const Task &task);
 
   virtual bool thread_init() { return true; }
   virtual void thread_end();
-
-  void set_monitor(Monitor_interface *monitor);
 
   bool is_worker_thread(my_thread_t thread_id);
   bool is_running();
@@ -98,7 +99,7 @@ class Scheduler_dynamic {
     }
 
     bool remove_if(Element_type &result,
-                   ngs::function<bool(Element_type &)> matches) {
+                   std::function<bool(Element_type &)> matches) {
       MUTEX_LOCK(guard, m_access_mutex);
       for (typename std::list<Element_type>::iterator it = m_list.begin();
            it != m_list.end(); ++it) {
@@ -113,7 +114,7 @@ class Scheduler_dynamic {
     }
 
    private:
-    Mutex m_access_mutex;
+    xpl::Mutex m_access_mutex;
     std::list<Element_type> m_list;
   };
 
@@ -131,17 +132,17 @@ class Scheduler_dynamic {
   }
 
   bool wait_if_idle_then_delete_worker(ulonglong &thread_waiting_started);
-  int32 increase_workers_count();
-  int32 decrease_workers_count();
-  int32 increase_tasks_count();
-  int32 decrease_tasks_count();
+  int32_t increase_workers_count();
+  int32_t decrease_workers_count();
+  int32_t increase_tasks_count();
+  int32_t decrease_tasks_count();
 
   const std::string m_name;
-  Mutex m_worker_pending_mutex;
-  Cond m_worker_pending_cond;
-  Mutex m_thread_exit_mutex;
-  Cond m_thread_exit_cond;
-  Mutex m_post_mutex;
+  xpl::Mutex m_worker_pending_mutex;
+  xpl::Cond m_worker_pending_cond;
+  xpl::Mutex m_thread_exit_mutex;
+  xpl::Cond m_thread_exit_cond;
+  xpl::Mutex m_post_mutex;
   volatile std::atomic<int32> m_is_running;
   volatile std::atomic<int32> m_min_workers_count;
   volatile std::atomic<int32> m_workers_count;
@@ -150,9 +151,9 @@ class Scheduler_dynamic {
   lock_list<Task *> m_tasks;
   lock_list<Thread_t> m_threads;
   lock_list<my_thread_t> m_terminating_workers;
-  ngs::Memory_instrumented<Monitor_interface>::Unique_ptr m_monitor;
+  std::unique_ptr<Monitor_interface> m_monitor;
   PSI_thread_key m_thread_key;
 };
 }  // namespace ngs
 
-#endif
+#endif  // PLUGIN_X_NGS_INCLUDE_NGS_SCHEDULER_H_

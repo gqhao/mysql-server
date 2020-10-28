@@ -2,6 +2,7 @@
 
 --source include/have_ndb.inc
 --source suite/ndb/include/ndb_find_tools.inc
+--source suite/ndb/include/backup_restore_setup.inc
 
 --echo Testing ndbinfo_select_all
 --error 1
@@ -61,8 +62,11 @@ drop table t1;
 --echo Testing ndb_show_tables
 --error 1
 --exec $NDB_SHOW_TABLES --ndb-connectstring=no_such_host --connect-retry-delay=1 --connect-retries=3
+--echo
 
 --echo Testing ndb_waiter
 --replace_regex /line.*/line=no_such_host/
 --error 1
 --exec $NDB_WAITER --ndb-connectstring=no_such_host --connect-retry-delay=1 --connect-retries=3
+--source suite/ndb/include/backup_restore_cleanup.inc
+--remove_file $NDB_TOOLS_OUTPUT

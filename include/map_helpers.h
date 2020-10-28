@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -23,6 +23,7 @@
 #ifndef MAP_HELPERS_INCLUDED
 #define MAP_HELPERS_INCLUDED
 
+#include <map>
 #include <memory>
 #include <string>
 #include <type_traits>
@@ -33,7 +34,7 @@
 #include "m_ctype.h"
 #include "my_inttypes.h"
 #include "sql/malloc_allocator.h"
-#include "sql/memroot_allocator.h"
+#include "sql/mem_root_allocator.h"
 #include "template_utils.h"
 
 /**
@@ -139,7 +140,7 @@ class Collation_hasher {
       : cs(cs_arg), hash_sort(cs->coll->hash_sort) {}
 
   size_t operator()(const std::string &s) const {
-    ulong nr1 = 1, nr2 = 4;
+    uint64 nr1 = 1, nr2 = 4;
     hash_sort(cs, pointer_cast<const uchar *>(s.data()), s.size(), &nr1, &nr2);
     return nr1;
   }
@@ -274,21 +275,77 @@ class collation_unordered_set
                            Malloc_allocator<Key>>(
             /*bucket_count=*/10, Collation_hasher(cs), Collation_key_equal(cs),
             Malloc_allocator<>(psi_key)) {}
+  collation_unordered_set(std::initializer_list<Key> il, CHARSET_INFO *cs,
+                          PSI_memory_key psi_key)
+      : std::unordered_set<Key, Collation_hasher, Collation_key_equal,
+                           Malloc_allocator<Key>>(
+            il, /*bucket_count=*/10, Collation_hasher(cs),
+            Collation_key_equal(cs), Malloc_allocator<>(psi_key)) {}
 };
 
 /** std::unordered_set, but allocated on a MEM_ROOT.  */
 template <class Key, class Hash = std::hash<Key>,
           class KeyEqual = std::equal_to<Key>>
-class memroot_unordered_set
-    : public std::unordered_set<Key, Hash, KeyEqual, Memroot_allocator<Key>> {
+class mem_root_unordered_set
+    : public std::unordered_set<Key, Hash, KeyEqual, Mem_root_allocator<Key>> {
  public:
   /*
     In theory, we should be allowed to send in the allocator only, but GCC 4.8
     is missing several unordered_set constructors, so let's give in everything.
   */
-  memroot_unordered_set(MEM_ROOT *mem_root)
-      : std::unordered_set<Key, Hash, KeyEqual, Memroot_allocator<Key>>(
+  mem_root_unordered_set(MEM_ROOT *mem_root)
+      : std::unordered_set<Key, Hash, KeyEqual, Mem_root_allocator<Key>>(
             /*bucket_count=*/10, Hash(), KeyEqual(),
-            Memroot_allocator<Key>(mem_root)) {}
+            Mem_root_allocator<Key>(mem_root)) {}
 };
+
+/**
+  std::unordered_map, but allocated on a MEM_ROOT.
+*/
+template <class Key, class Value, class Hash = std::hash<Key>,
+          class KeyEqual = std::equal_to<Key>>
+class mem_root_unordered_map
+    : public std::unordered_map<
+          Key, Value, Hash, KeyEqual,
+          Mem_root_allocator<std::pair<const Key, Value>>> {
+ public:
+  mem_root_unordered_map(MEM_ROOT *mem_root)
+      : std::unordered_map<Key, Value, Hash, KeyEqual,
+                           Mem_root_allocator<std::pair<const Key, Value>>>(
+            /*bucket_count=*/10, Hash(), KeyEqual(),
+            Mem_root_allocator<std::pair<const Key, Value>>(mem_root)) {}
+};
+
+// std::unordered_multimap, but allocated on a MEM_ROOT.
+template <class Key, class Value, class Hash,
+          class KeyEqual = std::equal_to<Key>>
+class mem_root_unordered_multimap
+    : public std::unordered_multimap<
+          Key, Value, Hash, KeyEqual,
+          Mem_root_allocator<std::pair<const Key, Value>>> {
+ public:
+  mem_root_unordered_multimap(MEM_ROOT *mem_root, Hash hash)
+      : std::unordered_multimap<
+            Key, Value, Hash, KeyEqual,
+            Mem_root_allocator<std::pair<const Key, Value>>>(
+            /*bucket_count=*/10, hash, KeyEqual(),
+            Mem_root_allocator<std::pair<const Key, Value>>(mem_root)) {}
+};
+
+/**
+  std::unordered_map, but collation aware and allocated on a MEM_ROOT.
+*/
+template <class Key, class Value>
+class mem_root_collation_unordered_map
+    : public std::unordered_map<
+          Key, Value, Collation_hasher, Collation_key_equal,
+          Mem_root_allocator<std::pair<const Key, Value>>> {
+ public:
+  mem_root_collation_unordered_map(const CHARSET_INFO *cs, MEM_ROOT *mem_root)
+      : std::unordered_map<Key, Value, Collation_hasher, Collation_key_equal,
+                           Mem_root_allocator<std::pair<const Key, Value>>>(
+            /*bucket_count=*/10, Collation_hasher(cs), Collation_key_equal(cs),
+            Mem_root_allocator<std::pair<const Key, Value>>(mem_root)) {}
+};
+
 #endif  // MAP_HELPERS_INCLUDED

@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -34,11 +34,11 @@ namespace gcs_xcom_packet_unittest {
 
 class GcsPacketTest : public GcsBaseTest {
  protected:
-  GcsPacketTest(){};
+  GcsPacketTest() {}
 
-  virtual void SetUp() { lz4_stage = new Gcs_message_stage_lz4(1024); }
+  void SetUp() override { lz4_stage = new Gcs_message_stage_lz4(true, 1024); }
 
-  virtual void TearDown() { delete lz4_stage; }
+  void TearDown() override { delete lz4_stage; }
 
   Gcs_message_stage_lz4 *lz4_stage;
 
@@ -48,60 +48,58 @@ class GcsPacketTest : public GcsBaseTest {
 };
 
 const unsigned long long GcsPacketTest::LARGE_PAYLOAD_LEN =
-    1024 + Gcs_internal_message_header::WIRE_FIXED_HEADER_SIZE;
+    1024 + Gcs_internal_message_header::WIRE_TOTAL_FIXED_HEADER_SIZE;
 const unsigned long long GcsPacketTest::SMALL_PAYLOAD_LEN =
-    1024 - Gcs_internal_message_header::WIRE_FIXED_HEADER_SIZE;
+    1024 - Gcs_internal_message_header::WIRE_TOTAL_FIXED_HEADER_SIZE;
 
 TEST_F(GcsPacketTest, PacketInit) {
-  char content[] = "OLA123";
+  const char content[] = "OLA123";
   unsigned int content_len = sizeof(content);
 
+  /*
+   Simulate a message that was prepared by an upper layer such as group
+   replication.
+   */
   Gcs_member_identifier origin(std::string("luis"));
   Gcs_message msg(origin, new Gcs_message_data(0, content_len));
-  Gcs_internal_message_header::enum_cargo_type cargo =
-      Gcs_internal_message_header::CT_INTERNAL_STATE_EXCHANGE;
+  Cargo_type cargo = Cargo_type::CT_INTERNAL_STATE_EXCHANGE;
   msg.get_message_data().append_to_payload((const unsigned char *)content,
                                            content_len);
 
+  /*
+   Create an internal gcs message that will be eventually delivered to
+   the group communication layer.
+   */
   Gcs_message_data &msg_data = msg.get_message_data();
-  unsigned long long len =
-      msg_data.get_header_length() + msg_data.get_payload_length();
-  Gcs_packet p(len);
-  uint64_t buffer_size = p.get_capacity();
-  unsigned long long payload_len;
-  Gcs_internal_message_header gcs_hd;
+  unsigned long long payload_length = msg_data.get_encode_size();
 
-  ASSERT_NE(p.get_buffer(), (void *)NULL);
+  bool packet_ok;
+  Gcs_packet p;
+  std::tie(packet_ok, p) = Gcs_packet::make_outgoing_packet(
+      cargo, Gcs_protocol_version::V1, {}, {}, payload_length);
+  ASSERT_TRUE(packet_ok);
 
-  // insert the payload
-  msg_data.encode(
-      p.get_buffer() + Gcs_internal_message_header::WIRE_FIXED_HEADER_SIZE,
-      &buffer_size);
+  /*
+   Encode the payload encapsulated in the group replication message into
+   the gcs message.
+   */
+  uint64_t buffer_size = p.get_payload_length();
+  ASSERT_FALSE(msg_data.encode(p.get_payload_pointer(), &buffer_size));
 
-  payload_len = buffer_size;
+  ASSERT_EQ(p.get_payload_length(), payload_length);
+  ASSERT_EQ(p.get_total_length(),
+            payload_length +
+                Gcs_internal_message_header::WIRE_TOTAL_FIXED_HEADER_SIZE);
 
-  // fix the header
-  gcs_hd.set_msg_length(payload_len +
-                        Gcs_internal_message_header::WIRE_FIXED_HEADER_SIZE);
-  gcs_hd.set_dynamic_headers_length(0);
-  gcs_hd.set_cargo_type(cargo);
-  gcs_hd.encode(p.get_buffer());
-
-  // set the headers
-  p.reload_header(gcs_hd);
-
-  ASSERT_EQ(p.get_payload_length(), payload_len);
-  ASSERT_EQ(p.get_length(),
-            payload_len + Gcs_internal_message_header::WIRE_FIXED_HEADER_SIZE);
-  ASSERT_GE(p.get_capacity(), p.BLOCK_SIZE);
-
+  /*
+   Decode the payload from the gcs message into the group replication
+   message.
+   */
   Gcs_message_data msg_decoded(p.get_payload_length());
-  msg_decoded.decode(p.get_payload(), p.get_payload_length());
+  msg_decoded.decode(p.get_payload_pointer(), p.get_payload_length());
 
   ASSERT_TRUE(strncmp((const char *)msg_decoded.get_payload(),
                       (const char *)content, content_len) == 0);
-
-  free(p.get_buffer());
 }
 
 }  // namespace gcs_xcom_packet_unittest

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2010, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -30,10 +30,10 @@
 #include <unordered_map>
 #include <utility>
 
-#include "binary_log_types.h"
 #include "m_ctype.h"
 #include "m_string.h"  // strmake
 #include "map_helpers.h"
+#include "mutex_lock.h"  // Mutex_lock
 #include "my_byteorder.h"
 #include "my_command.h"
 #include "my_dbug.h"
@@ -68,7 +68,9 @@
 #include "sql/rpl_group_replication.h"  // is_group_replication_running
 #include "sql/rpl_gtid.h"
 #include "sql/rpl_handler.h"  // RUN_HOOK
-#include "sql/sql_class.h"    // THD
+#include "sql/rpl_utility.h"
+#include "sql/sql_class.h"  // THD
+#include "sql/sql_lex.h"
 #include "sql/sql_list.h"
 #include "sql/system_variables.h"
 #include "sql_string.h"
@@ -76,7 +78,7 @@
 #include "typelib.h"
 
 int max_binlog_dump_events = 0;  // unlimited
-bool opt_sporadic_binlog_dump_fail = 0;
+bool opt_sporadic_binlog_dump_fail = false;
 
 malloc_unordered_map<uint32, unique_ptr_my_free<SLAVE_INFO>> slave_list{
     key_memory_SLAVE_INFO};
@@ -89,7 +91,7 @@ extern TYPELIB binlog_checksum_typelib;
       my_error(ER_MALFORMED_PACKET, MYF(0));     \
       return 1;                                  \
     }                                            \
-    len = (uint)*p++;                            \
+    len = net_field_length_ll(&p);               \
     if (p + len > p_end || len >= sizeof(obj)) { \
       errmsg = msg;                              \
       goto err;                                  \
@@ -145,7 +147,8 @@ int register_slave(THD *thd, uchar *packet, size_t packet_length) {
   uchar *p = packet, *p_end = packet + packet_length;
   const char *errmsg = "Wrong parameters to function register_slave";
 
-  if (check_access(thd, REPL_SLAVE_ACL, any_db, NULL, NULL, 0, 0)) return 1;
+  if (check_access(thd, REPL_SLAVE_ACL, any_db, nullptr, nullptr, false, false))
+    return 1;
 
   unique_ptr_my_free<SLAVE_INFO> si((SLAVE_INFO *)my_malloc(
       key_memory_SLAVE_INFO, sizeof(SLAVE_INFO), MYF(MY_WME)));
@@ -188,7 +191,7 @@ err:
 }
 
 void unregister_slave(THD *thd, bool only_mine, bool need_lock_slave_list) {
-  if (thd->server_id) {
+  if (thd->server_id && slave_list_inited) {
     if (need_lock_slave_list)
       mysql_mutex_lock(&LOCK_slave_list);
     else
@@ -212,23 +215,27 @@ void unregister_slave(THD *thd, bool only_mine, bool need_lock_slave_list) {
   @retval true failure
 */
 bool show_slave_hosts(THD *thd) {
-  List<Item> field_list;
+  mem_root_deque<Item *> field_list(thd->mem_root);
   Protocol *protocol = thd->get_protocol();
-  DBUG_ENTER("show_slave_hosts");
+  DBUG_TRACE;
 
-  field_list.push_back(new Item_return_int("Server_id", 10, MYSQL_TYPE_LONG));
-  field_list.push_back(new Item_empty_string("Host", 20));
+  field_list.push_back(new Item_return_int("Server_Id", 10, MYSQL_TYPE_LONG));
+  field_list.push_back(new Item_empty_string("Host", HOSTNAME_LENGTH));
   if (opt_show_slave_auth_info) {
-    field_list.push_back(new Item_empty_string("User", 20));
+    field_list.push_back(new Item_empty_string("User", USERNAME_CHAR_LENGTH));
     field_list.push_back(new Item_empty_string("Password", 20));
   }
   field_list.push_back(new Item_return_int("Port", 7, MYSQL_TYPE_LONG));
-  field_list.push_back(new Item_return_int("Master_id", 10, MYSQL_TYPE_LONG));
-  field_list.push_back(new Item_empty_string("Slave_UUID", UUID_LENGTH));
+  field_list.push_back(new Item_return_int("Source_Id", 10, MYSQL_TYPE_LONG));
+  field_list.push_back(new Item_empty_string("Replica_UUID", UUID_LENGTH));
 
-  if (thd->send_result_metadata(&field_list,
+  // TODO: once the old syntax is removed, remove this as well.
+  if (thd->lex->is_replication_deprecated_syntax_used())
+    rename_fields_use_old_replica_source_terms(thd, field_list);
+
+  if (thd->send_result_metadata(field_list,
                                 Protocol::SEND_NUM_ROWS | Protocol::SEND_EOF))
-    DBUG_RETURN(true);
+    return true;
 
   mysql_mutex_lock(&LOCK_slave_list);
 
@@ -250,12 +257,12 @@ bool show_slave_hosts(THD *thd) {
       protocol->store(slave_uuid.c_ptr_safe(), &my_charset_bin);
     if (protocol->end_row()) {
       mysql_mutex_unlock(&LOCK_slave_list);
-      DBUG_RETURN(true);
+      return true;
     }
   }
   mysql_mutex_unlock(&LOCK_slave_list);
   my_eof(thd);
-  DBUG_RETURN(false);
+  return false;
 }
 
 /* clang-format off */
@@ -362,7 +369,7 @@ bool show_slave_hosts(THD *thd) {
   @ref sect_protocol_replication_event_start_v3.
 
   <table>
-  <caption>Binlog::FORMAT_DESCRIPTION_EVENT:</caption>
+  <caption>Payload</caption>
   <tr><th>Type</th><th>Name</th><th>Description</th></tr>
   <tr><td>@ref a_protocol_type_int2 "int&lt;2&gt;"</td>
       <td>binlog-version</td>
@@ -483,10 +490,67 @@ bool show_slave_hosts(THD *thd) {
   For mysql-5.5.2-m2 it is `0x1b` (`27`).
 
   @subsection sect_protocol_replication_event_stop STOP_EVENT
+
+  A @ref sect_protocol_replication_event_stop has not payload or post-header
+
   @subsection sect_protocol_replication_event_rotate ROTATE_EVENT
+
+  The rotate event is added to the binlog as last event to tell the reader what
+  binlog to request next.
+
+  <table>
+  <caption>Post-header</caption>
+  <tr><th>Type</th><th>Name</th><th>Description</th></tr>
+  <tr><td colspan="3">if binlog-version > 1 {</td></tr>
+  <tr><td>@ref a_protocol_type_int8 "int&lt;8&gt;"</td>
+      <td>position</td>
+      <td></td></tr>
+  <tr><td colspan="3">}</td></tr>
+  </table>
+
+  <table>
+  <caption>Payload</caption>
+  <tr><th>Type</th><th>Name</th><th>Description</th></tr>
+  <tr><td>@ref sect_protocol_basic_dt_string_eof "string&lt;EOF&gt;"</td>
+      <td>binlog</td>
+      <td>name of the next binlog</td></tr>
+  </table>
+
   @subsection sect_protocol_replication_event_slave SLAVE_EVENT
+
+  @note Ignored !
+
   @subsection sect_protocol_replication_event_incident INCIDENT_EVENT
+
+  <table>
+  <caption>Payload</caption>
+  <tr><th>Type</th><th>Name</th><th>Description</th></tr>
+  <tr><td>@ref a_protocol_type_int2 "int&lt;2&gt;"</td>
+      <td>type</td>
+      <td>
+         <table>
+         <tr><th>Hex</th><th>Name</th></tr>
+         <tr><td>0x0000</td><td>INCIDENT_NONE</td></tr>
+         <tr><td>0x0001</td><td>INCIDENT_LOST_EVENTS</td></tr>
+      </td></tr>
+  <tr><td>@ref a_protocol_type_int1 "int&lt;1&gt;"</td>
+      <td>message_length</td>
+      <td>Length of `message`</td></tr>
+  <tr><td>@ref sect_protocol_basic_dt_string_var "binary&lt;var&gt;"</td>
+      <td>message</td>
+      <td>Incident message with length `message_length`</td></tr>
+  </table>
+
   @subsection sect_protocol_replication_event_heartbeat HEARTBEAT_EVENT
+
+  An artificial event genereted by the master. It isn't written to the relay
+  logs.
+
+  It is added by the master after the replication connection was idle for
+  `x` seconds to update the slave's `Seconds_behind_master timestamp in the
+  SHOW SLAVE STATUS output.
+
+  It has no payload nor post-header.
 
   @section sect_protocol_replication_binlog_event_sbr Statement Based Replication Events
 
@@ -495,6 +559,212 @@ bool show_slave_hosts(THD *thd) {
   connection's state on the slave side.
 
   @subsection sect_protocol_replication_event_query QUERY_EVENT
+
+  The query event is used to send text queries through the binlod
+
+  <table>
+  <caption>Post-header</caption>
+  <tr><th>Type</th><th>Name</th><th>Description</th></tr>
+  <tr><td>@ref a_protocol_type_int4 "int&lt;4&gt;"</td>
+      <td>slave_proxy_id</td>
+      <td></td></tr>
+  <tr><td>@ref a_protocol_type_int4 "int&lt;4&gt;"</td>
+      <td>execution time</td>
+      <td></td></tr>
+  <tr><td>@ref a_protocol_type_int1 "int&lt;1&gt;"</td>
+      <td>schema length</td>
+      <td></td></tr>
+  <tr><td>@ref a_protocol_type_int2 "int&lt;2&gt;"</td>
+      <td>error code</td>
+      <td></td></tr>
+  <tr><td colspan="3">if binlog-version >= 4 {</td></tr>
+  <tr><td>@ref a_protocol_type_int2 "int&lt;2&gt;"</td>
+      <td>status_vars length</td>
+      <td>Number of bytes in the following sequence of `status_vars`</td></tr>
+  <tr><td colspan="3">}</td></tr>
+  </table>
+
+  <table>
+  <caption>Payload</caption>
+  <tr><th>Type</th><th>Name</th><th>Description</th></tr>
+  <tr><td>@ref sect_protocol_basic_dt_string_var "binary&lt;var&gt;"</td>
+  <td>status-vars</td>
+  <td>A sequence of status key/value pairs. The key is 1-byte, while the
+  value is dependent on the key
+  <table>
+  <tr><th>Hex</th><th>Flag</th><th>Value Length</th></tr>
+  <tr><td>0x00</td><td>@ref sect_protocol_replication_event_query_00 "Q_FLAGS2_CODE"</td>
+    <td>4</td></tr>
+  <tr><td>0x01</td><td>@ref sect_protocol_replication_event_query_01 "Q_SQL_MODE_CODE"</td>
+    <td>8</td></tr>
+  <tr><td>0x02</td><td>@ref sect_protocol_replication_event_query_02 "Q_AUTO_INCREMENT"</td>
+    <td>1 + n + 1</td></tr>
+  <tr><td>0x03</td><td>@ref sect_protocol_replication_event_query_03 "Q_CATALOG"</td>
+    <td>2 + 2</td></tr>
+  <tr><td>0x04</td><td>@ref sect_protocol_replication_event_query_04 "Q_CHARSET_CODE"</td>
+    <td>2 + 2 + 2</td></tr>
+  <tr><td>0x05</td><td>@ref sect_protocol_replication_event_query_05 "Q_TIME_ZONE_CODE"</td>
+    <td>1 + 1</td></tr>
+  <tr><td>0x06</td><td>@ref sect_protocol_replication_event_query_06 "Q_CATALOG_NZ_CODE"</td>
+    <td>1 + n</td></tr>
+  <tr><td>0x07</td><td>@ref sect_protocol_replication_event_query_07 "Q_LC_TIME_NAMES_CODE"</td>
+    <td>2</td></tr>
+  <tr><td>0x08</td><td>@ref sect_protocol_replication_event_query_08 "Q_CHARSET_DATABASE_CODE"</td>
+    <td>2</td></tr>
+  <tr><td>0x09</td><td>@ref sect_protocol_replication_event_query_09 "Q_TABLE_MAP_FOR_UPDATE_CODE"</td>
+    <td>8</td></tr>
+  <tr><td>0x0a</td><td>@ref sect_protocol_replication_event_query_0a "Q_MASTER_DATA_WRITTEN_CODE"</td>
+    <td>4</td></tr>
+  <tr><td>0x0b</td><td>@ref sect_protocol_replication_event_query_0b "Q_INVOKERS"</td>
+    <td>1 + n + 1 + n</td></tr>
+  <tr><td>0x0c</td><td>@ref sect_protocol_replication_event_query_0c "Q_UPDATED_DB_NAMES"</td>
+    <td>1 + n*nul-term-string</td></tr>
+  <tr><td>0x0d</td><td>@ref sect_protocol_replication_event_query_0d "Q_MICROSECONDS"</td>
+    <td>3</td></tr>
+  </table>
+
+  The value of the different status vars are:
+
+  @anchor sect_protocol_replication_event_query_00 <b>Q_FLAGS2_CODE</b>
+
+  Bitmask of flags that are usually set with the SET command:
+
+  * SQL_AUTO_IS_NULL
+  * FOREIGN_KEY_CHECKS
+  * UNIQUE_CHECKS
+  * AUTOCOMMIT
+
+  <table>
+    <tr><th>Hex</th><th>Flag</th></tr>
+    <tr><td>0x00004000</td><td>::OPTION_AUTO_IS_NULL</td></tr>
+    <tr><td>0x00080000</td><td>::OPTION_NOT_AUTOCOMMIT</td></tr>
+    <tr><td>0x04000000</td><td>::OPTION_NO_FOREIGN_KEY_CHECKS</td></tr>
+    <tr><td>0x08000000</td><td>::OPTION_RELAXED_UNIQUE_CHECKS</td></tr>
+  </table>
+
+  @anchor sect_protocol_replication_event_query_01 <b>Q_SQL_MODE_CODE</b>
+
+  Bitmask of flags that are usually set with SET sql_mode:
+
+  <table>
+    <tr><th>Hex</th><th>Flag</th></tr>
+    <tr><td>0x00000001</td><td>::MODE_REAL_AS_FLOAT</td></tr>
+    <tr><td>0x00000002</td><td>::MODE_PIPES_AS_CONCAT</td></tr>
+    <tr><td>0x00000004</td><td>::MODE_ANSI_QUOTES</td></tr>
+    <tr><td>0x00000008</td><td>::MODE_IGNORE_SPACE</td></tr>
+    <tr><td>0x00000010</td><td>::MODE_NOT_USED</td></tr>
+    <tr><td>0x00000020</td><td>::MODE_ONLY_FULL_GROUP_BY</td></tr>
+    <tr><td>0x00000040</td><td>::MODE_NO_UNSIGNED_SUBTRACTION</td></tr>
+    <tr><td>0x00000080</td><td>::MODE_NO_DIR_IN_CREATE</td></tr>
+    <tr><td>0x00000100</td><td>MODE_POSTGRESQL</td></tr>
+    <tr><td>0x00000200</td><td>MODE_ORACLE</td></tr>
+    <tr><td>0x00000400</td><td>MODE_MSSQL</td></tr>
+    <tr><td>0x00000800</td><td>MODE_DB2</td></tr>
+    <tr><td>0x00001000</td><td>MODE_MAXDB</td></tr>
+    <tr><td>0x00002000</td><td>MODE_NO_KEY_OPTIONS</td></tr>
+    <tr><td>0x00004000</td><td>MODE_NO_TABLE_OPTIONS</td></tr>
+    <tr><td>0x00008000</td><td>MODE_NO_FIELD_OPTIONS</td></tr>
+    <tr><td>0x00010000</td><td>MODE_MYSQL323</td></tr>
+    <tr><td>0x00020000</td><td>MODE_MYSQL40</td></tr>
+    <tr><td>0x00040000</td><td>::MODE_ANSI</td></tr>
+    <tr><td>0x00080000</td><td>::MODE_NO_AUTO_VALUE_ON_ZERO</td></tr>
+    <tr><td>0x00100000</td><td>::MODE_NO_BACKSLASH_ESCAPES</td></tr>
+    <tr><td>0x00200000</td><td>::MODE_STRICT_TRANS_TABLES</td></tr>
+    <tr><td>0x00400000</td><td>::MODE_STRICT_ALL_TABLES</td></tr>
+    <tr><td>0x00800000</td><td>::MODE_NO_ZERO_IN_DATE</td></tr>
+    <tr><td>0x01000000</td><td>::MODE_NO_ZERO_DATE</td></tr>
+    <tr><td>0x02000000</td><td>::MODE_INVALID_DATES</td></tr>
+    <tr><td>0x04000000</td><td>::MODE_ERROR_FOR_DIVISION_BY_ZERO</td></tr>
+    <tr><td>0x08000000</td><td>::MODE_TRADITIONAL</td></tr>
+    <tr><td>0x10000000</td><td>MODE_NO_AUTO_CREATE_USER</td></tr>
+    <tr><td>0x20000000</td><td>::MODE_HIGH_NOT_PRECEDENCE</td></tr>
+    <tr><td>0x40000000</td><td>::MODE_NO_ENGINE_SUBSTITUTION</td></tr>
+    <tr><td>0x80000000</td><td>::MODE_PAD_CHAR_TO_FULL_LENGTH</td></tr>
+  </table>
+
+  @anchor sect_protocol_replication_event_query_02 <b>Q_AUTO_INCREMENT</b>
+
+  2 byte autoincrement-increment and 2 byte autoincrement-offset
+
+  @note Only written if the -increment is > 1
+
+
+  @anchor sect_protocol_replication_event_query_03 <b>Q_CATALOG</b>
+
+  1 byte length + &lt;length&gt; chars of the cataiog + &lsquo;0&lsquo;-char
+
+  @note Oly written if length > 0
+
+
+  @anchor sect_protocol_replication_event_query_04 <b>Q_CHARSET_CODE</b>
+
+  2 bytes character_set_client + 2 bytes collation_connection + 2 bytes collation_server
+
+  See @ref page_protocol_basic_character_set
+
+
+  @anchor sect_protocol_replication_event_query_05 <b>Q_TIME_ZONE_CODE</b>
+
+  1 byte length + &lt;length&gt; chars of the timezone.
+
+  Timezone the master is in.
+
+  @note only written when length > 0
+
+
+  @anchor sect_protocol_replication_event_query_06 <b>Q_CATALOG_NZ_CODE</b>
+
+  1 byte length + &lt;length&gt; chars of the catalog.
+
+  @note only written when length > 0
+
+
+  @anchor sect_protocol_replication_event_query_07 <b>Q_LC_TIME_NAMES_CODE</b>
+
+  LC_TIME of the server. Defines how to parse week-, month and day-names in timestamps
+
+  @note only written when length > 0
+
+
+  @anchor sect_protocol_replication_event_query_08 <b>Q_CHARSET_DATABASE_CODE</b>
+
+  character set and collation of the schema
+
+
+  @anchor sect_protocol_replication_event_query_09 <b>Q_TABLE_MAP_FOR_UPDATE_CODE</b>
+
+  a 64bit field ... should only be used in @ref sect_protocol_replication_binlog_event_rbr
+  and multi-table updates
+
+
+  @anchor sect_protocol_replication_event_query_0a <b>Q_MASTER_DATA_WRITTEN_CODE</b>
+
+  4 byte ...
+
+
+  @anchor sect_protocol_replication_event_query_0b <b>Q_INVOKERS</b>
+
+  1 byte length + &lt;length&gt; bytes username and 1 byte length + &lt;length&gt; bytes hostname
+
+
+  @anchor sect_protocol_replication_event_query_0c <b>Q_UPDATED_DB_NAMES</b>
+
+  1 byte count + &lt;count&gt; \0 terminated string
+
+
+  @anchor sect_protocol_replication_event_query_0d <b>Q_MICROSECONDS</b>
+
+  3 byte microseconds
+
+  </td></tr>
+  <tr><td>@ref sect_protocol_basic_dt_string_var "binary&lt;var&gt;"</td>
+      <td>schema</td>
+      <td></td></tr>
+  <tr><td>@ref sect_protocol_basic_dt_string_eof "binary&lt;eof&gt;"</td>
+      <td>query</td>
+      <td>text of the query</td></tr>
+  </table>
+
   @subsection sect_protocol_replication_event_intvar INTVAR_EVENT
   @subsection sect_protocol_replication_event_rand RAND_EVENT
   @subsection sect_protocol_replication_event_uservar USER_VAR_EVENT
@@ -644,15 +914,16 @@ bool show_slave_hosts(THD *thd) {
   } while (0)
 
 bool com_binlog_dump(THD *thd, char *packet, size_t packet_length) {
-  DBUG_ENTER("com_binlog_dump");
+  DBUG_TRACE;
   ulong pos;
   ushort flags = 0;
   const uchar *packet_position = (uchar *)packet;
   size_t packet_bytes_todo = packet_length;
 
+  DBUG_ASSERT(!thd->status_var_aggregated);
   thd->status_var.com_other++;
   thd->enable_slow_log = opt_log_slow_admin_statements;
-  if (check_global_access(thd, REPL_SLAVE_ACL)) DBUG_RETURN(false);
+  if (check_global_access(thd, REPL_SLAVE_ACL)) return false;
 
   /*
     4 bytes is too little, but changing the protocol would break
@@ -670,20 +941,20 @@ bool com_binlog_dump(THD *thd, char *packet, size_t packet_length) {
 
   query_logger.general_log_print(thd, thd->get_command(), "Log: '%s'  Pos: %ld",
                                  packet + 10, (long)pos);
-  mysql_binlog_send(thd, thd->mem_strdup(packet + 10), (my_off_t)pos, NULL,
+  mysql_binlog_send(thd, thd->mem_strdup(packet + 10), (my_off_t)pos, nullptr,
                     flags);
 
   unregister_slave(thd, true, true /*need_lock_slave_list=true*/);
   /*  fake COM_QUIT -- if we get here, the thread needs to terminate */
-  DBUG_RETURN(true);
+  return true;
 
 error_malformed_packet:
   my_error(ER_MALFORMED_PACKET, MYF(0));
-  DBUG_RETURN(true);
+  return true;
 }
 
 bool com_binlog_dump_gtid(THD *thd, char *packet, size_t packet_length) {
-  DBUG_ENTER("com_binlog_dump_gtid");
+  DBUG_TRACE;
   /*
     Before going GA, we need to make this protocol extensible without
     breaking compatitibilty. /Alfranio.
@@ -693,48 +964,50 @@ bool com_binlog_dump_gtid(THD *thd, char *packet, size_t packet_length) {
   uint64 pos = 0;
   char name[FN_REFLEN + 1];
   uint32 name_size = 0;
-  char *gtid_string = NULL;
+  char *gtid_string = nullptr;
   const uchar *packet_position = (uchar *)packet;
   size_t packet_bytes_todo = packet_length;
   Sid_map sid_map(
-      NULL /*no sid_lock because this is a completely local object*/);
+      nullptr /*no sid_lock because this is a completely local object*/);
   Gtid_set slave_gtid_executed(&sid_map);
 
+  DBUG_ASSERT(!thd->status_var_aggregated);
   thd->status_var.com_other++;
   thd->enable_slow_log = opt_log_slow_admin_statements;
-  if (check_global_access(thd, REPL_SLAVE_ACL)) DBUG_RETURN(false);
+  if (check_global_access(thd, REPL_SLAVE_ACL)) return false;
 
   READ_INT(flags, 2);
   READ_INT(thd->server_id, 4);
   READ_INT(name_size, 4);
   READ_STRING(name, name_size, sizeof(name));
   READ_INT(pos, 8);
-  DBUG_PRINT("info",
-             ("pos=%llu flags=%d server_id=%d", pos, flags, thd->server_id));
+  DBUG_PRINT("info", ("pos=%" PRIu64 " flags=%d server_id=%d", pos, flags,
+                      thd->server_id));
   READ_INT(data_size, 4);
   CHECK_PACKET_SIZE(data_size);
   if (slave_gtid_executed.add_gtid_encoding(packet_position, data_size) !=
       RETURN_STATUS_OK)
-    DBUG_RETURN(true);
+    return true;
   slave_gtid_executed.to_string(&gtid_string);
-  DBUG_PRINT("info", ("Slave %d requested to read %s at position %llu gtid set "
-                      "'%s'.",
-                      thd->server_id, name, pos, gtid_string));
+  DBUG_PRINT("info",
+             ("Slave %d requested to read %s at position %" PRIu64 " gtid set "
+              "'%s'.",
+              thd->server_id, name, pos, gtid_string));
 
   kill_zombie_dump_threads(thd);
   query_logger.general_log_print(thd, thd->get_command(),
-                                 "Log: '%s' Pos: %llu GTIDs: '%s'", name, pos,
-                                 gtid_string);
+                                 "Log: '%s' Pos: %" PRIu64 " GTIDs: '%s'", name,
+                                 pos, gtid_string);
   my_free(gtid_string);
   mysql_binlog_send(thd, name, (my_off_t)pos, &slave_gtid_executed, flags);
 
   unregister_slave(thd, true, true /*need_lock_slave_list=true*/);
   /*  fake COM_QUIT -- if we get here, the thread needs to terminate */
-  DBUG_RETURN(true);
+  return true;
 
 error_malformed_packet:
   my_error(ER_MALFORMED_PACKET, MYF(0));
-  DBUG_RETURN(true);
+  return true;
 }
 
 void mysql_binlog_send(THD *thd, char *log_ident, my_off_t pos,
@@ -753,20 +1026,17 @@ void mysql_binlog_send(THD *thd, char *log_ident, my_off_t pos,
   @return       if success value is returned else NULL is returned.
 */
 String *get_slave_uuid(THD *thd, String *value) {
-  if (value == NULL) return NULL;
+  if (value == nullptr) return nullptr;
 
   /* Protects thd->user_vars. */
-  mysql_mutex_lock(&thd->LOCK_thd_data);
+  MUTEX_LOCK(lock_guard, &thd->LOCK_thd_data);
 
   const auto it = thd->user_vars.find("slave_uuid");
   if (it != thd->user_vars.end() && it->second->length() > 0) {
-    value->copy(it->second->ptr(), it->second->length(), NULL);
-    mysql_mutex_unlock(&thd->LOCK_thd_data);
+    value->copy(it->second->ptr(), it->second->length(), nullptr);
     return value;
   }
-
-  mysql_mutex_unlock(&thd->LOCK_thd_data);
-  return NULL;
+  return nullptr;
 }
 
 /**
@@ -779,7 +1049,7 @@ String *get_slave_uuid(THD *thd, String *value) {
 class Find_zombie_dump_thread : public Find_THD_Impl {
  public:
   Find_zombie_dump_thread(String value) : m_slave_uuid(value) {}
-  virtual bool operator()(THD *thd) {
+  bool operator()(THD *thd) override {
     THD *cur_thd = current_thd;
     if (thd != cur_thd && (thd->get_command() == COM_BINLOG_DUMP ||
                            thd->get_command() == COM_BINLOG_DUMP_GTID)) {
@@ -883,7 +1153,12 @@ bool reset_master(THD *thd, bool unlock_global_read_lock) {
     is not enabled, as RESET MASTER command will clear 'gtid_executed' table.
   */
   thd->set_skip_readonly_check();
-  if (is_group_replication_running()) {
+
+  /*
+    No RESET MASTER commands are allowed while Group Replication is running
+    unless executed during a clone operation as part of the process.
+  */
+  if (is_group_replication_running() && !is_group_replication_cloning()) {
     my_error(ER_CANT_RESET_MASTER, MYF(0), "Group Replication is running");
     ret = true;
     goto end;
@@ -939,11 +1214,10 @@ end:
 */
 bool show_master_status(THD *thd) {
   Protocol *protocol = thd->get_protocol();
-  char *gtid_set_buffer = NULL;
+  char *gtid_set_buffer = nullptr;
   int gtid_set_size = 0;
-  List<Item> field_list;
 
-  DBUG_ENTER("show_binlog_info");
+  DBUG_TRACE;
 
   global_sid_lock->wrlock();
   const Gtid_set *gtid_set = gtid_state->get_executed_gtids();
@@ -951,10 +1225,11 @@ bool show_master_status(THD *thd) {
     global_sid_lock->unlock();
     my_eof(thd);
     my_free(gtid_set_buffer);
-    DBUG_RETURN(true);
+    return true;
   }
   global_sid_lock->unlock();
 
+  mem_root_deque<Item *> field_list(thd->mem_root);
   field_list.push_back(new Item_empty_string("File", FN_REFLEN));
   field_list.push_back(
       new Item_return_int("Position", 20, MYSQL_TYPE_LONGLONG));
@@ -963,10 +1238,10 @@ bool show_master_status(THD *thd) {
   field_list.push_back(
       new Item_empty_string("Executed_Gtid_Set", gtid_set_size));
 
-  if (thd->send_result_metadata(&field_list,
+  if (thd->send_result_metadata(field_list,
                                 Protocol::SEND_NUM_ROWS | Protocol::SEND_EOF)) {
     my_free(gtid_set_buffer);
-    DBUG_RETURN(true);
+    return true;
   }
   protocol->start_row();
 
@@ -981,12 +1256,12 @@ bool show_master_status(THD *thd) {
     protocol->store(gtid_set_buffer, &my_charset_bin);
     if (protocol->end_row()) {
       my_free(gtid_set_buffer);
-      DBUG_RETURN(true);
+      return true;
     }
   }
   my_eof(thd);
   my_free(gtid_set_buffer);
-  DBUG_RETURN(false);
+  return false;
 }
 
 /**
@@ -1003,23 +1278,24 @@ bool show_binlogs(THD *thd) {
   LOG_INFO cur;
   File file;
   char fname[FN_REFLEN];
-  List<Item> field_list;
   size_t length;
   size_t cur_dir_len;
   Protocol *protocol = thd->get_protocol();
-  DBUG_ENTER("show_binlogs");
+  DBUG_TRACE;
 
   if (!mysql_bin_log.is_open()) {
     my_error(ER_NO_BINARY_LOGGING, MYF(0));
-    DBUG_RETURN(true);
+    return true;
   }
 
+  mem_root_deque<Item *> field_list(thd->mem_root);
   field_list.push_back(new Item_empty_string("Log_name", 255));
   field_list.push_back(
       new Item_return_int("File_size", 20, MYSQL_TYPE_LONGLONG));
-  if (thd->send_result_metadata(&field_list,
+  field_list.push_back(new Item_empty_string("Encrypted", 3));
+  if (thd->send_result_metadata(field_list,
                                 Protocol::SEND_NUM_ROWS | Protocol::SEND_EOF))
-    DBUG_RETURN(true);
+    return true;
 
   mysql_mutex_lock(mysql_bin_log.get_log_lock());
   DEBUG_SYNC(thd, "show_binlogs_after_lock_log_before_lock_index");
@@ -1031,30 +1307,42 @@ bool show_binlogs(THD *thd) {
 
   cur_dir_len = dirname_length(cur.log_file_name);
 
-  reinit_io_cache(index_file, READ_CACHE, (my_off_t)0, 0, 0);
+  reinit_io_cache(index_file, READ_CACHE, (my_off_t)0, false, false);
 
   /* The file ends with EOF or empty line */
   while ((length = my_b_gets(index_file, fname, sizeof(fname))) > 1) {
     size_t dir_len;
+    int encrypted_header_size = 0;
     ulonglong file_length = 0;  // Length if open fails
     fname[--length] = '\0';     // remove the newline
 
     protocol->start_row();
     dir_len = dirname_length(fname);
     length -= dir_len;
-    protocol->store(fname + dir_len, length, &my_charset_bin);
+    protocol->store_string(fname + dir_len, length, &my_charset_bin);
 
-    if (!(strncmp(fname + dir_len, cur.log_file_name + cur_dir_len, length)))
+    if (!(strncmp(fname + dir_len, cur.log_file_name + cur_dir_len, length))) {
+      /* Encryption header size shall be accounted in the file_length */
+      encrypted_header_size = cur.encrypted_header_size;
       file_length = cur.pos; /* The active log, use the active position */
-    else {
+      file_length = file_length + encrypted_header_size;
+    } else {
       /* this is an old log, open it and find the size */
       if ((file = mysql_file_open(key_file_binlog, fname, O_RDONLY, MYF(0))) >=
           0) {
+        unsigned char magic[Rpl_encryption_header::ENCRYPTION_MAGIC_SIZE];
+        if (mysql_file_read(file, magic, BINLOG_MAGIC_SIZE, MYF(0)) == 4 &&
+            memcmp(magic, Rpl_encryption_header::ENCRYPTION_MAGIC,
+                   Rpl_encryption_header::ENCRYPTION_MAGIC_SIZE) == 0) {
+          /* Encryption header size is already accounted in the file_length */
+          encrypted_header_size = 1;
+        }
         file_length = (ulonglong)mysql_file_seek(file, 0L, MY_SEEK_END, MYF(0));
         mysql_file_close(file, MYF(0));
       }
     }
     protocol->store(file_length);
+    protocol->store(encrypted_header_size ? "Yes" : "No", &my_charset_bin);
     if (protocol->end_row()) {
       DBUG_PRINT(
           "info",
@@ -1066,9 +1354,9 @@ bool show_binlogs(THD *thd) {
   if (index_file->error == -1) goto err;
   mysql_bin_log.unlock_index();
   my_eof(thd);
-  DBUG_RETURN(false);
+  return false;
 
 err:
   mysql_bin_log.unlock_index();
-  DBUG_RETURN(true);
+  return true;
 }

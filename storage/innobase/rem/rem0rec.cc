@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1994, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1994, 2020, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -35,16 +35,17 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include <sys/types.h>
 #ifndef UNIV_HOTBACKUP
 
+#include "data0data.h"
 #include "fts0fts.h"
 #endif /* !UNIV_HOTBACKUP */
 #include "gis0geo.h"
 #include "mach0data.h"
 #include "mtr0log.h"
 #include "mtr0mtr.h"
-#include "my_dbug.h"
-#include "my_inttypes.h"
 #include "page0page.h"
 #include "trx0sys.h"
+
+#include "my_dbug.h"
 
 /*			PHYSICAL RECORD (OLD STYLE)
                         ===========================
@@ -103,6 +104,11 @@ represented on a higher text line):
 ...
 | length of first variable-length field of data |
 | SQL-null flags (1 bit per nullable field), padded to full bytes |
+| 1 or 2 bytes to indicate number of fields in the record if the table
+  where the record resides has undergone an instant ADD COLUMN
+  before this record gets inserted; If no instant ADD COLUMN ever
+  happened, here should be no byte; So parsing this optional number
+  requires the index or table information |
 | 4 bits used to delete mark a record, and mark a predefined
   minimum record in alphabetical order |
 | 4 bits giving the number of records owned by this record
@@ -247,7 +253,7 @@ ulint rec_get_nth_field_offs_old(const rec_t *rec, /*!< in: record */
 
   ut_ad(len);
   ut_a(rec);
-  ut_a(n < rec_get_n_fields_old(rec));
+  ut_a(n < rec_get_n_fields_old_raw(rec));
 
   if (rec_get_1byte_offs_flag(rec)) {
     os = rec_1_get_field_start_offs(rec, n);
@@ -295,13 +301,15 @@ UNIV_INLINE MY_ATTRIBUTE((warn_unused_result)) ulint
         const dtuple_t *v_entry,   /*!< in: dtuple contains virtual column
                                    data */
         ulint *extra,              /*!< out: extra size */
+        ulint *status,             /*!< in: status bits of the record,
+                                   can be nullptr if unnecessary */
         bool temp)                 /*!< in: whether this is a
                                    temporary file record */
 {
-  ulint extra_size;
+  ulint extra_size = 0;
   ulint data_size;
   ulint i;
-  ulint n_null = (n_fields > 0) ? index->n_nullable : 0;
+  ulint n_null = 0;
   ulint n_v_fields;
   ut_ad(n_fields <= dict_index_get_n_fields(index));
   ut_ad(!temp || extra);
@@ -311,8 +319,30 @@ UNIV_INLINE MY_ATTRIBUTE((warn_unused_result)) ulint
   ut_ad(!v_entry || (index->is_clustered() && temp));
   n_v_fields = v_entry ? dtuple_get_n_v_fields(v_entry) : 0;
 
-  extra_size = temp ? UT_BITS_IN_BYTES(n_null)
-                    : REC_N_NEW_EXTRA_BYTES + UT_BITS_IN_BYTES(n_null);
+  if (n_fields > 0) {
+    n_null = index->has_instant_cols()
+                 ? index->get_n_nullable_before(static_cast<uint32_t>(n_fields))
+                 : index->n_nullable;
+  }
+
+  if (index->is_tuple_instant_format(n_fields) && status != nullptr) {
+    switch (UNIV_EXPECT(*status, REC_STATUS_ORDINARY)) {
+      case REC_STATUS_ORDINARY:
+        ut_ad(!temp && n_fields > 0);
+        extra_size += rec_get_n_fields_length(n_fields);
+        break;
+      case REC_STATUS_NODE_PTR:
+        ut_ad(!temp && n_fields > 0);
+        n_null = index->n_instant_nullable;
+        break;
+      case REC_STATUS_INFIMUM:
+      case REC_STATUS_SUPREMUM:
+        break;
+    }
+  }
+
+  extra_size += temp ? UT_BITS_IN_BYTES(n_null)
+                     : REC_N_NEW_EXTRA_BYTES + UT_BITS_IN_BYTES(n_null);
   data_size = 0;
 
   if (temp && dict_table_is_comp(index->table)) {
@@ -424,15 +454,23 @@ UNIV_INLINE MY_ATTRIBUTE((warn_unused_result)) ulint
         data_size += mach_get_compressed_size(i + REC_MAX_N_FIELDS);
         vfield = dtuple_get_nth_v_field(v_entry, col->v_pos);
 
-        flen = vfield->len;
+        if (dfield_is_multi_value(vfield)) {
+          Multi_value_logger mv_logger(
+              static_cast<multi_value_data *>(dfield_get_data(vfield)),
+              dfield_get_len(vfield));
+          data_size += mv_logger.get_log_len(true);
+        } else {
+          flen = vfield->len;
 
-        if (flen != UNIV_SQL_NULL) {
-          flen = ut_min(flen, static_cast<ulint>(
-                                  DICT_MAX_FIELD_LEN_BY_FORMAT(index->table)));
-          data_size += flen;
+          if (flen != UNIV_SQL_NULL) {
+            flen = ut_min(
+                flen,
+                static_cast<ulint>(DICT_MAX_FIELD_LEN_BY_FORMAT(index->table)));
+            data_size += flen;
+          }
+
+          data_size += mach_get_compressed_size(flen);
         }
-
-        data_size += mach_get_compressed_size(flen);
       }
     }
   }
@@ -449,8 +487,8 @@ ulint rec_get_converted_size_comp_prefix(
     ulint *extra)              /*!< out: extra size */
 {
   ut_ad(dict_table_is_comp(index->table));
-  return (rec_get_converted_size_comp_prefix_low(index, fields, n_fields, NULL,
-                                                 extra, false));
+  return (rec_get_converted_size_comp_prefix_low(
+      index, fields, n_fields, nullptr, extra, nullptr, false));
 }
 
 /** Determines the size of a data tuple in ROW_FORMAT=COMPACT.
@@ -470,7 +508,10 @@ ulint rec_get_converted_size_comp(
 
   switch (UNIV_EXPECT(status, REC_STATUS_ORDINARY)) {
     case REC_STATUS_ORDINARY:
-      ut_ad(n_fields == dict_index_get_n_fields(index));
+      /* If this is a record for instant index, it could has
+      less fields when it comes from update path */
+      ut_ad(n_fields == dict_index_get_n_fields(index) ||
+            index->has_instant_cols());
       size = 0;
       break;
     case REC_STATUS_NODE_PTR:
@@ -488,11 +529,10 @@ ulint rec_get_converted_size_comp(
       return (REC_N_NEW_EXTRA_BYTES + 8);
     default:
       ut_error;
-      return (ULINT_UNDEFINED);
   }
 
-  return (size + rec_get_converted_size_comp_prefix_low(index, fields, n_fields,
-                                                        NULL, extra, false));
+  return (size + rec_get_converted_size_comp_prefix_low(
+                     index, fields, n_fields, nullptr, extra, &status, false));
 }
 
 /** Sets the value of the ith field SQL null bit of an old-style record. */
@@ -546,8 +586,7 @@ void rec_set_nth_field_sql_null(rec_t *rec, /*!< in: record */
  @return pointer to the origin of physical record */
 static rec_t *rec_convert_dtuple_to_rec_old(
     byte *buf,              /*!< in: start address of the physical record */
-    const dtuple_t *dtuple, /*!< in: data tuple */
-    ulint n_ext)            /*!< in: number of externally stored columns */
+    const dtuple_t *dtuple) /*!< in: data tuple */
 {
   const dfield_t *field;
   ulint n_fields;
@@ -568,8 +607,8 @@ static rec_t *rec_convert_dtuple_to_rec_old(
   ut_ad(n_fields > 0);
 
   /* Calculate the offset of the origin in the physical record */
-
-  rec = buf + rec_get_converted_extra_size(data_size, n_fields, n_ext);
+  const bool has_ext = dtuple->has_ext();
+  rec = buf + rec_get_converted_extra_size(data_size, n_fields, has_ext);
 #ifdef UNIV_DEBUG
   /* Suppress Valgrind warnings of ut_ad()
   in mach_write_to_1(), mach_write_to_2() et al. */
@@ -584,8 +623,7 @@ static rec_t *rec_convert_dtuple_to_rec_old(
   /* Store the data and the offsets */
 
   end_offset = 0;
-
-  if (!n_ext && data_size <= REC_1BYTE_OFFS_LIMIT) {
+  if (!has_ext && data_size <= REC_1BYTE_OFFS_LIMIT) {
     rec_set_1byte_offs_flag(rec, TRUE);
 
     for (i = 0; i < n_fields; i++) {
@@ -642,25 +680,27 @@ static rec_t *rec_convert_dtuple_to_rec_old(
   return (rec);
 }
 
-/** Builds a ROW_FORMAT=COMPACT record out of a data tuple. */
+/** Builds a ROW_FORMAT=COMPACT record out of a data tuple.
+@param[in]	rec		origin of record
+@param[in]	index		record descriptor
+@param[in]	fields		array of data fields
+@param[in]	n_fields	number of data fields
+@param[in]	v_entry		dtuple contains virtual column data
+@param[in]	status		status bits of the record
+@param[in]	temp		whether to use the format for temporary
+                                files in index creation
+@return	true	if this record is an instant record on leaf page
+@retval	false	if not an instant record */
 UNIV_INLINE
-void rec_convert_dtuple_to_rec_comp(
-    rec_t *rec,                /*!< in: origin of record */
-    const dict_index_t *index, /*!< in: record descriptor */
-    const dfield_t *fields,    /*!< in: array of data fields */
-    ulint n_fields,            /*!< in: number of data fields */
-    const dtuple_t *v_entry,   /*!< in: dtuple contains
-                               virtual column data */
-    ulint status,              /*!< in: status bits of the record */
-    bool temp)                 /*!< in: whether to use the
-                               format for temporary files in
-                               index creation */
-{
+bool rec_convert_dtuple_to_rec_comp(rec_t *rec, const dict_index_t *index,
+                                    const dfield_t *fields, ulint n_fields,
+                                    const dtuple_t *v_entry, ulint status,
+                                    bool temp) {
   const dfield_t *field;
   const dtype_t *type;
   byte *end;
   byte *nulls;
-  byte *lens = NULL;
+  byte *lens = nullptr;
   ulint len;
   ulint i;
   ulint n_node_ptr_field;
@@ -668,8 +708,15 @@ void rec_convert_dtuple_to_rec_comp(
   ulint null_mask = 1;
   ulint n_null = 0;
   ulint num_v = v_entry ? dtuple_get_n_v_fields(v_entry) : 0;
+  bool instant = false;
 
   ut_ad(temp || dict_table_is_comp(index->table));
+
+  if (n_fields != 0) {
+    n_null = index->has_instant_cols()
+                 ? index->get_n_nullable_before(static_cast<uint32_t>(n_fields))
+                 : index->n_nullable;
+  }
 
   if (temp) {
     ut_ad(status == REC_STATUS_ORDINARY);
@@ -682,7 +729,7 @@ void rec_convert_dtuple_to_rec_comp(
       temp = false;
     }
   } else {
-    ut_ad(v_entry == NULL);
+    ut_ad(v_entry == nullptr);
     ut_ad(num_v == 0);
     nulls = rec - (REC_N_NEW_EXTRA_BYTES + 1);
 
@@ -690,10 +737,20 @@ void rec_convert_dtuple_to_rec_comp(
       case REC_STATUS_ORDINARY:
         ut_ad(n_fields <= dict_index_get_n_fields(index));
         n_node_ptr_field = ULINT_UNDEFINED;
+
+        if (index->is_tuple_instant_format(n_fields)) {
+          uint32_t n_fields_len;
+          n_fields_len = rec_set_n_fields(rec, n_fields);
+          nulls -= n_fields_len;
+          instant = true;
+        }
         break;
       case REC_STATUS_NODE_PTR:
-        ut_ad(n_fields == dict_index_get_n_unique_in_tree_nonleaf(index) + 1);
+        ut_ad(n_fields ==
+              static_cast<ulint>(
+                  dict_index_get_n_unique_in_tree_nonleaf(index) + 1));
         n_node_ptr_field = n_fields - 1;
+        n_null = index->n_instant_nullable;
         break;
       case REC_STATUS_INFIMUM:
       case REC_STATUS_SUPREMUM:
@@ -702,14 +759,13 @@ void rec_convert_dtuple_to_rec_comp(
         break;
       default:
         ut_error;
-        return;
+        return (instant);
     }
   }
 
   end = rec;
 
   if (n_fields != 0) {
-    n_null = index->n_nullable;
     lens = nulls - UT_BITS_IN_BYTES(n_null);
     /* clear the SQL-null flags */
     memset(lens + 1, 0, nulls - lens);
@@ -719,7 +775,7 @@ void rec_convert_dtuple_to_rec_comp(
 
   for (i = 0; i < n_fields; i++) {
     const dict_field_t *ifield;
-    dict_col_t *col = NULL;
+    dict_col_t *col = nullptr;
 
     field = &fields[i];
 
@@ -806,7 +862,7 @@ void rec_convert_dtuple_to_rec_comp(
   }
 
   if (!num_v) {
-    return;
+    return (instant);
   }
 
   /* reserve 2 bytes for writing length */
@@ -829,26 +885,35 @@ void rec_convert_dtuple_to_rec_comp(
 
       vfield = dtuple_get_nth_v_field(v_entry, col->v_pos);
 
-      flen = vfield->len;
+      if (dfield_is_multi_value(vfield)) {
+        Multi_value_logger mv_logger(
+            static_cast<multi_value_data *>(dfield_get_data(vfield)),
+            dfield_get_len(vfield));
+        mv_logger.log(&ptr);
+      } else {
+        flen = vfield->len;
 
-      if (flen != UNIV_SQL_NULL) {
-        /* The virtual column can only be in sec
-        index, and index key length is bound by
-        DICT_MAX_FIELD_LEN_BY_FORMAT */
-        flen = ut_min(flen, static_cast<ulint>(
-                                DICT_MAX_FIELD_LEN_BY_FORMAT(index->table)));
-      }
+        if (flen != UNIV_SQL_NULL) {
+          /* The virtual column can only be in sec
+          index, and index key length is bound by
+          DICT_MAX_FIELD_LEN_BY_FORMAT */
+          flen = ut_min(flen, static_cast<ulint>(
+                                  DICT_MAX_FIELD_LEN_BY_FORMAT(index->table)));
+        }
 
-      ptr += mach_write_compressed(ptr, flen);
+        ptr += mach_write_compressed(ptr, flen);
 
-      if (flen != UNIV_SQL_NULL) {
-        ut_memcpy(ptr, dfield_get_data(vfield), flen);
-        ptr += flen;
+        if (flen != UNIV_SQL_NULL) {
+          ut_memcpy(ptr, dfield_get_data(vfield), flen);
+          ptr += flen;
+        }
       }
     }
   }
 
   mach_write_to_2(end, ptr - end);
+
+  return (instant);
 }
 
 /** Builds a new-style physical record out of a data tuple and
@@ -863,17 +928,25 @@ static rec_t *rec_convert_dtuple_to_rec_new(
   ulint extra_size;
   ulint status;
   rec_t *rec;
+  bool instant;
 
   status = dtuple_get_info_bits(dtuple) & REC_NEW_STATUS_MASK;
   rec_get_converted_size_comp(index, status, dtuple->fields, dtuple->n_fields,
                               &extra_size);
   rec = buf + extra_size;
 
-  rec_convert_dtuple_to_rec_comp(rec, index, dtuple->fields, dtuple->n_fields,
-                                 NULL, status, false);
+  instant = rec_convert_dtuple_to_rec_comp(
+      rec, index, dtuple->fields, dtuple->n_fields, nullptr, status, false);
 
   /* Set the info bits of the record */
   rec_set_info_and_status_bits(rec, dtuple_get_info_bits(dtuple));
+
+  if (instant) {
+    ut_ad(index->has_instant_cols());
+    rec_set_instant_flag_new(rec, true);
+  } else {
+    rec_set_instant_flag_new(rec, false);
+  }
 
   return (rec);
 }
@@ -885,27 +958,28 @@ rec_t *rec_convert_dtuple_to_rec(
     byte *buf,                 /*!< in: start address of the
                                physical record */
     const dict_index_t *index, /*!< in: record descriptor */
-    const dtuple_t *dtuple,    /*!< in: data tuple */
-    ulint n_ext)               /*!< in: number of
-                               externally stored columns */
+    const dtuple_t *dtuple)    /*!< in: data tuple */
 {
   rec_t *rec;
 
-  ut_ad(buf != NULL);
-  ut_ad(index != NULL);
-  ut_ad(dtuple != NULL);
+  ut_ad(buf != nullptr);
+  ut_ad(index != nullptr);
+  ut_ad(dtuple != nullptr);
   ut_ad(dtuple_validate(dtuple));
   ut_ad(dtuple_check_typed(dtuple));
 
   if (dict_table_is_comp(index->table)) {
     rec = rec_convert_dtuple_to_rec_new(buf, index, dtuple);
   } else {
-    rec = rec_convert_dtuple_to_rec_old(buf, dtuple, n_ext);
+    rec = rec_convert_dtuple_to_rec_old(buf, dtuple);
   }
 
 #ifdef UNIV_DEBUG
-  {
-    mem_heap_t *heap = NULL;
+  /* Can't check this if it's an index with instantly added columns,
+  because if it comes from UPDATE, the fields of dtuple may be less than
+  the on from index itself. */
+  if (!index->has_instant_cols()) {
+    mem_heap_t *heap = nullptr;
     ulint offsets_[REC_OFFS_NORMAL_SIZE];
     const ulint *offsets;
     ulint i;
@@ -939,8 +1013,8 @@ ulint rec_get_converted_size_temp(
                                data */
     ulint *extra)              /*!< out: extra size */
 {
-  return (rec_get_converted_size_comp_prefix_low(index, fields, n_fields,
-                                                 v_entry, extra, true));
+  return (rec_get_converted_size_comp_prefix_low(
+      index, fields, n_fields, v_entry, extra, nullptr, true));
 }
 
 /** Determine the offset to each field in temporary file.
@@ -997,7 +1071,7 @@ void rec_copy_prefix_to_dtuple(
     ulint len;
 
     field = dtuple_get_nth_field(tuple, i);
-    data = rec_get_nth_field(rec, offsets, i, &len);
+    data = rec_get_nth_field_instant(rec, offsets, i, index, &len);
 
     if (len != UNIV_SQL_NULL) {
       dfield_set_data(field, mem_heap_dup(heap, data, len), len);
@@ -1017,7 +1091,7 @@ static rec_t *rec_copy_prefix_to_buf_old(
     ulint area_end,   /*!< in: end of the prefix data */
     byte **buf,       /*!< in/out: memory buffer for
                       the copied prefix, or NULL */
-    ulint *buf_size)  /*!< in/out: buffer size */
+    size_t *buf_size) /*!< in/out: buffer size */
 {
   rec_t *copy_rec;
   ulint area_start;
@@ -1031,7 +1105,7 @@ static rec_t *rec_copy_prefix_to_buf_old(
 
   prefix_len = area_start + area_end;
 
-  if ((*buf == NULL) || (*buf_size < prefix_len)) {
+  if ((*buf == nullptr) || (*buf_size < prefix_len)) {
     ut_free(*buf);
     *buf_size = prefix_len;
     *buf = static_cast<byte *>(ut_malloc_nokey(prefix_len));
@@ -1046,21 +1120,11 @@ static rec_t *rec_copy_prefix_to_buf_old(
   return (copy_rec);
 }
 
-/** Copies the first n fields of a physical record to a new physical record in
- a buffer.
- @return own: copied record */
-rec_t *rec_copy_prefix_to_buf(
-    const rec_t *rec,          /*!< in: physical record */
-    const dict_index_t *index, /*!< in: record descriptor */
-    ulint n_fields,            /*!< in: number of fields
-                               to copy */
-    byte **buf,                /*!< in/out: memory buffer
-                               for the copied prefix,
-                               or NULL */
-    ulint *buf_size)           /*!< in/out: buffer size */
-{
+rec_t *rec_copy_prefix_to_buf(const rec_t *rec, const dict_index_t *index,
+                              ulint n_fields, byte **buf, size_t *buf_size) {
   const byte *nulls;
   const byte *lens;
+  uint16_t n_null;
   ulint i;
   ulint prefix_len;
   ulint null_mask;
@@ -1097,11 +1161,13 @@ rec_t *rec_copy_prefix_to_buf(
       /* infimum or supremum record: no sense to copy anything */
     default:
       ut_error;
-      return (NULL);
+      return (nullptr);
   }
 
-  nulls = rec - (REC_N_NEW_EXTRA_BYTES + 1);
-  lens = nulls - UT_BITS_IN_BYTES(index->n_nullable);
+  ut_d(uint16_t non_default_fields =)
+      rec_init_null_and_len_comp(rec, index, &nulls, &lens, &n_null);
+  ut_ad(!rec_get_instant_flag_new(rec) || n_fields <= non_default_fields);
+
   UNIV_PREFETCH_R(lens);
   prefix_len = 0;
   null_mask = 1;
@@ -1161,7 +1227,7 @@ rec_t *rec_copy_prefix_to_buf(
 
   prefix_len += rec - (lens + 1);
 
-  if ((*buf == NULL) || (*buf_size < prefix_len)) {
+  if ((*buf == nullptr) || (*buf_size < prefix_len)) {
     ut_free(*buf);
     *buf_size = prefix_len;
     *buf = static_cast<byte *>(ut_malloc_nokey(prefix_len));
@@ -1183,7 +1249,7 @@ static ibool rec_validate_old(const rec_t *rec) /*!< in: physical record */
   ulint i;
 
   ut_a(rec);
-  n_fields = rec_get_n_fields_old(rec);
+  n_fields = rec_get_n_fields_old_raw(rec);
 
   if ((n_fields == 0) || (n_fields > REC_MAX_N_FIELDS)) {
     ib::error(ER_IB_MSG_922) << "Record has " << n_fields << " fields";
@@ -1221,34 +1287,52 @@ ibool rec_validate(
     const ulint *offsets) /*!< in: array returned by rec_get_offsets() */
 {
   ulint len;
-  ulint n_fields;
+  uint16_t n_fields;
   ulint len_sum = 0;
   ulint i;
+  uint16_t n_defaults = 0;
 
   ut_a(rec);
-  n_fields = rec_offs_n_fields(offsets);
+  n_fields = static_cast<uint16_t>(rec_offs_n_fields(offsets));
 
   if ((n_fields == 0) || (n_fields > REC_MAX_N_FIELDS)) {
     ib::error(ER_IB_MSG_925) << "Record has " << n_fields << " fields";
     return (FALSE);
   }
 
-  ut_a(rec_offs_comp(offsets) || n_fields <= rec_get_n_fields_old(rec));
-
   for (i = 0; i < n_fields; i++) {
     rec_get_nth_field_offs(offsets, i, &len);
 
-    if (!((len < UNIV_PAGE_SIZE) || (len == UNIV_SQL_NULL))) {
-      ib::error(ER_IB_MSG_926) << "Record field " << i << " len " << len;
-      return (FALSE);
-    }
+    switch (len) {
+      case UNIV_SQL_ADD_COL_DEFAULT:
+        ++n_defaults;
+        break;
+      case UNIV_SQL_NULL:
+        if (!rec_offs_comp(offsets)) {
+          /* If a default value is NULL, it will come
+          here, however, this is not inlined, so
+          don't count it */
+          if (i < rec_get_n_fields_old_raw(rec)) {
+            len_sum += rec_get_nth_field_size(rec, i);
+          } else {
+            ++n_defaults;
+          }
+        }
+        break;
+      default:
+        ut_a(n_defaults == 0);
+        if (len >= UNIV_PAGE_SIZE) {
+          ib::error(ER_IB_MSG_926) << "Record field " << i << " len " << len;
+          return (FALSE);
+        }
 
-    if (len != UNIV_SQL_NULL) {
-      len_sum += len;
-    } else if (!rec_offs_comp(offsets)) {
-      len_sum += rec_get_nth_field_size(rec, i);
+        len_sum += len;
+        break;
     }
   }
+
+  ut_a(rec_offs_comp(offsets) ||
+       n_fields <= rec_get_n_fields_old_raw(rec) + n_defaults);
 
   if (len_sum != rec_offs_data_size(offsets)) {
     ib::error(ER_IB_MSG_927) << "Record len should be " << len_sum << ", len "
@@ -1263,10 +1347,10 @@ ibool rec_validate(
   return (TRUE);
 }
 
-/** Prints an old-style physical record. */
-void rec_print_old(FILE *file,       /*!< in: file where to print */
-                   const rec_t *rec) /*!< in: physical record */
-{
+/** Prints an old-style physical record.
+@param[in] file File where to print
+@param[in] rec Physical record */
+void rec_print_old(FILE *file, const rec_t *rec) {
   const byte *data;
   ulint len;
   ulint n;
@@ -1274,7 +1358,7 @@ void rec_print_old(FILE *file,       /*!< in: file where to print */
 
   ut_ad(rec);
 
-  n = rec_get_n_fields_old(rec);
+  n = rec_get_n_fields_old_raw(rec);
 
   fprintf(file,
           "PHYSICAL RECORD: n_fields %lu;"
@@ -1318,28 +1402,37 @@ static void rec_print_comp(
   ulint i;
 
   for (i = 0; i < rec_offs_n_fields(offsets); i++) {
-    const byte *data;
+    const byte *data = nullptr;
     ulint len;
 
-    data = rec_get_nth_field(rec, offsets, i, &len);
+    if (rec_offs_nth_default(offsets, i)) {
+      len = UNIV_SQL_ADD_COL_DEFAULT;
+    } else {
+      data = rec_get_nth_field(rec, offsets, i, &len);
+    }
 
     fprintf(file, " %lu:", (ulong)i);
 
-    if (len != UNIV_SQL_NULL) {
-      if (len <= 30) {
-        ut_print_buf(file, data, len);
-      } else if (rec_offs_nth_extern(offsets, i)) {
-        ut_print_buf(file, data, 30);
-        fprintf(file, " (total %lu bytes, external)", (ulong)len);
-        ut_print_buf(file, data + len - BTR_EXTERN_FIELD_REF_SIZE,
-                     BTR_EXTERN_FIELD_REF_SIZE);
-      } else {
-        ut_print_buf(file, data, 30);
+    switch (len) {
+      case UNIV_SQL_NULL:
+        fputs(" SQL NULL", file);
+        break;
+      case UNIV_SQL_ADD_COL_DEFAULT:
+        fputs(" SQL DEFAULT", file);
+        break;
+      default:
+        if (len <= 30) {
+          ut_print_buf(file, data, len);
+        } else if (rec_offs_nth_extern(offsets, i)) {
+          ut_print_buf(file, data, 30);
+          fprintf(file, " (total %lu bytes, external)", (ulong)len);
+          ut_print_buf(file, data + len - BTR_EXTERN_FIELD_REF_SIZE,
+                       BTR_EXTERN_FIELD_REF_SIZE);
+        } else {
+          ut_print_buf(file, data, 30);
 
-        fprintf(file, " (total %lu bytes)", (ulong)len);
-      }
-    } else {
-      fputs(" SQL NULL", file);
+          fprintf(file, " (total %lu bytes)", (ulong)len);
+        }
     }
     putc(';', file);
     putc('\n', file);
@@ -1357,7 +1450,7 @@ static void rec_print_mbr_old(FILE *file,       /*!< in: file where to print */
 
   ut_ad(rec);
 
-  n = rec_get_n_fields_old(rec);
+  n = rec_get_n_fields_old_raw(rec);
 
   fprintf(file,
           "PHYSICAL RECORD: n_fields %lu;"
@@ -1413,15 +1506,14 @@ static void rec_print_mbr_old(FILE *file,       /*!< in: file where to print */
   rec_validate_old(rec);
 }
 
-/** Prints a spatial index record. */
-void rec_print_mbr_rec(
-    FILE *file,           /*!< in: file where to print */
-    const rec_t *rec,     /*!< in: physical record */
-    const ulint *offsets) /*!< in: array returned by rec_get_offsets() */
-{
+/** Prints a spatial index record.
+@param[in] file File where to print
+@param[in] rec Physical record
+@param[in] offsets Array returned by rec_get_offsets() */
+void rec_print_mbr_rec(FILE *file, const rec_t *rec, const ulint *offsets) {
   ut_ad(rec);
   ut_ad(offsets);
-  ut_ad(rec_offs_validate(rec, NULL, offsets));
+  ut_ad(rec_offs_validate(rec, nullptr, offsets));
 
   if (!rec_offs_comp(offsets)) {
     rec_print_mbr_old(file, rec);
@@ -1432,6 +1524,7 @@ void rec_print_mbr_rec(
     const byte *data;
     ulint len;
 
+    ut_ad(!rec_offs_nth_default(offsets, i));
     data = rec_get_nth_field(rec, offsets, i, &len);
 
     if (i == 0) {
@@ -1485,7 +1578,7 @@ void rec_print_new(
 {
   ut_ad(rec);
   ut_ad(offsets);
-  ut_ad(rec_offs_validate(rec, NULL, offsets));
+  ut_ad(rec_offs_validate(rec, nullptr, offsets));
 
 #ifdef UNIV_DEBUG
   if (rec_get_deleted_flag(rec, rec_offs_comp(offsets))) {
@@ -1510,18 +1603,18 @@ void rec_print_new(
   rec_validate(rec, offsets);
 }
 
-/** Prints a physical record. */
-void rec_print(FILE *file,                /*!< in: file where to print */
-               const rec_t *rec,          /*!< in: physical record */
-               const dict_index_t *index) /*!< in: record descriptor */
-{
+/** Prints a physical record.
+@param[in] file File where to print
+@param[in] rec Physical record
+@param[in] index Record descriptor */
+void rec_print(FILE *file, const rec_t *rec, const dict_index_t *index) {
   ut_ad(index);
 
   if (!dict_table_is_comp(index->table)) {
     rec_print_old(file, rec);
     return;
   } else {
-    mem_heap_t *heap = NULL;
+    mem_heap_t *heap = nullptr;
     ulint offsets_[REC_OFFS_NORMAL_SIZE];
     rec_offs_init(offsets_);
 
@@ -1544,7 +1637,7 @@ void rec_print(std::ostream &o, const rec_t *rec, ulint info,
   const ulint comp = rec_offs_comp(offsets);
   const ulint n = rec_offs_n_fields(offsets);
 
-  ut_ad(rec_offs_validate(rec, NULL, offsets));
+  ut_ad(rec_offs_validate(rec, nullptr, offsets));
 
   o << (comp ? "COMPACT RECORD" : "RECORD") << "(info_bits=" << info << ", "
     << n << " fields): {";
@@ -1555,6 +1648,11 @@ void rec_print(std::ostream &o, const rec_t *rec, ulint info,
 
     if (i) {
       o << ',';
+    }
+
+    if (rec_offs_nth_default(offsets, i)) {
+      o << "DEFAULT";
+      continue;
     }
 
     data = rec_get_nth_field(rec, offsets, i, &len);
@@ -1585,9 +1683,9 @@ void rec_print(std::ostream &o, const rec_t *rec, ulint info,
 @param[in]	r	record to display
 @return	the output stream */
 std::ostream &operator<<(std::ostream &o, const rec_index_print &r) {
-  mem_heap_t *heap = NULL;
+  mem_heap_t *heap = nullptr;
   ulint *offsets =
-      rec_get_offsets(r.m_rec, r.m_index, NULL, ULINT_UNDEFINED, &heap);
+      rec_get_offsets(r.m_rec, r.m_index, nullptr, ULINT_UNDEFINED, &heap);
   rec_print(o, r.m_rec, rec_get_info_bits(r.m_rec, rec_offs_comp(offsets)),
             offsets);
   mem_heap_free(heap);
@@ -1612,7 +1710,7 @@ trx_id_t rec_get_trx_id(const rec_t *rec,          /*!< in: record */
   ulint trx_id_col = index->get_sys_col_pos(DATA_TRX_ID);
   const byte *trx_id;
   ulint len;
-  mem_heap_t *heap = NULL;
+  mem_heap_t *heap = nullptr;
   ulint offsets_[REC_OFFS_NORMAL_SIZE];
   ulint *offsets = offsets_;
   rec_offs_init(offsets_);

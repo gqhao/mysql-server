@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2020, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -48,10 +48,6 @@ this program; if not, write to the Free Software Foundation, Inc.,
 
 /** printf(3) format used for printing DB_TRX_ID and other system fields */
 #define TRX_ID_FMT IB_ID_FMT
-
-/** maximum length that a formatted trx_t::id could take, not including
-the terminating NUL character. */
-static const ulint TRX_ID_MAX_LEN = 17;
 
 /** Space id of the transaction system page (the system tablespace) */
 static const space_id_t TRX_SYS_SPACE = 0;
@@ -119,7 +115,7 @@ enum trx_dict_op_t {
 };
 
 /** Memory objects */
-/* @{ */
+/** @{ */
 /** Transaction */
 struct trx_t;
 /** The locks and state of an active transaction */
@@ -140,7 +136,7 @@ struct roll_node_t;
 struct commit_node_t;
 /** SAVEPOINT command node in a query graph */
 struct trx_named_savept_t;
-/* @} */
+/** @} */
 
 /** Row identifier (DB_ROW_ID, DATA_ROW_ID) */
 typedef ib_id_t row_id_t;
@@ -160,7 +156,7 @@ struct trx_savept_t {
 };
 
 /** File objects */
-/* @{ */
+/** @{ */
 /** Transaction system header */
 typedef byte trx_sysf_t;
 /** Rollback segment array header */
@@ -175,7 +171,7 @@ typedef byte trx_ulogf_t;
 typedef byte trx_upagef_t;
 /** Undo log record */
 typedef byte trx_undo_rec_t;
-/* @} */
+/** @} */
 
 typedef ib_mutex_t RsegMutex;
 typedef ib_mutex_t TrxMutex;
@@ -185,30 +181,71 @@ typedef ib_mutex_t TrxSysMutex;
 
 /** The rollback segment memory object */
 struct trx_rseg_t {
+#ifdef UNIV_DEBUG
+  /** Validate the curr_size member by re-calculating it.
+  @param[in]  take_mutex  take the rseg->mutex. default is true.
+  @return true if valid, false otherwise. */
+  bool validate_curr_size(bool take_mutex = true);
+#endif /* UNIV_DEBUG */
+
+  /** Enter the rseg->mutex. */
+  void latch() {
+    mutex_enter(&mutex);
+    ut_ad(validate_curr_size(false));
+  }
+
+  /** Exit the rseg->mutex. */
+  void unlatch() {
+    ut_ad(validate_curr_size(false));
+    mutex_exit(&mutex);
+  }
+
+  /** Decrement the current size of the rollback segment by the given number
+  of pages.
+  @param[in]  npages  number of pages to reduce in size. */
+  void decr_curr_size(page_no_t npages = 1) {
+    ut_ad(curr_size >= npages);
+    curr_size -= npages;
+  }
+
+  /** Increment the current size of the rollback segment by the given number
+  of pages. */
+  void incr_curr_size() { ++curr_size; }
+
+  /* Get the current size of the rollback segment in pages.
+   @return current size of the rollback segment in pages. */
+  page_no_t get_curr_size() const { return (curr_size); }
+
+  /* Set the current size of the rollback segment in pages.
+  @param[in]  npages  new value for the current size. */
+  void set_curr_size(page_no_t npages) { curr_size = npages; }
+
   /*--------------------------------------------------------*/
   /** rollback segment id == the index of its slot in the trx
   system file copy */
-  ulint id;
+  size_t id{};
 
   /** mutex protecting the fields in this struct except id,space,page_no
   which are constant */
   RsegMutex mutex;
 
   /** space ID where the rollback segment header is placed */
-  space_id_t space_id;
+  space_id_t space_id{};
 
   /** page number of the rollback segment header */
-  page_no_t page_no;
+  page_no_t page_no{};
 
   /** page size of the relevant tablespace */
   page_size_t page_size;
 
   /** maximum allowed size in pages */
-  ulint max_size;
+  page_no_t max_size{};
 
+ private:
   /** current size in pages */
-  ulint curr_size;
+  page_no_t curr_size{};
 
+ public:
   /*--------------------------------------------------------*/
   /* Fields for update undo logs */
   /** List of update undo logs */
@@ -229,20 +266,31 @@ struct trx_rseg_t {
 
   /** Page number of the last not yet purged log header in the history
   list; FIL_NULL if all list purged */
-  page_no_t last_page_no;
+  page_no_t last_page_no{};
 
   /** Byte offset of the last not yet purged log header */
-  ulint last_offset;
+  size_t last_offset{};
 
   /** Transaction number of the last not yet purged log */
   trx_id_t last_trx_no;
 
-  /** TRUE if the last not yet purged log needs purging */
-  ibool last_del_marks;
+  /** true if the last not yet purged log needs purging */
+  bool last_del_marks{};
 
   /** Reference counter to track rseg allocated transactions. */
-  std::atomic<ulint> trx_ref_count;
+  std::atomic<size_t> trx_ref_count{};
+
+  std::ostream &print(std::ostream &out) const {
+    out << "[trx_rseg_t: this=" << (void *)this << ", id=" << id
+        << ", space_id=" << space_id << ", page_no=" << page_no
+        << ", curr_size=" << curr_size << "]";
+    return (out);
+  }
 };
+
+inline std::ostream &operator<<(std::ostream &out, const trx_rseg_t &rseg) {
+  return (rseg.print(out));
+}
 
 using Rsegs_Vector = std::vector<trx_rseg_t *, ut_allocator<trx_rseg_t *>>;
 using Rseg_Iterator = Rsegs_Vector::iterator;
@@ -251,7 +299,7 @@ using Rseg_Iterator = Rsegs_Vector::iterator;
 class Rsegs {
  public:
   /** Default constructor */
-  Rsegs() : m_rsegs(), m_latch(), m_active(false) {
+  Rsegs() : m_rsegs(), m_latch(), m_state(INIT) {
 #ifndef UNIV_HOTBACKUP
     init();
 #endif /* !UNIV_HOTBACKUP */
@@ -323,19 +371,55 @@ class Rsegs {
   /** Get a shared lock on m_rsegs. */
   void x_unlock() { rw_lock_x_unlock(m_latch); }
 
-  /* Set the transaction active. */
-  void set_active() { m_active = true; }
-
-  /* Set the transaction inactive. */
-  void set_inactive() { m_active = false; }
-
-  /* Return whether the undo tablespace is active.
+  /** Return whether the undo tablespace is active.
   @return true if active */
-  bool is_active() { return (m_active); }
+  bool is_active() { return (m_state == ACTIVE); }
 
-  /* Return whether the undo tablespace is inactive.
-  @return true if active */
-  bool is_inactive() { return (!m_active); }
+  /** Return whether the undo tablespace is inactive due to
+  implicit selection by the purge thread.
+  @return true if marked for truncation by the purge thread */
+  bool is_inactive_implicit() { return (m_state == INACTIVE_IMPLICIT); }
+
+  /** Return whether the undo tablespace was made inactive by
+  ALTER TABLESPACE.
+  @return true if altered */
+  bool is_inactive_explicit() { return (m_state == INACTIVE_EXPLICIT); }
+
+  /** Return whether the undo tablespace is empty and ready
+  to be dropped.
+  @return true if empty */
+  bool is_empty() { return (m_state == EMPTY); }
+
+  /** Return whether the undo tablespace is being initialized.
+  @return true if empty */
+  bool is_init() { return (m_state == INIT); }
+
+  /** Set the state of the rollback segments in this undo tablespace
+  to ACTIVE for use by new transactions. */
+  void set_active() { m_state = ACTIVE; }
+
+  /** Set the state of the rollback segments in this undo
+  tablespace to inactive_implicit. This means that it will be
+  truncated and then made active again by the purge thread.
+  It will not be used for new transactions until it becomes
+  active again. */
+  void set_inactive_implicit() {
+    ut_ad(m_state == ACTIVE || m_state == INACTIVE_EXPLICIT);
+    m_state = INACTIVE_IMPLICIT;
+  }
+
+  /** Make the undo tablespace inactive so that it will not be
+  used for new transactions.  The purge thread will clear out
+  all the undo logs, truncate it, and then mark it empty. */
+  void set_inactive_explicit() { m_state = INACTIVE_EXPLICIT; }
+
+  /** Set the state of the undo tablespace to empty so that it
+  can be dropped. */
+  void set_empty() {
+    ut_ad(m_state == INACTIVE_EXPLICIT || m_state == ACTIVE ||
+          m_state == INIT || m_state == EMPTY);
+    m_state = EMPTY;
+  }
 
   /** std::vector of rollback segments */
   Rsegs_Vector m_rsegs;
@@ -349,9 +433,85 @@ class Rsegs {
              s and atomic increment for modification, x for read */
   rw_lock_t *m_latch;
 
-  /** If true, then these rollback segments can be allocated
-  to new transactions. */
-  bool m_active;
+  /* The four states of an undo tablespace.
+  INIT:     The initial state of an undo space that is being created or opened.
+  ACTIVE:   The rollback segments in this tablespace can be allocated to new
+            transactions.  The undo tablespace is ready for undo logs.
+  INACTIVE_IMPLICIT: These rollback segments are no longer being used by new
+            transactions.  They arre 'inactive'. The truncate process
+            is happening. This undo tablespace was selected by the
+            purge thread implicitly. When the truncation process
+            is complete, the next state is ACTIVE.
+  INACTIVE_EXPLICIT:  These rollback segments are no longer being used by new
+            transactions.  They arre 'inactive'. The truncate process
+            is happening. This undo tablespace was selected by the
+            an ALTER UNDO TABLESPACE  SET INACTIVE command. When the
+            truncation process is complete, the next state is EMPTY.
+  EMPTY:    The undo tablespace has been truncated but is no longer
+            active. It is ready to be either dropped or set active
+            explicitly. This state is also used when the undo tablespace and
+            its rollback segments are being inititalized.
+
+  These states are changed under an exclusive lock on m_latch and are read
+  under a shared lock.
+
+  The following actions can cause changes in these states:
+  Init:         Implicit undo spaces are created at startup.
+  Create:       Explicit undo tablespace creation at runtime.
+  Mark:         Purge thread implicitly selects an undo space to truncate.
+  SetInactive:  This ALTER UNDO TABLESPACE causes an explicit truncation.
+  SetActive:    This ALTER UNDO TABLESPACE changes the target state from
+                EMPTY to ACTIVE.
+  Trucate:      The truncate process is completed by the purge thread.
+  Drop:         Delete an EMPTY undo tablespace
+  Crash:        A crash occurs
+  Fixup:        At startup, if an undo space was being truncated with a crash.
+  SaveDDState:  At startup, once the DD is available the state saved there
+                will be applied.  INACTIVE_IMPLICIT is never saved to the DD.
+                So the DD state INACTIVE means INACTIVE_EXPLICIT.
+                See apply_dd_undo_state()
+
+  State changes allowed: (Actions on states not mentioned are not allowed.)
+  Init         from null -> INIT -> ACTIVE see srv_start()
+               from null -> INIT -> EMPTY  see trx_rsegs_init()
+  Create       from null -> EMPTY -> ACTIVE
+  Mark         from INACTIVE_EXPLICIT -> INACTIVE_EXPLICIT -> Truncate
+               from ACTIVE -> INACTIVE_IMPLICIT -> Truncate
+  SetInactive  from ACTIVE -> INACTIVE_EXPLICIT -> Mark
+               from INACTIVE_IMPLICIT -> INACTIVE_EXPLICIT
+               from INACTIVE_EXPLICIT -> INACTIVE_EXPLICIT
+               from EMPTY -> EMPTY
+  SetActive    from ACTIVE -> ACTIVE
+               from INACTIVE_IMPLICIT -> INACTIVE_IMPLICIT
+               from INACTIVE_EXPLICIT -> INACTIVE_IMPLICIT
+               from EMPTY -> ACTIVE
+  Truncate     from INACTIVE_IMPLICIT -> ACTIVE
+               from INACTIVE_EXPLICIT -> EMPTY
+  Drop         if ACTIVE -> error returned
+               if INACTIVE_IMPLICIT -> error returned
+               if INACTIVE_EXPLICIT -> error returned
+               from EMPTY -> null
+  Crash        if ACTIVE, at startup:  ACTIVE
+               if INACTIVE_IMPLICIT, at startup: Fixup
+               if INACTIVE_EXPLICIT, at startup: Fixup
+               if EMPTY, at startup:  EMPTY
+  Fixup        from INACTIVE_IMPLICIT before crash -> INACTIVE_IMPLICIT -> Mark
+               from INACTIVE_EXPLICIT before crash -> INACTIVE_IMPLICIT -> Mark
+  SaveDDState  from ACTIVE before crash -> ACTIVE
+               from INACTIVE_IMPLICIT before crash -> ACTIVE
+               from INACTIVE_EXPLICIT before crash -> INACTIVE_EXPLICIT -> Mark
+               from EMPTY -> EMPTY
+  */
+  enum undo_space_states {
+    INIT,
+    ACTIVE,
+    INACTIVE_IMPLICIT,
+    INACTIVE_EXPLICIT,
+    EMPTY
+  };
+
+  /** The current state of this undo tablespace. */
+  undo_space_states m_state;
 };
 
 /** Rollback segements from a given transaction with trx-no
@@ -428,7 +588,7 @@ typedef std::vector<trx_id_t, ut_allocator<trx_id_t>> trx_ids_t;
 /** Mapping read-write transactions from id to transaction instance, for
 creating read views and during trx id lookup for MVCC and locking. */
 struct TrxTrack {
-  explicit TrxTrack(trx_id_t id, trx_t *trx = NULL) : m_id(id), m_trx(trx) {
+  explicit TrxTrack(trx_id_t id, trx_t *trx = nullptr) : m_id(id), m_trx(trx) {
     // Do nothing
   }
 
@@ -459,4 +619,12 @@ struct TrxTrackCmp {
 // typedef std::unordered_set<TrxTrack, TrxTrackHash, TrxTrackHashCmp> TrxIdSet;
 typedef std::set<TrxTrack, TrxTrackCmp, ut_allocator<TrxTrack>> TrxIdSet;
 
+struct TrxVersion {
+  TrxVersion(trx_t *trx);
+
+  trx_t *m_trx;
+  ulint m_version;
+};
+
+typedef std::vector<TrxVersion, ut_allocator<TrxVersion>> hit_list_t;
 #endif /* trx0types_h */

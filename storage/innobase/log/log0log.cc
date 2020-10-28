@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2020, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2009, Google Inc.
 
 Portions of this file contain modifications contributed and copyrighted by
@@ -65,9 +65,9 @@ log_checksum_func_t log_checksum_algorithm_ptr;
 #include <debug_sync.h>
 #include <sys/types.h>
 #include <time.h>
-#include "ha_prototypes.h"
-
 #include "dict0boot.h"
+#include "ha_prototypes.h"
+#include "log0meb.h"
 #include "os0thread-create.h"
 #include "trx0sys.h"
 
@@ -86,7 +86,7 @@ This means that after the checkpoint lsn there should be no records to apply.
 However the log files still could contain some old data (which is not used
 during the recovery process).
 
-Every change to content of a data page must be done through a mini transaction
+Every change to content of a data page must be done through a mini-transaction
 (so called mtr - mtr_t), which in mtr_commit() writes all its log records
 to the redo log.
 
@@ -315,8 +315,6 @@ It holds (unless the log writer thread misses an update of the
 
         log.buf_dirty_pages_added_up_to_lsn <= log.buf_ready_for_write_lsn.
 
-Value is updated by: [log closer thread](@ref sect_redo_log_closer).
-
 @subsection subsect_redo_log_available_for_checkpoint_lsn
 log.available_for_checkpoint_lsn
 
@@ -378,9 +376,6 @@ log_t *log_sys;
 
 /** PFS key for the log writer thread. */
 mysql_pfs_key_t log_writer_thread_key;
-
-/** PFS key for the log closer thread. */
-mysql_pfs_key_t log_closer_thread_key;
 
 /** PFS key for the log checkpointer thread. */
 mysql_pfs_key_t log_checkpointer_thread_key;
@@ -467,13 +462,26 @@ that the proper size of the log buffer should be a power of two.
 @param[out]	log		redo log */
 static void log_calc_buf_size(log_t &log);
 
+/** Pauses writer, flusher and notifiers and switches user threads
+to write log as former version.
+NOTE: These pause/resume functions should be protected by mutex while serving.
+The caller innodb_log_writer_threads_update() is protected
+by LOCK_global_system_variables in mysqld.
+@param[out]	log	redo log */
+static void log_pause_writer_threads(log_t &log);
+
+/** Resumes writer, flusher and notifiers and switches user threads
+not to write log.
+@param[out]	log	redo log */
+static void log_resume_writer_threads(log_t &log);
+
 /**************************************************/ /**
 
  @name	Initialization and finalization of log_sys
 
  *******************************************************/
 
-/* @{ */
+/** @{ */
 
 bool log_sys_init(uint32_t n_files, uint64_t file_size, space_id_t space_id) {
   ut_a(log_sys == nullptr);
@@ -502,6 +510,7 @@ bool log_sys_init(uint32_t n_files, uint64_t file_size, space_id_t space_id) {
   log.state = log_state_t::OK;
   log.n_log_ios_old = log.n_log_ios;
   log.last_printout_time = time(nullptr);
+  ut_d(log.first_block_is_correct_for_lsn = 0);
 
   ut_a(file_size <= std::numeric_limits<uint64_t>::max() / n_files);
   log.file_size = file_size;
@@ -512,11 +521,18 @@ bool log_sys_init(uint32_t n_files, uint64_t file_size, space_id_t space_id) {
   log.current_file_real_offset = LOG_FILE_HDR_SIZE;
   log_files_update_offsets(log, log.current_file_lsn);
 
-  log.checkpointer_event = os_event_create("log_checkpointer_event");
-  log.write_notifier_event = os_event_create("log_write_notifier_event");
-  log.flush_notifier_event = os_event_create("log_flush_notifier_event");
-  log.writer_event = os_event_create("log_writer_event");
-  log.flusher_event = os_event_create("log_flusher_event");
+  log.checkpointer_event = os_event_create();
+  log.closer_event = os_event_create();
+  log.write_notifier_event = os_event_create();
+  log.flush_notifier_event = os_event_create();
+  log.writer_event = os_event_create();
+  log.flusher_event = os_event_create();
+  log.old_flush_event = os_event_create();
+  os_event_set(log.old_flush_event);
+  log.writer_threads_resume_event = os_event_create();
+  os_event_set(log.writer_threads_resume_event);
+  log.sn_lock_event = os_event_create();
+  os_event_set(log.sn_lock_event);
 
   mutex_create(LATCH_ID_LOG_CHECKPOINTER, &log.checkpointer_mutex);
   mutex_create(LATCH_ID_LOG_CLOSER, &log.closer_mutex);
@@ -524,8 +540,23 @@ bool log_sys_init(uint32_t n_files, uint64_t file_size, space_id_t space_id) {
   mutex_create(LATCH_ID_LOG_FLUSHER, &log.flusher_mutex);
   mutex_create(LATCH_ID_LOG_WRITE_NOTIFIER, &log.write_notifier_mutex);
   mutex_create(LATCH_ID_LOG_FLUSH_NOTIFIER, &log.flush_notifier_mutex);
+  mutex_create(LATCH_ID_LOG_LIMITS, &log.limits_mutex);
+  mutex_create(LATCH_ID_LOG_SN_MUTEX, &log.sn_x_lock_mutex);
 
-  log.sn_lock.create(log_sn_lock_key, SYNC_LOG_SN, 64);
+#ifdef UNIV_PFS_RWLOCK
+  /* pfs_psi is separated from sn_lock_inst,
+  because not needed for non debug build. */
+  log.pfs_psi =
+      PSI_RWLOCK_CALL(init_rwlock)(log_sn_lock_key.m_value, &log.pfs_psi);
+#endif /* UNIV_PFS_RWLOCK */
+#ifdef UNIV_DEBUG
+  /* initialize rw_lock without pfs_psi */
+  log.sn_lock_inst =
+      static_cast<rw_lock_t *>(ut_zalloc_nokey(sizeof(*log.sn_lock_inst)));
+  new (log.sn_lock_inst) rw_lock_t;
+  rw_lock_create_func(log.sn_lock_inst, SYNC_LOG_SN, "log.sn_lock_inst",
+                      __FILE__, __LINE__);
+#endif /* UNIV_DEBUG */
 
   /* Allocate buffers. */
   log_allocate_buffer(log);
@@ -538,8 +569,13 @@ bool log_sys_init(uint32_t n_files, uint64_t file_size, space_id_t space_id) {
   log_allocate_file_header_buffers(log);
 
   log_calc_buf_size(log);
+  log_calc_max_ages(log);
 
-  if (!log_calc_max_ages(log)) {
+  log.m_crash_unsafe = false;
+  log.m_disable = false;
+  log.m_first_file_lsn = LOG_START_LSN;
+
+  if (!log_calc_concurrency_margin(log)) {
     ib::error(ER_IB_MSG_1267)
         << "Cannot continue operation. ib_logfiles are too"
         << " small for innodb_thread_concurrency " << srv_thread_concurrency
@@ -564,14 +600,17 @@ void log_start(log_t &log, checkpoint_no_t checkpoint_no, lsn_t checkpoint_lsn,
   ut_a(checkpoint_lsn >= LOG_START_LSN);
   ut_a(start_lsn >= checkpoint_lsn);
 
+  log.write_to_file_requests_total.store(0);
+  log.write_to_file_requests_interval.store(0);
+
   log.recovered_lsn = start_lsn;
   log.last_checkpoint_lsn = checkpoint_lsn;
   log.next_checkpoint_no = checkpoint_no;
   log.available_for_checkpoint_lsn = checkpoint_lsn;
 
-  log_update_limits(log);
-
+  ut_a((log.sn.load(std::memory_order_acquire) & SN_LOCKED) == 0);
   log.sn = log_translate_lsn_to_sn(log.recovered_lsn);
+  log.sn_locked = log_translate_lsn_to_sn(log.recovered_lsn);
 
   if ((start_lsn + LOG_BLOCK_TRL_SIZE) % OS_FILE_LOG_BLOCK_SIZE == 0) {
     start_lsn += LOG_BLOCK_TRL_SIZE + LOG_BLOCK_HDR_SIZE;
@@ -593,8 +632,8 @@ void log_start(log_t &log, checkpoint_no_t checkpoint_no, lsn_t checkpoint_lsn,
 
   log_files_update_offsets(log, start_lsn);
 
-  log.write_ahead_end_offset =
-      ut_uint64_align_up(log.current_file_end_offset, srv_log_write_ahead_size);
+  log.write_ahead_end_offset = ut_uint64_align_up(log.current_file_real_offset,
+                                                  srv_log_write_ahead_size);
 
   lsn_t block_lsn;
   byte *block;
@@ -611,7 +650,14 @@ void log_start(log_t &log, checkpoint_no_t checkpoint_no, lsn_t checkpoint_lsn,
 
   log_block_set_data_len(block, start_lsn - block_lsn);
 
-  log_block_set_first_rec_group(block, start_lsn % OS_FILE_LOG_BLOCK_SIZE);
+  const auto first_rec_group = log_block_get_first_rec_group(block);
+
+  ut_ad(log.first_block_is_correct_for_lsn == start_lsn);
+  ut_ad(first_rec_group >= LOG_BLOCK_HDR_SIZE);
+  ut_a(first_rec_group <= start_lsn - block_lsn);
+
+  log_update_buf_limit(log, start_lsn);
+  log_update_limits(log);
 
   /* Do not reorder writes above, below this line. For x86 this
   protects only from unlikely compile-time reordering. */
@@ -632,8 +678,20 @@ void log_sys_close() {
   log_deallocate_write_ahead_buffer(log);
   log_deallocate_buffer(log);
 
-  log.sn_lock.free();
+#ifdef UNIV_DEBUG
+  rw_lock_free_func(log.sn_lock_inst);
+  ut_free(log.sn_lock_inst);
+  log.sn_lock_inst = nullptr;
+#endif /* UNIV_DEBUG */
+#ifdef UNIV_PFS_RWLOCK
+  if (log.pfs_psi != nullptr) {
+    PSI_RWLOCK_CALL(destroy_rwlock)(log.pfs_psi);
+    log.pfs_psi = nullptr;
+  }
+#endif /* UNIV_PFS_RWLOCK */
 
+  mutex_free(&log.sn_x_lock_mutex);
+  mutex_free(&log.limits_mutex);
   mutex_free(&log.write_notifier_mutex);
   mutex_free(&log.flush_notifier_mutex);
   mutex_free(&log.flusher_mutex);
@@ -643,19 +701,23 @@ void log_sys_close() {
 
   os_event_destroy(log.write_notifier_event);
   os_event_destroy(log.flush_notifier_event);
+  os_event_destroy(log.closer_event);
   os_event_destroy(log.checkpointer_event);
   os_event_destroy(log.writer_event);
   os_event_destroy(log.flusher_event);
+  os_event_destroy(log.old_flush_event);
+  os_event_destroy(log.writer_threads_resume_event);
+  os_event_destroy(log.sn_lock_event);
 
   log_sys_object->destroy();
 
-  ut_free(log_sys_object);
+  UT_DELETE(log_sys_object);
   log_sys_object = nullptr;
 
   log_sys = nullptr;
 }
 
-/* @} */
+/** @} */
 
 /**************************************************/ /**
 
@@ -663,48 +725,37 @@ void log_sys_close() {
 
  *******************************************************/
 
-/* @{ */
+/** @{ */
 
 void log_writer_thread_active_validate(const log_t &log) {
-  ut_a(log.writer_thread_alive.load());
-}
-
-void log_closer_thread_active_validate(const log_t &log) {
-  ut_a(log.closer_thread_alive.load());
+  ut_a(log_writer_is_active());
 }
 
 void log_background_write_threads_active_validate(const log_t &log) {
   ut_ad(!log.disable_redo_writes);
 
-  ut_a(log.writer_thread_alive.load());
-
-  ut_a(log.flusher_thread_alive.load());
+  ut_a(log_writer_is_active());
+  ut_a(log_flusher_is_active());
 }
 
 void log_background_threads_active_validate(const log_t &log) {
   log_background_write_threads_active_validate(log);
 
-  ut_a(log.write_notifier_thread_alive.load());
-  ut_a(log.flush_notifier_thread_alive.load());
-
-  ut_a(log.closer_thread_alive.load());
-
-  ut_a(log.checkpointer_thread_alive.load());
+  ut_a(log_write_notifier_is_active());
+  ut_a(log_flush_notifier_is_active());
+  ut_a(log_checkpointer_is_active());
 }
 
 void log_background_threads_inactive_validate(const log_t &log) {
-  ut_a(!log.checkpointer_thread_alive.load());
-  ut_a(!log.closer_thread_alive.load());
-  ut_a(!log.write_notifier_thread_alive.load());
-  ut_a(!log.flush_notifier_thread_alive.load());
-  ut_a(!log.writer_thread_alive.load());
-  ut_a(!log.flusher_thread_alive.load());
+  ut_a(!log_checkpointer_is_active());
+  ut_a(!log_write_notifier_is_active());
+  ut_a(!log_flush_notifier_is_active());
+  ut_a(!log_writer_is_active());
+  ut_a(!log_flusher_is_active());
 }
 
 void log_start_background_threads(log_t &log) {
   ib::info(ER_IB_MSG_1258) << "Log background threads are being started...";
-
-  std::atomic_thread_fence(std::memory_order_seq_cst);
 
   log_background_threads_inactive_validate(log);
 
@@ -712,30 +763,35 @@ void log_start_background_threads(log_t &log) {
   ut_a(!srv_read_only_mode);
   ut_a(log.sn.load() > 0);
 
-  log.closer_thread_alive = true;
-  log.checkpointer_thread_alive = true;
-  log.writer_thread_alive = true;
-  log.flusher_thread_alive = true;
-  log.write_notifier_thread_alive = true;
-  log.flush_notifier_thread_alive = true;
+  log.should_stop_threads.store(false);
+  log.writer_threads_paused.store(false);
 
-  log.should_stop_threads = false;
+  srv_threads.m_log_checkpointer =
+      os_thread_create(log_checkpointer_thread_key, log_checkpointer, &log);
 
-  std::atomic_thread_fence(std::memory_order_seq_cst);
+  srv_threads.m_log_flush_notifier =
+      os_thread_create(log_flush_notifier_thread_key, log_flush_notifier, &log);
 
-  os_thread_create(log_checkpointer_thread_key, log_checkpointer, &log);
+  srv_threads.m_log_flusher =
+      os_thread_create(log_flusher_thread_key, log_flusher, &log);
 
-  os_thread_create(log_closer_thread_key, log_closer, &log);
+  srv_threads.m_log_write_notifier =
+      os_thread_create(log_write_notifier_thread_key, log_write_notifier, &log);
 
-  os_thread_create(log_writer_thread_key, log_writer, &log);
+  srv_threads.m_log_writer =
+      os_thread_create(log_writer_thread_key, log_writer, &log);
 
-  os_thread_create(log_flusher_thread_key, log_flusher, &log);
-
-  os_thread_create(log_write_notifier_thread_key, log_write_notifier, &log);
-
-  os_thread_create(log_flush_notifier_thread_key, log_flush_notifier, &log);
+  srv_threads.m_log_checkpointer.start();
+  srv_threads.m_log_flush_notifier.start();
+  srv_threads.m_log_flusher.start();
+  srv_threads.m_log_write_notifier.start();
+  srv_threads.m_log_writer.start();
 
   log_background_threads_active_validate(log);
+
+  log_control_writer_threads(log);
+
+  meb::redo_log_archive_init();
 }
 
 void log_stop_background_threads(log_t &log) {
@@ -743,46 +799,134 @@ void log_stop_background_threads(log_t &log) {
           * log_checkpointer starts log_checkpoint()
           * log_checkpoint() asks to persist dd dynamic metadata
           * dict_persist_dd_table_buffer() tries to write to redo
-          * but cannot acquire shared lock on log.sn_lock
+          * but cannot lock on log.sn
           * so log_checkpointer thread waits for this thread
             until the x-lock is released
           * but this thread waits until log background threads
             have been stopped - log_checkpointer is not stopped. */
-  ut_ad(!log.sn_lock.x_own());
+  ut_ad(!rw_lock_own(log.sn_lock_inst, RW_LOCK_X));
 
   ib::info(ER_IB_MSG_1259) << "Log background threads are being closed...";
 
-  std::atomic_thread_fence(std::memory_order_seq_cst);
+  meb::redo_log_archive_deinit();
 
   log_background_threads_active_validate(log);
 
   ut_a(!srv_read_only_mode);
 
-  log.should_stop_threads = true;
+  log_resume_writer_threads(log);
+  log.should_stop_threads.store(true);
 
   /* Wait until threads are closed. */
-  while (log.closer_thread_alive.load() ||
-         log.checkpointer_thread_alive.load() ||
-         log.writer_thread_alive.load() || log.flusher_thread_alive.load() ||
-         log.write_notifier_thread_alive.load() ||
-         log.flush_notifier_thread_alive.load()) {
-    os_thread_sleep(100 * 1000);
+  while (log_writer_is_active()) {
+    os_event_set(log.writer_event);
+    os_thread_sleep(10);
   }
-
-  std::atomic_thread_fence(std::memory_order_seq_cst);
+  while (log_write_notifier_is_active()) {
+    os_event_set(log.write_notifier_event);
+    os_thread_sleep(10);
+  }
+  while (log_flusher_is_active()) {
+    os_event_set(log.flusher_event);
+    os_thread_sleep(10);
+  }
+  while (log_flush_notifier_is_active()) {
+    os_event_set(log.flush_notifier_event);
+    os_thread_sleep(10);
+  }
+  while (log_checkpointer_is_active()) {
+    os_event_set(log.checkpointer_event);
+    os_thread_sleep(10);
+  }
 
   log_background_threads_inactive_validate(log);
 }
 
-bool log_threads_active(const log_t &log) {
-  return (log.closer_thread_alive.load() ||
-          log.checkpointer_thread_alive.load() ||
-          log.writer_thread_alive.load() || log.flusher_thread_alive.load() ||
-          log.write_notifier_thread_alive.load() ||
-          log.flush_notifier_thread_alive.load());
+void log_stop_background_threads_nowait(log_t &log) {
+  log_resume_writer_threads(log);
+  log.should_stop_threads.store(true);
+  log_wake_threads(log);
 }
 
-/* @} */
+void log_wake_threads(log_t &log) {
+  if (log_checkpointer_is_active()) {
+    os_event_set(log.checkpointer_event);
+  }
+  if (log_writer_is_active()) {
+    os_event_set(log.writer_event);
+  }
+  if (log_flusher_is_active()) {
+    os_event_set(log.flusher_event);
+  }
+  if (log_write_notifier_is_active()) {
+    os_event_set(log.write_notifier_event);
+  }
+}
+
+static void log_pause_writer_threads(log_t &log) {
+  /* protected by LOCK_global_system_variables */
+  if (!log.writer_threads_paused.load()) {
+    os_event_reset(log.writer_threads_resume_event);
+    log.writer_threads_paused.store(true);
+    if (log_writer_is_active()) {
+      os_event_set(log.writer_event);
+    }
+    if (log_flusher_is_active()) {
+      os_event_set(log.flusher_event);
+    }
+    if (log_write_notifier_is_active()) {
+      os_event_set(log.write_notifier_event);
+    }
+    if (log_flush_notifier_is_active()) {
+      os_event_set(log.flush_notifier_event);
+    }
+
+    /* wakeup waiters to use the log writer threads */
+    for (size_t i = 0; i < log.write_events_size; ++i) {
+      os_event_set(log.write_events[i]);
+    }
+    for (size_t i = 0; i < log.flush_events_size; ++i) {
+      os_event_set(log.flush_events[i]);
+    }
+  }
+}
+
+static void log_resume_writer_threads(log_t &log) {
+  /* protected by LOCK_global_system_variables */
+  if (log.writer_threads_paused.load()) {
+    log.writer_threads_paused.store(false);
+
+    /* wakeup waiters not to use the log writer threads */
+    os_event_set(log.old_flush_event);
+
+    /* gives resume lsn for each notifiers */
+    log.write_notifier_resume_lsn.store(log.write_lsn.load());
+    log.flush_notifier_resume_lsn.store(log.flushed_to_disk_lsn.load());
+    os_event_set(log.writer_threads_resume_event);
+
+    /* confirms *_notifier_resume_lsn have been accepted */
+    while (log.write_notifier_resume_lsn.load(std::memory_order_acquire) != 0 ||
+           log.flush_notifier_resume_lsn.load(std::memory_order_acquire) != 0) {
+      os_thread_sleep(1000);
+      ut_a(log_write_notifier_is_active());
+      ut_a(log_flush_notifier_is_active());
+      os_event_set(log.writer_threads_resume_event);
+    }
+  }
+}
+
+void log_control_writer_threads(log_t &log) {
+  /* pause/resume the log writer threads based on innodb_log_writer_threads
+  value. NOTE: This function is protected by LOCK_global_system_variables
+  in mysqld by called from innodb_log_writer_threads_update() */
+  if (srv_log_writer_threads) {
+    log_resume_writer_threads(log);
+  } else {
+    log_pause_writer_threads(log);
+  }
+}
+
+/** @} */
 
 /**************************************************/ /**
 
@@ -790,7 +934,7 @@ bool log_threads_active(const log_t &log) {
 
  *******************************************************/
 
-/* @{ */
+/** @{ */
 
 void log_print(const log_t &log, FILE *file) {
   lsn_t last_checkpoint_lsn;
@@ -798,18 +942,21 @@ void log_print(const log_t &log, FILE *file) {
   lsn_t ready_for_write_lsn;
   lsn_t write_lsn;
   lsn_t flush_lsn;
-  lsn_t oldest_lsn;
   lsn_t max_assigned_lsn;
   lsn_t current_lsn;
+  lsn_t oldest_lsn;
 
-  last_checkpoint_lsn = log.last_checkpoint_lsn;
+  last_checkpoint_lsn = log.last_checkpoint_lsn.load();
   dirty_pages_added_up_to_lsn = log_buffer_dirty_pages_added_up_to_lsn(log);
   ready_for_write_lsn = log_buffer_ready_for_write_lsn(log);
-  write_lsn = log.write_lsn;
-  flush_lsn = log.flushed_to_disk_lsn;
-  oldest_lsn = log.available_for_checkpoint_lsn;
+  write_lsn = log.write_lsn.load();
+  flush_lsn = log.flushed_to_disk_lsn.load();
   max_assigned_lsn = log_get_lsn(log);
   current_lsn = log_get_lsn(log);
+
+  log_limits_mutex_enter(log);
+  oldest_lsn = log.available_for_checkpoint_lsn;
+  log_limits_mutex_exit(log);
 
   fprintf(file,
           "Log sequence number          " LSN_PF
@@ -853,7 +1000,7 @@ void log_refresh_stats(log_t &log) {
   log.last_printout_time = time(nullptr);
 }
 
-/* @} */
+/** @} */
 
 /**************************************************/ /**
 
@@ -861,7 +1008,7 @@ void log_refresh_stats(log_t &log) {
 
  *******************************************************/
 
-/* @{ */
+/** @{ */
 
 bool log_buffer_resize_low(log_t &log, size_t new_size, lsn_t end_lsn) {
   ut_ad(log_checkpointer_mutex_own(log));
@@ -902,6 +1049,8 @@ bool log_buffer_resize_low(log_t &log, size_t new_size, lsn_t end_lsn) {
   UT_DELETE_ARRAY(tmp_buf);
 
   log_calc_buf_size(log);
+
+  log_update_buf_limit(log);
 
   ut_a(srv_log_buffer_size == log.buf_size);
 
@@ -957,11 +1106,9 @@ static void log_calc_buf_size(log_t &log) {
   for free space in the log buffer). */
 
   log.buf_size_sn = log_translate_lsn_to_sn(log.buf_size);
-
-  log_update_limits(log);
 }
 
-/* @} */
+/** @} */
 
 /**************************************************/ /**
 
@@ -969,7 +1116,7 @@ static void log_calc_buf_size(log_t &log) {
 
  *******************************************************/
 
-/* @{ */
+/** @{ */
 
 static void log_allocate_buffer(log_t &log) {
   ut_a(srv_log_buffer_size >= INNODB_LOG_BUFFER_SIZE_MIN);
@@ -1012,7 +1159,7 @@ static void log_allocate_flush_events(log_t &log) {
   log.flush_events = UT_NEW_ARRAY_NOKEY(os_event_t, n);
 
   for (size_t i = 0; i < log.flush_events_size; ++i) {
-    log.flush_events[i] = os_event_create("log_flush_event");
+    log.flush_events[i] = os_event_create();
   }
 }
 
@@ -1038,7 +1185,7 @@ static void log_allocate_write_events(log_t &log) {
   log.write_events = UT_NEW_ARRAY_NOKEY(os_event_t, n);
 
   for (size_t i = 0; i < log.write_events_size; ++i) {
-    log.write_events[i] = os_event_create("log_write_event");
+    log.write_events[i] = os_event_create();
   }
 }
 
@@ -1090,7 +1237,7 @@ static void log_deallocate_file_header_buffers(log_t &log) {
   log.file_header_bufs = nullptr;
 }
 
-/* @} */
+/** @} */
 
 /**************************************************/ /**
 
@@ -1098,7 +1245,7 @@ static void log_deallocate_file_header_buffers(log_t &log) {
 
  *******************************************************/
 
-/* @{ */
+/** @{ */
 
 void log_position_lock(log_t &log) {
   log_buffer_x_lock_enter(log);
@@ -1114,7 +1261,7 @@ void log_position_unlock(log_t &log) {
 
 void log_position_collect_lsn_info(const log_t &log, lsn_t *current_lsn,
                                    lsn_t *checkpoint_lsn) {
-  ut_ad(log_buffer_x_lock_own(log));
+  ut_ad(rw_lock_own(log.sn_lock_inst, RW_LOCK_X));
   ut_ad(log_checkpointer_mutex_own(log));
 
   *checkpoint_lsn = log.last_checkpoint_lsn.load();
@@ -1129,6 +1276,6 @@ void log_position_collect_lsn_info(const log_t &log, lsn_t *current_lsn,
   ut_a(*current_lsn >= *checkpoint_lsn);
 }
 
-  /* @} */
+/** @} */
 
 #endif /* !UNIV_HOTBACKUP */

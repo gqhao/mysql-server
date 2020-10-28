@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -34,7 +34,6 @@
 #include "mysqld_error.h"               // ER_SPECIFIC_ACCESS_DENIED_ERROR
 #include "sql/auth/auth_acls.h"         // SHUTDOWN_ACL
 #include "sql/auth/sql_security_ctx.h"  // Security_context
-#include "sql/log.h"                    // Query_logger
 #include "sql/sql_class.h"              // THD
 #include "sql/sql_lex.h"                // LEX
 
@@ -54,33 +53,35 @@ static inline bool check_restart_server_admin_privilege(THD *thd) {
   return !opt_noacl && check_global_access(thd, SHUTDOWN_ACL);
 }
 
-#ifndef _WIN32
 bool is_mysqld_managed() {
+#ifndef _WIN32
   char *parent_pid = getenv("MYSQLD_PARENT_PID");
   if (parent_pid == nullptr) return false;
 
   return atoi(parent_pid) == getppid();
-}
+#else
+  return !(opt_debugging || opt_no_monitor);
 #endif  // _WIN32
+}
 
 bool Sql_cmd_restart_server::execute(THD *thd) {
-  DBUG_ENTER("Sql_cmd_restart_server");
+  DBUG_TRACE;
 
-  if (check_restart_server_admin_privilege(thd)) DBUG_RETURN(true);
+  if (check_restart_server_admin_privilege(thd)) return true;
 
   // RESTART shall not be binlogged.
-  thd->lex->no_write_to_binlog = 1;
+  thd->lex->no_write_to_binlog = true;
 
   query_logger.general_log_print(thd, COM_QUERY, NullS);
-  LogErr(SYSTEM_LEVEL, ER_RESTART_RECEIVED_INFO,
-         thd->security_context()->user().str, server_version);
 
   if (signal_restart_server()) {
     my_error(ER_RESTART_SERVER_FAILED, MYF(0), "Restart server failed");
-    DBUG_RETURN(true);
+    return true;
   }
 
+  LogErr(SYSTEM_LEVEL, ER_RESTART_RECEIVED_INFO,
+         thd->security_context()->user().str, server_version);
   my_ok(thd);
 
-  DBUG_RETURN(false);
+  return false;
 }

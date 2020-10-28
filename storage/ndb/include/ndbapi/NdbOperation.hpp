@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2016, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -61,6 +61,8 @@ class NdbOperation
   friend class NdbScanFilterImpl;
   friend class NdbReceiver;
   friend class NdbBlob;
+  friend class BlobBatchChecker;
+  friend class OpList;
 #endif
 
 public:
@@ -889,9 +891,9 @@ public:
   const NdbError & getNdbError() const;
 
   /**
-   * Get the method number where the error occured.
+   * Get the method number where the error occurred.
    * 
-   * @return method number where the error occured.
+   * @return method number where the error occurred.
    */
 #ifndef DOXYGEN_SHOULD_SKIP_DEPRECATED
   int getNdbErrorLine();
@@ -1065,7 +1067,8 @@ public:
                  OO_QUEUABLE     = 0x100,
                  OO_NOT_QUEUABLE = 0x200,
                  OO_DEFERRED_CONSTAINTS = 0x400,
-                 OO_DISABLE_FK   = 0x800
+                 OO_DISABLE_FK   = 0x800,
+                 OO_NOWAIT       = 0x1000
     };
 
     /* An operation-specific abort option.
@@ -1111,6 +1114,9 @@ public:
 #ifndef DOXYGEN_SHOULD_SKIP_INTERNAL
   // XXX until NdbRecord is used in ndb_restore
   void set_disable_fk() { m_flags |= OF_DISABLE_FK; }
+
+  /* Set nowait option on locking read */
+  int setNoWait();
 #endif
 
 protected:
@@ -1363,8 +1369,8 @@ protected:
   int	      insertCall(Uint32 aCall);
   int	      insertBranch(Uint32 aBranch);
 
-  Uint32 ptr2int() { return theReceiver.getId(); };
-  Uint32 ptr2int() const { return theReceiver.getId(); };
+  Uint32 ptr2int() { return theReceiver.getId(); }
+  Uint32 ptr2int() const { return theReceiver.getId(); }
 
   // get table or index key from prepared signals
   int getKeyFromTCREQ(Uint32* data, Uint32 & size);
@@ -1483,7 +1489,9 @@ protected:
     OF_USE_ANY_VALUE = 0x2,
     OF_QUEUEABLE = 0x4,
     OF_DEFERRED_CONSTRAINTS = 0x8,
-    OF_DISABLE_FK = 0x10
+    OF_DISABLE_FK = 0x10,
+    OF_NOWAIT = 0x20,
+    OF_BLOB_PART_READ = 0x40
   };
   Uint8  m_flags;
 

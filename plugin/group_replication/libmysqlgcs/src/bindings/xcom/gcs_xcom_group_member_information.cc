@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -30,17 +30,19 @@
 #include "plugin/group_replication/libmysqlgcs/include/mysql/gcs/gcs_logging_system.h"
 #include "plugin/group_replication/libmysqlgcs/include/mysql/gcs/xplatform/byteorder.h"
 #include "plugin/group_replication/libmysqlgcs/include/mysql/gcs/xplatform/my_xp_util.h"
-#include "plugin/group_replication/libmysqlgcs/src/bindings/xcom/gcs_xcom_utils.h"
+#include "plugin/group_replication/libmysqlgcs/src/bindings/xcom/gcs_xcom_proxy.h"
+#include "plugin/group_replication/libmysqlgcs/src/bindings/xcom/xcom/synode_no.h"
 
 Gcs_xcom_node_address::Gcs_xcom_node_address(std::string member_address)
     : m_member_address(member_address), m_member_ip(), m_member_port(0) {
-  std::size_t idx = member_address.find(":");
+  char address[IP_MAX_SIZE];
+  xcom_port port;
 
-  if (idx != std::string::npos) {
-    m_member_ip.append(m_member_address, 0, idx);
-    std::string sport;
-    sport.append(m_member_address, idx + 1, m_member_address.size() - idx);
-    m_member_port = static_cast<xcom_port>(strtoul(sport.c_str(), NULL, 0));
+  int error = get_ip_and_port(const_cast<char *>(member_address.c_str()),
+                              address, &port);
+  if (!error) {
+    m_member_ip.append(address);
+    m_member_port = port;
   }
 }
 
@@ -56,6 +58,10 @@ std::string *Gcs_xcom_node_address::get_member_representation() const {
   return new std::string(m_member_address);
 }
 
+bool Gcs_xcom_node_address::is_valid() const {
+  return !m_member_ip.empty() && m_member_port != 0;
+}
+
 Gcs_xcom_node_address::~Gcs_xcom_node_address() {}
 
 Gcs_xcom_node_information::Gcs_xcom_node_information(
@@ -64,7 +70,10 @@ Gcs_xcom_node_information::Gcs_xcom_node_information(
       m_uuid(Gcs_xcom_uuid::create_uuid()),
       m_node_no(VOID_NODE_NO),
       m_alive(alive),
-      m_timestamp(0) {}
+      m_member(false),
+      m_suspicion_creation_timestamp(0),
+      m_lost_messages(false),
+      m_max_synode(null_synode) {}
 
 Gcs_xcom_node_information::Gcs_xcom_node_information(
     const std::string &member_id, const Gcs_xcom_uuid &uuid,
@@ -73,13 +82,18 @@ Gcs_xcom_node_information::Gcs_xcom_node_information(
       m_uuid(uuid),
       m_node_no(node_no),
       m_alive(alive),
-      m_timestamp(0) {}
+      m_member(false),
+      m_suspicion_creation_timestamp(0),
+      m_lost_messages(false),
+      m_max_synode(null_synode) {}
 
-void Gcs_xcom_node_information::set_timestamp(uint64_t ts) { m_timestamp = ts; }
+void Gcs_xcom_node_information::set_suspicion_creation_timestamp(uint64_t ts) {
+  m_suspicion_creation_timestamp = ts;
+}
 
 /* purecov: begin tested */
-uint64_t Gcs_xcom_node_information::get_timestamp() const {
-  return m_timestamp;
+uint64_t Gcs_xcom_node_information::get_suspicion_creation_timestamp() const {
+  return m_suspicion_creation_timestamp;
 }
 /* purecov: end */
 
@@ -107,9 +121,57 @@ unsigned int Gcs_xcom_node_information::get_node_no() const {
 
 bool Gcs_xcom_node_information::is_alive() const { return m_alive; }
 
+bool Gcs_xcom_node_information::is_member() const { return m_member; }
+
+void Gcs_xcom_node_information::set_member(bool m) { m_member = m; }
+
+std::pair<bool, node_address *> Gcs_xcom_node_information::make_xcom_identity(
+    Gcs_xcom_proxy &xcom_proxy) const {
+  bool constexpr kError = true;
+  bool constexpr kSuccess = false;
+
+  bool error_code = kError;
+  node_address *xcom_identity = nullptr;
+
+  /* Get our unique XCom identifier to pass it along to XCom. */
+  // Address.
+  const std::string &address_str = get_member_id().get_member_id();
+  char *address[] = {const_cast<char *>(address_str.c_str())};
+  // Incarnation.
+  bool error_creating_blob;
+  blob incarnation_blob;
+  std::tie(error_creating_blob, incarnation_blob) =
+      get_member_uuid().make_xcom_blob();
+
+  if (!error_creating_blob) {
+    blob incarnation[] = {incarnation_blob};
+    xcom_identity = xcom_proxy.new_node_address_uuid(1, address, incarnation);
+    std::free(incarnation_blob.data.data_val);
+    error_code = kSuccess;
+  }
+
+  return {error_code, xcom_identity};
+}
+
 bool Gcs_xcom_node_information::has_timed_out(uint64_t now_ts,
                                               uint64_t timeout) {
-  return (m_timestamp + timeout) < now_ts;
+  return (m_suspicion_creation_timestamp + timeout) < now_ts;
+}
+
+bool Gcs_xcom_node_information::has_lost_messages() const {
+  return m_lost_messages;
+}
+
+void Gcs_xcom_node_information::set_lost_messages(bool lost_msgs) {
+  m_lost_messages = lost_msgs;
+}
+
+synode_no Gcs_xcom_node_information::get_max_synode() const {
+  return m_max_synode;
+}
+
+void Gcs_xcom_node_information::set_max_synode(synode_no synode) {
+  m_max_synode = synode;
 }
 
 Gcs_xcom_uuid Gcs_xcom_uuid::create_uuid() {
@@ -148,7 +210,7 @@ Gcs_xcom_uuid Gcs_xcom_uuid::create_uuid() {
 }
 
 bool Gcs_xcom_uuid::encode(uchar **buffer, unsigned int *size) const {
-  if (buffer == NULL || *buffer == NULL || size == NULL) {
+  if (buffer == nullptr || *buffer == nullptr || size == nullptr) {
     /* purecov: begin tested */
     return false;
     /* purecov: end */
@@ -161,7 +223,7 @@ bool Gcs_xcom_uuid::encode(uchar **buffer, unsigned int *size) const {
 }
 
 bool Gcs_xcom_uuid::decode(const uchar *buffer, const unsigned int size) {
-  if (buffer == NULL) {
+  if (buffer == nullptr) {
     /* purecov: begin tested */
     return false;
     /* purecov: end */
@@ -173,20 +235,40 @@ bool Gcs_xcom_uuid::decode(const uchar *buffer, const unsigned int size) {
   return true;
 }
 
+std::pair<bool, blob> Gcs_xcom_uuid::make_xcom_blob() const {
+  bool constexpr kError = true;
+  bool constexpr kSuccess = false;
+  bool error_code = kError;
+
+  blob incarnation;
+  incarnation.data.data_len = actual_value.size();
+  incarnation.data.data_val =
+      reinterpret_cast<char *>(std::malloc(incarnation.data.data_len));
+  if (incarnation.data.data_val == nullptr) goto end;
+
+  encode(reinterpret_cast<uchar **>(&incarnation.data.data_val),
+         &incarnation.data.data_len);
+  error_code = kSuccess;
+
+end:
+  return {error_code, incarnation};
+}
+
 Gcs_xcom_nodes::Gcs_xcom_nodes()
     : m_node_no(VOID_NODE_NO),
       m_nodes(),
       m_size(0),
-      m_addrs(NULL),
-      m_uuids(NULL) {}
+      m_addrs(nullptr),
+      m_uuids(nullptr) {}
 
 Gcs_xcom_nodes::Gcs_xcom_nodes(const site_def *site, node_set &nodes)
     : m_node_no(site->nodeno),
       m_nodes(),
       m_size(nodes.node_set_len),
-      m_addrs(NULL),
-      m_uuids(NULL) {
+      m_addrs(nullptr),
+      m_uuids(nullptr) {
   Gcs_xcom_uuid uuid;
+
   for (unsigned int i = 0; i < nodes.node_set_len; ++i) {
     /* Get member address and save it. */
     std::string address(site->nodes.node_list_val[i].address);
@@ -234,7 +316,7 @@ const Gcs_xcom_node_information *Gcs_xcom_nodes::get_node(
       return &(*nodes_it);
   }
 
-  return NULL;
+  return nullptr;
 }
 
 const Gcs_xcom_node_information *Gcs_xcom_nodes::get_node(
@@ -244,7 +326,7 @@ const Gcs_xcom_node_information *Gcs_xcom_nodes::get_node(
     if ((*nodes_it).get_node_no() == node_no) return &(*nodes_it);
   }
 
-  return NULL; /* purecov: tested */
+  return nullptr; /* purecov: tested */
 }
 
 /* purecov: begin tested */
@@ -256,7 +338,7 @@ const Gcs_xcom_node_information *Gcs_xcom_nodes::get_node(
       return &(*nodes_it);
   }
 
-  return NULL;
+  return nullptr;
 }
 /* purecov: end */
 
@@ -301,20 +383,20 @@ bool Gcs_xcom_nodes::encode(unsigned int *ptr_size, char ***ptr_addrs,
   /*
     If there is information already encoded, free it first.
   */
-  if (m_addrs != NULL || m_uuids != NULL) {
+  if (m_addrs != nullptr || m_uuids != nullptr) {
     /* purecov: begin tested */
     free_encode();
     /* purecov: end */
   }
 
-  m_addrs = static_cast<char **>(malloc(m_size * sizeof(char *)));
-  m_uuids = static_cast<blob *>(malloc(m_size * sizeof(blob)));
+  m_addrs = static_cast<char **>(std::calloc(m_size, sizeof(char *)));
+  m_uuids = static_cast<blob *>(std::calloc(m_size, sizeof(blob)));
 
   /*
     If memory was not successfuly allocated, an error is
     reported.
   */
-  if ((m_addrs == NULL) || (m_uuids == NULL)) {
+  if ((m_addrs == nullptr) || (m_uuids == nullptr)) {
     /* purecov: begin deadcode */
     free_encode();
     return false;
@@ -348,7 +430,7 @@ bool Gcs_xcom_nodes::encode(unsigned int *ptr_size, char ***ptr_addrs,
 void Gcs_xcom_nodes::free_encode() {
   unsigned int i = 0;
 
-  if (m_uuids != NULL) {
+  if (m_uuids != nullptr) {
     for (; i < m_size; i++) {
       free(m_uuids[i].data.data_val);
     }
@@ -357,6 +439,6 @@ void Gcs_xcom_nodes::free_encode() {
   free(m_addrs);
   free(m_uuids);
 
-  m_addrs = NULL;
-  m_uuids = NULL;
+  m_addrs = nullptr;
+  m_uuids = nullptr;
 }

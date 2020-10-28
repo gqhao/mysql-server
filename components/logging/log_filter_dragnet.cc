@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2.0,
@@ -65,7 +65,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
 #define LOG_FILTER_DUMP_BUFF_SIZE 8192
 #define LOG_FILTER_LANGUAGE_NAME "dragnet"
-#define LOG_FILTER_VARIABLE_NAME "log_error_filter_rules"
+#define LOG_FILTER_SYSVAR_NAME "log_error_filter_rules"
+#define LOG_FILTER_STATUS_NAME "Status"
 #define LOG_FILTER_DEFAULT_RULES        \
   "IF prio>=INFORMATION THEN drop. IF " \
   "EXISTS source_line THEN unset source_line."
@@ -76,6 +77,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 #include <mysql/components/component_implementation.h>
 #include <mysql/components/service_implementation.h>
 
+#include <mysql/components/services/component_status_var_service.h>
 #include <mysql/components/services/component_sys_var_service.h>
 #include <mysql/plugin.h>
 
@@ -83,10 +85,20 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
 REQUIRES_SERVICE_PLACEHOLDER(component_sys_variable_register);
 REQUIRES_SERVICE_PLACEHOLDER(component_sys_variable_unregister);
+REQUIRES_SERVICE_PLACEHOLDER(status_variable_registration);
 
-STR_CHECK_ARG(str) sys_var_filter_rules;  ///< limits and default for sysvar
+STR_CHECK_ARG(rules) values_filter_rules;  ///< limits and default for sysvar
 
 static char *log_error_filter_rules = nullptr;  ///< sysvar containing rules
+
+static char log_error_filter_decompile[LOG_FILTER_DUMP_BUFF_SIZE] = "";
+
+static SHOW_VAR show_var_filter_rules_decompile[] = {
+    {LOG_FILTER_LANGUAGE_NAME "." LOG_FILTER_STATUS_NAME,
+     (char *)&log_error_filter_decompile, SHOW_CHAR, SHOW_SCOPE_GLOBAL},
+    {nullptr, nullptr, SHOW_UNDEF,
+     SHOW_SCOPE_UNDEF}  // null terminator required
+};
 
 /*
   Accessors for log items etc.
@@ -102,7 +114,7 @@ static char *log_error_filter_rules = nullptr;  ///< sysvar containing rules
 #include <mysql/components/services/log_builtins_filter.h>
 
 /*
-  C_STRING_WITH_LEN
+  STRING_WITH_LEN
 */
 #include <m_string.h>
 
@@ -183,67 +195,68 @@ typedef enum enum_log_filter_syntax {
 static const log_filter_xlate_key log_filter_xlate_keys[] = {
     // keywords. order matters: we want to dump "else if" as "elseif" etc.
     {LOG_FILTER_WORD_IF, LOG_FILTER_XLATE_FLOW | LOG_FILTER_XLATE_PREFIX,
-     C_STRING_WITH_LEN("IF")},
+     STRING_WITH_LEN("IF")},
     {LOG_FILTER_WORD_ELSEIF, LOG_FILTER_XLATE_FLOW | LOG_FILTER_XLATE_PREFIX,
-     C_STRING_WITH_LEN("ELSEIF")},
+     STRING_WITH_LEN("ELSEIF")},
     {LOG_FILTER_WORD_ELSEIF, LOG_FILTER_XLATE_FLOW | LOG_FILTER_XLATE_PREFIX,
-     C_STRING_WITH_LEN("ELSE IF")},
+     STRING_WITH_LEN("ELSE IF")},
     {LOG_FILTER_WORD_ELSEIF, LOG_FILTER_XLATE_FLOW | LOG_FILTER_XLATE_PREFIX,
-     C_STRING_WITH_LEN("ELSIF")}, /* PL/SQL style */
+     STRING_WITH_LEN("ELSIF")}, /* PL/SQL style */
     {LOG_FILTER_WORD_ELSE, LOG_FILTER_XLATE_FLOW | LOG_FILTER_XLATE_PREFIX,
-     C_STRING_WITH_LEN("ELSE")},
+     STRING_WITH_LEN("ELSE")},
 
-    {LOG_FILTER_WORD_THEN, LOG_FILTER_XLATE_FLOW, C_STRING_WITH_LEN("THEN")},
+    {LOG_FILTER_WORD_THEN, LOG_FILTER_XLATE_FLOW, STRING_WITH_LEN("THEN")},
 
     // conditions
 
     // absence required
     {LOG_FILTER_COND_ABSENT, LOG_FILTER_XLATE_COND | LOG_FILTER_XLATE_PREFIX,
-     C_STRING_WITH_LEN("NOT EXISTS")},
+     STRING_WITH_LEN("NOT EXISTS")},
     {LOG_FILTER_COND_ABSENT, LOG_FILTER_XLATE_COND | LOG_FILTER_XLATE_PREFIX,
-     C_STRING_WITH_LEN("NOT")},
+     STRING_WITH_LEN("NOT")},
 
     // presence required
     {LOG_FILTER_COND_PRESENT, LOG_FILTER_XLATE_COND | LOG_FILTER_XLATE_PREFIX,
-     C_STRING_WITH_LEN("EXISTS")},
+     STRING_WITH_LEN("EXISTS")},
 
     {LOG_FILTER_COND_EQ, LOG_FILTER_XLATE_COND | LOG_FILTER_XLATE_REF,
-     C_STRING_WITH_LEN("==")},
+     STRING_WITH_LEN("==")},
 
     {LOG_FILTER_COND_NE, LOG_FILTER_XLATE_COND | LOG_FILTER_XLATE_REF,
-     C_STRING_WITH_LEN("!=")},
+     STRING_WITH_LEN("!=")},
     {LOG_FILTER_COND_NE, LOG_FILTER_XLATE_COND | LOG_FILTER_XLATE_REF,
-     C_STRING_WITH_LEN("<>")},
+     STRING_WITH_LEN("<>")},
 
     {LOG_FILTER_COND_LT, LOG_FILTER_XLATE_COND | LOG_FILTER_XLATE_REF,
-     C_STRING_WITH_LEN("<")},
+     STRING_WITH_LEN("<")},
 
     {LOG_FILTER_COND_LE, LOG_FILTER_XLATE_COND | LOG_FILTER_XLATE_REF,
-     C_STRING_WITH_LEN("<=")},
+     STRING_WITH_LEN("<=")},
     {LOG_FILTER_COND_LE, LOG_FILTER_XLATE_COND | LOG_FILTER_XLATE_REF,
-     C_STRING_WITH_LEN("=<")},
+     STRING_WITH_LEN("=<")},
 
     {LOG_FILTER_COND_GE, LOG_FILTER_XLATE_COND | LOG_FILTER_XLATE_REF,
-     C_STRING_WITH_LEN(">=")},
+     STRING_WITH_LEN(">=")},
     {LOG_FILTER_COND_GE, LOG_FILTER_XLATE_COND | LOG_FILTER_XLATE_REF,
-     C_STRING_WITH_LEN("=>")},
+     STRING_WITH_LEN("=>")},
 
     {LOG_FILTER_COND_GT, LOG_FILTER_XLATE_COND | LOG_FILTER_XLATE_REF,
-     C_STRING_WITH_LEN(">")},
+     STRING_WITH_LEN(">")},
 
     // verbs/actions
 
-    {LOG_FILTER_DROP, LOG_FILTER_XLATE_VERB, C_STRING_WITH_LEN("drop")},
+    {LOG_FILTER_DROP, LOG_FILTER_XLATE_VERB, STRING_WITH_LEN("drop")},
     {LOG_FILTER_THROTTLE, LOG_FILTER_XLATE_VERB | LOG_FILTER_XLATE_AUXVAL,
-     C_STRING_WITH_LEN("throttle")},
+     STRING_WITH_LEN("throttle")},
     {LOG_FILTER_ITEM_SET,
      LOG_FILTER_XLATE_VERB | LOG_FILTER_XLATE_AUXNAME | LOG_FILTER_XLATE_AUXVAL,
-     C_STRING_WITH_LEN("set")},
+     STRING_WITH_LEN("set")},
     {LOG_FILTER_ITEM_DEL, LOG_FILTER_XLATE_VERB | LOG_FILTER_XLATE_AUXNAME,
-     C_STRING_WITH_LEN("unset")},
+     STRING_WITH_LEN("unset")},
+    {LOG_FILTER_RETURN, LOG_FILTER_XLATE_VERB, STRING_WITH_LEN("return")},
 
-    {LOG_FILTER_CHAIN_AND, LOG_FILTER_XLATE_CHAIN, C_STRING_WITH_LEN("AND")},
-    {LOG_FILTER_CHAIN_OR, LOG_FILTER_XLATE_CHAIN, C_STRING_WITH_LEN("OR")}};
+    {LOG_FILTER_CHAIN_AND, LOG_FILTER_XLATE_CHAIN, STRING_WITH_LEN("AND")},
+    {LOG_FILTER_CHAIN_OR, LOG_FILTER_XLATE_CHAIN, STRING_WITH_LEN("OR")}};
 
 /**
   result codes used in dumping/decompiling rules
@@ -388,6 +401,9 @@ static void log_filter_append_item_value(char *out_buf, size_t out_siz,
           len = log_bs->substitute(out_writepos, out_left, "%lld",
                                    li->data.data_integer);
       }
+    } else if (li->type == LOG_ITEM_SQL_ERRCODE) {
+      len = log_bs->substitute(out_writepos, out_left, "MY-%06lld",
+                               li->data.data_integer);
     } else {
       len = log_bs->substitute(out_writepos, out_left, "%lld",
                                li->data.data_integer);
@@ -759,11 +775,12 @@ static set_arg_result log_filter_set_arg(const char **token, const size_t *len,
                                          log_item *li, const char **state) {
   char *val;
   size_t val_len;
+  bool is_symbol = false;
 
   // sanity check
   DBUG_ASSERT(!(li->alloc & LOG_ITEM_FREE_VALUE));
   if (li->alloc & LOG_ITEM_FREE_VALUE) {
-    log_bs->free((void *)li->data.data_string.str);
+    log_bs->free(const_cast<char *>(li->data.data_string.str));
     li->data.data_string.str = nullptr;
     li->alloc &= ~LOG_ITEM_FREE_VALUE;
   }
@@ -771,19 +788,21 @@ static set_arg_result log_filter_set_arg(const char **token, const size_t *len,
   *state = "Setting argument ...";
 
   // ER_* -- convenience: we convert symbol(ER_STARTUP) -> int(1234)
-  if (log_bs->compare(*token, "ER_", 3, false) == 0) {
+  if ((is_symbol = (log_bs->compare(*token, "ER_", 3, false) == 0)) ||
+      (log_bs->compare(*token, "MY-", 3, true) == 0)) {
     char *sym = log_bs->strndup(*token, *len);
     longlong errcode = 0;
 
-    *state = "Resolving ER_symbol ...";
+    *state = is_symbol ? "Resolving ER_symbol ..." : "Resolving MY-code ...";
 
     if (sym == nullptr) return SET_ARG_OOM; /* purecov: inspected */
 
     errcode = log_bi->errcode_by_errsymbol(sym);
+
     log_bs->free(sym);
 
-    if (errcode < 0) {
-      *state = "unknown ER_code";
+    if (errcode < 1) {
+      *state = is_symbol ? "unknown ER_code" : "invalid MY-code";
       return SET_ARG_MALFORMED_VALUE;
     }
 
@@ -796,7 +815,7 @@ static set_arg_result log_filter_set_arg(const char **token, const size_t *len,
     else if (li->type != LOG_ITEM_SQL_ERRCODE) {
       *state =
           "\'err_code\' is the only built-in field-type "
-          "we will resolve ER_symbols for";
+          "we will resolve ER_symbols and MY-codes for";
       return SET_ARG_UNWANTED_NUMERIC;
     }
 
@@ -1408,62 +1427,20 @@ done:
 }
 
 /**
-  Variable listener.  This is a temporary solution until we have
-  per-component system variables.  "check" is called when the user
-  uses SQL statements trying to assign a value to certain server
-  system variables; the function can prevent assignment if e.g.
-  the supplied value has the wrong format.
+  Check the proposed value for the component variable which contains
+  the filter rules in human-readable format.
 
-  If several listeners are registered, an error will be signaled
-  to the user on the SQL level as soon as one service identifies
-  a problem with the value.
+  @param  thd      session
+  @param  self     the system variable we're checking
+  @param  save     where to save the resulting intermediate (char *) value
+  @param  value    the value we're validating
 
-  @param   ll  a log_line describing the variable update (name, new value)
-
-  @retval   0  for allow (including when we don't feel the event is for us),
-  @retval  <0  deny (nullptr, malformed structures, etc. -- caller broken?)
-  @retval  >0  deny (user input rejected)
+  @retval false    value OK, go ahead and update system variable (from "save")
+  @retval true     value rejected, do not update variable
 */
-DEFINE_METHOD(int, log_service_imp::variable_check,
-              (log_line * ll MY_ATTRIBUTE((unused)))) {
-  /*
-    We allow changing this even when we're not in the error "stack",
-    so users can configure this service, then enable it, rather than
-    enable it, and have it start logging with perhaps unwanted settings
-    until the user manages to update them.
-  */
-  return 0;
-}
-
-/**
-  Variable listener.  This is a temporary solution until we have
-  per-component system variables. "update" is called when the user
-  uses SQL statements trying to assign a value to certain server
-  system variables. If we got this far, we have already been called
-  upon to "check" the new value, and have confirmed that it meets
-  the requirements. "update" should now update the internal
-  representation of the value. Since we have already checked the
-  new value, failure should be a rare occurance (out of memory,
-  the operating system did not let us open the new file name, etc.).
-
-  If several listeners are registered, all will currently be called
-  with the new value, even if one of them signals failure.
-
-  @param  ll  a list-item describing the variable (name, new value)
-
-  @retval  0  the event is not for us
-  @retval <0  for failure
-  @retval >0  for success (at least one item was updated)
-*/
-DEFINE_METHOD(int, log_service_imp::variable_update,
-              (log_line * ll MY_ATTRIBUTE((unused)))) {
-  return 0;
-}
-
-static int check_var_filter_rules(MYSQL_THD thd MY_ATTRIBUTE((unused)),
+static int check_var_filter_rules(MYSQL_THD thd,
                                   SYS_VAR *self MY_ATTRIBUTE((unused)),
-                                  void *save MY_ATTRIBUTE((unused)),
-                                  struct st_mysql_value *value) {
+                                  void *save, struct st_mysql_value *value) {
   int ret;
   log_filter_ruleset *log_filter_temp_rules;
   const char *state = nullptr;
@@ -1494,21 +1471,24 @@ static int check_var_filter_rules(MYSQL_THD thd MY_ATTRIBUTE((unused)),
         "\"%s\" (state: %s) ...",
         LOG_FILTER_LANGUAGE_NAME, &proposed_rules[ret - 1], state);
   else if (ret == 0) {
-    char dump_buff[LOG_FILTER_DUMP_BUFF_SIZE];  ///< buffer
-    log_filter_result dump_result;              ///< result code from dump
+    log_filter_result dump_result;  ///< result code from dump
 
     *static_cast<const char **>(save) = proposed_rules;
 
-    dump_result = log_filter_ruleset_dump(log_filter_temp_rules, dump_buff,
-                                          sizeof(dump_buff));
+    dump_result = log_filter_ruleset_dump(log_filter_temp_rules,
+                                          log_error_filter_decompile,
+                                          LOG_FILTER_DUMP_BUFF_SIZE - 1);
 
-    if (dump_result == LOG_FILTER_LANGUAGE_OK) {
+    if (dump_result != LOG_FILTER_LANGUAGE_OK) {
       log_bt->notify_client(
           thd, Sql_condition::SL_NOTE, ER_COMPONENT_FILTER_DIAGNOSTICS,
           notify_buffer, sizeof(notify_buffer) - 1,
-          "filter configuration accepted: "
-          "SET @@global.%s.%s='%s';",
-          LOG_FILTER_LANGUAGE_NAME, LOG_FILTER_VARIABLE_NAME, dump_buff);
+          "The log-filter component \"%s\" updated its configuration from "
+          "its system variable \"%s.%s\", but could not update its status "
+          "variable \"%s.%s\" to reflect the decompiled rule-set.",
+          LOG_FILTER_LANGUAGE_NAME, LOG_FILTER_LANGUAGE_NAME,
+          LOG_FILTER_SYSVAR_NAME, LOG_FILTER_LANGUAGE_NAME,
+          LOG_FILTER_STATUS_NAME);
     }
   }
 
@@ -1525,13 +1505,13 @@ static int check_var_filter_rules(MYSQL_THD thd MY_ATTRIBUTE((unused)),
   @param  thd      session
   @param  self     the system variable we're changing
   @param  var_ptr  where to save the resulting (char *) value
-  @param  save     pointer to the new value (see check function)
+  @param  save     pointer to the new value (from check function)
 */
 static void update_var_filter_rules(MYSQL_THD thd MY_ATTRIBUTE((unused)),
                                     SYS_VAR *self MY_ATTRIBUTE((unused)),
                                     void *var_ptr, const void *save) {
   const char *state = nullptr;
-  const char *new_val = *((const char **)save);
+  const char *new_val = *(static_cast<const char **>(const_cast<void *>(save)));
 
   if ((log_filter_dragnet_set(log_filter_dragnet_rules, new_val, &state) ==
        0) &&
@@ -1581,18 +1561,18 @@ DEFINE_METHOD(int, log_service_imp::run,
                      the server/logging framework. It must be released
                      on close.
 
-  @retval  <0        a new instance could not be created
-  @retval  =0        success, returned hande is valid
+  @retval  LOG_SERVICE_SUCCESS        success, returned hande is valid
+  @retval  otherwise                  a new instance could not be created
 */
-DEFINE_METHOD(int, log_service_imp::open,
+DEFINE_METHOD(log_service_error, log_service_imp::open,
               (log_line * ll MY_ATTRIBUTE((unused)), void **instance)) {
-  if (instance == nullptr) return -1;
+  if (instance == nullptr) return LOG_SERVICE_INVALID_ARGUMENT;
 
   *instance = nullptr;
 
   opened++;
 
-  return 0;
+  return LOG_SERVICE_SUCCESS;
 }
 
 /**
@@ -1603,17 +1583,17 @@ DEFINE_METHOD(int, log_service_imp::open,
                      it should be released, and the pointer
                      set to nullptr.
 
-  @retval  <0        an error occurred
-  @retval  =0        success
+  @retval  LOG_SERVICE_SUCCESS        success
+  @retval  otherwise                  an error occurred
 */
-DEFINE_METHOD(int, log_service_imp::close, (void **instance)) {
-  if (instance == nullptr) return -1;
+DEFINE_METHOD(log_service_error, log_service_imp::close, (void **instance)) {
+  if (instance == nullptr) return LOG_SERVICE_INVALID_ARGUMENT;
 
   *instance = nullptr;
 
   opened--;
 
-  return 0;
+  return LOG_SERVICE_SUCCESS;
 }
 
 /**
@@ -1627,13 +1607,21 @@ DEFINE_METHOD(int, log_service_imp::close, (void **instance)) {
   @param   instance  State-pointer that was returned on open.
                      Value may be changed in flush.
 
-  @retval  <0        an error occurred
-  @retval  =0        no work was done
-  @retval  >0        flush completed without incident
+  @retval  LOG_SERVICE_NOTHING_DONE       no work was done
 */
-DEFINE_METHOD(int, log_service_imp::flush,
+DEFINE_METHOD(log_service_error, log_service_imp::flush,
               (void **instance MY_ATTRIBUTE((unused)))) {
-  return 0;
+  return LOG_SERVICE_NOTHING_DONE;
+}
+
+/**
+  Get characteristics of a log-service.
+
+  @retval  <0        an error occurred
+  @retval  >=0       characteristics (a set of log_service_chistics flags)
+*/
+DEFINE_METHOD(int, log_service_imp::characteristics, (void)) {
+  return LOG_SERVICE_FILTER | LOG_SERVICE_SINGLETON;
 }
 
 /**
@@ -1646,7 +1634,10 @@ DEFINE_METHOD(int, log_service_imp::flush,
 mysql_service_status_t log_filter_exit() {
   if (inited) {
     mysql_service_component_sys_variable_unregister->unregister_variable(
-        LOG_FILTER_LANGUAGE_NAME, LOG_FILTER_VARIABLE_NAME);
+        LOG_FILTER_LANGUAGE_NAME, LOG_FILTER_SYSVAR_NAME);
+
+    mysql_service_status_variable_registration->unregister_variable(
+        (SHOW_VAR *)&show_var_filter_rules_decompile);
 
     log_bf->filter_ruleset_lock(log_filter_dragnet_rules,
                                 LOG_BUILTINS_LOCK_EXCLUSIVE);
@@ -1671,15 +1662,15 @@ mysql_service_status_t log_filter_exit() {
 mysql_service_status_t log_filter_init() {
   const char *state = nullptr;
   char *var_value;
-  size_t var_len = 0;
+  size_t var_len = LOG_FILTER_DUMP_BUFF_SIZE;
   int rr = -1;
 
   if (inited) return true; /* purecov: inspected */
 
   inited = true;
-  var_value = new char[LOG_FILTER_DUMP_BUFF_SIZE];
+  var_value = new char[var_len + 1];
 
-  sys_var_filter_rules.def_val = (char *)LOG_FILTER_DEFAULT_RULES;
+  values_filter_rules.def_val = const_cast<char *>(LOG_FILTER_DEFAULT_RULES);
 
   log_bi = mysql_service_log_builtins;
   log_bs = mysql_service_log_builtins_string;
@@ -1689,15 +1680,17 @@ mysql_service_status_t log_filter_init() {
   if (((log_filter_dragnet_rules =
             log_bf->filter_ruleset_new(&rule_tag_dragnet, 0)) == nullptr) ||
       mysql_service_component_sys_variable_register->register_variable(
-          LOG_FILTER_LANGUAGE_NAME, LOG_FILTER_VARIABLE_NAME,
+          LOG_FILTER_LANGUAGE_NAME, LOG_FILTER_SYSVAR_NAME,
           PLUGIN_VAR_STR | PLUGIN_VAR_MEMALLOC,
           "Error log filter rules (for the dragnet filter "
           "configuration language)",
           check_var_filter_rules, update_var_filter_rules,
-          (void *)&sys_var_filter_rules, (void *)&log_error_filter_rules) ||
+          (void *)&values_filter_rules, (void *)&log_error_filter_rules) ||
+      mysql_service_status_variable_registration->register_variable(
+          (SHOW_VAR *)&show_var_filter_rules_decompile) ||
       mysql_service_component_sys_variable_register->get_variable(
-          LOG_FILTER_LANGUAGE_NAME, LOG_FILTER_VARIABLE_NAME,
-          (void **)&var_value, &var_len) ||
+          LOG_FILTER_LANGUAGE_NAME, LOG_FILTER_SYSVAR_NAME, (void **)&var_value,
+          &var_len) ||
       ((rr = log_filter_dragnet_set(log_filter_dragnet_rules, var_value,
                                     &state)) != 0)) {
     /*
@@ -1710,7 +1703,7 @@ mysql_service_status_t log_filter_init() {
       if (var_value[rr] == '\0') rr = 0;
 
       LogErr(ERROR_LEVEL, ER_COMPONENT_FILTER_WRONG_VALUE,
-             LOG_FILTER_LANGUAGE_NAME "." LOG_FILTER_VARIABLE_NAME,
+             LOG_FILTER_LANGUAGE_NAME "." LOG_FILTER_SYSVAR_NAME,
              (var_value == nullptr) ? "<NULL>" : (const char *)var_value);
 
       if (var_value != nullptr)
@@ -1719,13 +1712,12 @@ mysql_service_status_t log_filter_init() {
 
       // try to set default value. if that fails as well, refuse to load.
       if ((rr = log_filter_dragnet_set(log_filter_dragnet_rules,
-                                       sys_var_filter_rules.def_val, &state)) ==
+                                       values_filter_rules.def_val, &state)) ==
           0) {
         char *old = log_error_filter_rules;
         if ((log_error_filter_rules = log_bs->strndup(
-                 sys_var_filter_rules.def_val,
-                 log_bs->length(sys_var_filter_rules.def_val) + 1)) !=
-            nullptr) {
+                 values_filter_rules.def_val,
+                 log_bs->length(values_filter_rules.def_val) + 1)) != nullptr) {
           if (old != nullptr) log_bs->free((void *)old);
           goto success;
         }
@@ -1735,7 +1727,7 @@ mysql_service_status_t log_filter_init() {
       }
 
       LogErr(ERROR_LEVEL, ER_COMPONENT_FILTER_WRONG_VALUE,
-             LOG_FILTER_LANGUAGE_NAME "." LOG_FILTER_VARIABLE_NAME, "DEFAULT");
+             LOG_FILTER_LANGUAGE_NAME "." LOG_FILTER_SYSVAR_NAME, "DEFAULT");
     }
 
     delete[] var_value; /* purecov: begin inspected */
@@ -1752,8 +1744,8 @@ success:
 /* implementing a service: log_filter */
 BEGIN_SERVICE_IMPLEMENTATION(log_filter_dragnet, log_service)
 log_service_imp::run, log_service_imp::flush, nullptr, nullptr,
-    log_service_imp::variable_check,
-    log_service_imp::variable_update END_SERVICE_IMPLEMENTATION();
+    log_service_imp::characteristics, nullptr,
+    nullptr END_SERVICE_IMPLEMENTATION();
 
 /* component provides: just the log_filter service, for now */
 BEGIN_COMPONENT_PROVIDES(log_filter_dragnet)
@@ -1763,6 +1755,7 @@ PROVIDES_SERVICE(log_filter_dragnet, log_service), END_COMPONENT_PROVIDES();
 BEGIN_COMPONENT_REQUIRES(log_filter_dragnet)
 REQUIRES_SERVICE(component_sys_variable_register),
     REQUIRES_SERVICE(component_sys_variable_unregister),
+    REQUIRES_SERVICE(status_variable_registration),
     REQUIRES_SERVICE(log_builtins), REQUIRES_SERVICE(log_builtins_string),
     REQUIRES_SERVICE(log_builtins_filter), REQUIRES_SERVICE(log_builtins_tmp),
     END_COMPONENT_REQUIRES();

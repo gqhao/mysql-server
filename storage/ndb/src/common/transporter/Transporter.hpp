@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -39,8 +39,17 @@
 
 #include "ndb_socket.h"
 
+#define DISCONNECT_ERRNO(e, sz) ( \
+                (sz == 0) || \
+                 (!((sz == -1) && \
+                  ((e == SOCKET_EAGAIN) || \
+                   (e == SOCKET_EWOULDBLOCK) || \
+                   (e == SOCKET_EINTR)))))
+
 class Transporter {
   friend class TransporterRegistry;
+  friend class Multi_Transporter;
+  friend class Qmgr;
 public:
   virtual bool initTransporter() = 0;
 
@@ -49,11 +58,67 @@ public:
    */
   virtual ~Transporter();
 
+
+  /**
+   * Disconnect node/socket
+   */
+  bool do_disconnect(int err, bool send_source);
+
   /**
    * Clear any data buffered in the transporter.
    * Should only be called in a disconnected state.
    */
-  virtual void resetBuffers() {};
+  virtual void resetBuffers() {}
+
+  /**
+   * Is this transporter part of a multi transporter.
+   * It is a real transporter, but can be connected
+   * when the node is in the state connected.
+   */
+  virtual bool isPartOfMultiTransporter()
+  {
+    return (m_multi_transporter_instance != 0);
+  }
+
+  Uint32 get_multi_transporter_instance()
+  {
+    return m_multi_transporter_instance;
+  }
+  virtual bool isMultiTransporter()
+  {
+    return false;
+  }
+
+  void set_multi_transporter_instance(Uint32 val)
+  {
+    m_multi_transporter_instance = val;
+  }
+
+  virtual Uint64 get_bytes_sent() const
+  {
+    return m_bytes_sent;
+  }
+
+  virtual Uint64 get_bytes_received() const
+  {
+    return m_bytes_received;
+  }
+
+  /**
+   * In most cases we only use transporter per node connection.
+   * But in cases where the transporter is heavily loaded we can
+   * have multiple transporters to send for one node connection.
+   * In this case theNodeIdTransporters points to a Multi_Transporter
+   * object that has implemented a hash algorithm for
+   * get_send_transporter based on sending thread and receiving
+   * thread.
+   */
+  virtual Transporter* get_send_transporter(Uint32 recBlock, Uint32 sendBlock)
+  {
+    (void)recBlock;
+    (void)sendBlock;
+    return this;
+  }
 
   /**
    * None blocking
@@ -62,6 +127,13 @@ public:
   virtual bool connect_client();
   bool connect_client(NDB_SOCKET_TYPE sockfd);
   bool connect_server(NDB_SOCKET_TYPE socket, BaseString& errormsg);
+
+  /**
+   * Returns socket used (sockets are used for all transporters to ensure
+   * we can wake up also shared memory transporters and other types of
+   * transporters in consistent manner.
+   */
+  NDB_SOCKET_TYPE getSocket() const;
 
   /**
    * Blocking
@@ -78,6 +150,11 @@ public:
    */
   NodeId getRemoteNodeId() const;
 
+  /**
+   * Index into allTransporters array.
+   */
+  TrpId getTransporterIndex() const;
+  void setTransporterIndex(TrpId);
   /**
    * Local (own) Node Id
    */
@@ -105,7 +182,7 @@ public:
                                                used >= m_slowdown_limit);
   }
 
-  virtual bool doSend() = 0;
+  virtual bool doSend(bool need_wakeup = true) = 0;
 
   /* Get the configured maximum send buffer usage. */
   Uint32 get_max_send_buffer() { return m_max_send_buffer; }
@@ -116,9 +193,29 @@ public:
   Uint32 get_overload_count() { return m_overload_count; }
   void inc_slowdown_count() { m_slowdown_count++; }
   Uint32 get_slowdown_count() { return m_slowdown_count; }
+  void set_recv_thread_idx (Uint32 recv_thread_idx)
+  {
+    m_recv_thread_idx = recv_thread_idx;
+  }
+  void set_transporter_active(bool active)
+  {
+    m_is_active = active;
+  }
+  Uint32 get_recv_thread_idx() { return m_recv_thread_idx; }
+
+  TransporterType getTransporterType() const;
+
+  /**
+   * Only applies to TCP transporter, abort on any other object.
+   * Used as part of shutting down transporter when switching to
+   * multi socket setup.
+   * Shut down only for writes when all data have been sent.
+   */
+  virtual void shutdown() { abort();}
 
 protected:
   Transporter(TransporterRegistry &,
+              TrpId transporter_index,
 	      TransporterType,
 	      const char *lHostName,
 	      const char *rHostName, 
@@ -131,8 +228,9 @@ protected:
 	      bool compression, 
 	      bool checksum, 
 	      bool signalId,
-        Uint32 max_send_buffer,
-        bool _presend_checksum);
+              Uint32 max_send_buffer,
+              bool _presend_checksum,
+              Uint32 spintime);
 
   virtual bool configure(const TransporterConfiguration* conf);
   virtual bool configure_derived(const TransporterConfiguration* conf) = 0;
@@ -158,9 +256,15 @@ protected:
 
   int m_s_port;
 
+  Uint32 m_spintime;
+  Uint32 get_spintime()
+  {
+    return m_spintime;
+  }
   const NodeId remoteNodeId;
   const NodeId localNodeId;
-  
+
+  TrpId m_transporter_index;
   const bool isServer;
 
   int byteOrder;
@@ -180,35 +284,55 @@ protected:
   Uint32 m_overload_count;
   Uint32 m_slowdown_count;
 
+  // Sending/Receiving socket used by both client and server
+  NDB_SOCKET_TYPE theSocket;
 private:
+  SocketClient *m_socket_client;
+  struct in6_addr m_connect_address;
 
+  virtual bool send_is_possible(int timeout_millisec) const = 0;
+  virtual bool send_limit_reached(int bufsize) = 0;
+
+  void update_connect_state(bool connected);
+
+protected:
   /**
    * means that we transform an MGM connection into
    * a transporter connection
    */
   bool isMgmConnection;
 
-  SocketClient *m_socket_client;
-  struct in_addr m_connect_address;
+  Uint32 m_multi_transporter_instance;
+  Uint32 m_recv_thread_idx;
+  bool m_is_active;
 
-  virtual bool send_is_possible(int timeout_millisec) const = 0;
-  virtual bool send_limit_reached(int bufsize) = 0;
-
-protected:
   Uint32 m_os_max_iovec;
   Uint32 m_timeOutMillis;
   bool m_connected;     // Are we connected
   TransporterType m_type;
 
+  /**
+   * Statistics
+   */
+  Uint32 reportFreq;
+  Uint32 receiveCount;
+  Uint64 receiveSize;
+  Uint32 sendCount;
+  Uint64 sendSize;
+
   TransporterRegistry &m_transporter_registry;
-  TransporterCallback *get_callback_obj() { return m_transporter_registry.callbackObj; };
-  void do_disconnect(int err){m_transporter_registry.do_disconnect(remoteNodeId,err);};
+  TransporterCallback *get_callback_obj() { return m_transporter_registry.callbackObj; }
   void report_error(enum TransporterError err, const char *info = 0)
-    { m_transporter_registry.report_error(remoteNodeId, err, info); };
+    { m_transporter_registry.report_error(remoteNodeId, err, info); }
 
   Uint32 fetch_send_iovec_data(struct iovec dst[], Uint32 cnt);
   void iovec_data_sent(int nBytesSent);
 
+  void set_get(NDB_SOCKET_TYPE fd,
+               int level,
+               int optval,
+               const char *optname, 
+               int val);
   /*
    * Keep checksum state for Protocol6 messages over a byte stream.
    */
@@ -241,6 +365,19 @@ protected:
 };
 
 inline
+NDB_SOCKET_TYPE
+Transporter::getSocket() const {
+  return theSocket;
+}
+
+inline
+TransporterType
+Transporter::getTransporterType() const
+{
+  return m_type;
+}
+
+inline
 bool
 Transporter::isConnected() const {
   return m_connected;
@@ -250,6 +387,19 @@ inline
 NodeId
 Transporter::getRemoteNodeId() const {
   return remoteNodeId;
+}
+
+inline
+TrpId
+Transporter::getTransporterIndex() const {
+  return m_transporter_index;
+}
+
+inline
+void
+Transporter::setTransporterIndex(TrpId val)
+{
+  m_transporter_index = val;
 }
 
 inline
@@ -267,15 +417,18 @@ Uint32
 Transporter::fetch_send_iovec_data(struct iovec dst[], Uint32 cnt)
 {
   return get_callback_obj()->get_bytes_to_send_iovec(remoteNodeId,
-                                                     dst, cnt);
+                                                     m_transporter_index,
+                                                     dst,
+                                                     cnt);
 }
 
 inline
 void
 Transporter::iovec_data_sent(int nBytesSent)
 {
-  Uint32 used_bytes
-    = get_callback_obj()->bytes_sent(remoteNodeId, nBytesSent);
+  Uint32 used_bytes = get_callback_obj()->bytes_sent(remoteNodeId,
+                                                     m_transporter_index,
+                                                     nBytesSent);
   update_status_overloaded(used_bytes);
 }
 

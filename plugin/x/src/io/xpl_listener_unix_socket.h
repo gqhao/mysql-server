@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,50 +22,55 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-#ifndef XPL_LISTENER_UNIX_SOCKET_H_
-#define XPL_LISTENER_UNIX_SOCKET_H_
+#ifndef PLUGIN_X_SRC_IO_XPL_LISTENER_UNIX_SOCKET_H_
+#define PLUGIN_X_SRC_IO_XPL_LISTENER_UNIX_SOCKET_H_
 
-#include "my_inttypes.h"
-#include "plugin/x/ngs/include/ngs/interface/listener_interface.h"
-#include "plugin/x/ngs/include/ngs/interface/socket_events_interface.h"
-#include "plugin/x/ngs/include/ngs_common/operations_factory_interface.h"
-#include "plugin/x/ngs/include/ngs_common/socket_interface.h"
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "plugin/x/src/interface/listener.h"
+#include "plugin/x/src/interface/operations_factory.h"
+#include "plugin/x/src/interface/socket.h"
+#include "plugin/x/src/interface/socket_events.h"
 
 namespace xpl {
 
-class Listener_unix_socket : public ngs::Listener_interface {
+class Listener_unix_socket : public iface::Listener {
  public:
-  typedef ngs::Socket_interface::Shared_ptr Socket_ptr;
+  using Socket_ptr = std::shared_ptr<iface::Socket>;
 
+ public:
   Listener_unix_socket(
-      ngs::Operations_factory_interface::Shared_ptr operations_factory,
-      const std::string &unix_socket_path, ngs::Socket_events_interface &event,
-      const uint32 backlog);
-  ~Listener_unix_socket();
+      std::shared_ptr<iface::Operations_factory> operations_factory,
+      const std::string &unix_socket_path, iface::Socket_events &event,
+      const uint32_t backlog);
+  ~Listener_unix_socket() override;
 
-  bool is_handled_by_socket_event();
+  void report_properties(On_report_properties on_prop) override;
+  const Sync_variable_state &get_state() const override;
+  std::string get_configuration_variable() const override;
 
-  Sync_variable_state &get_state();
-  std::string get_name_and_configuration() const;
-  std::string get_last_error();
-  std::vector<std::string> get_configuration_variables() const;
+  bool report_status() const override;
 
-  bool setup_listener(On_connection on_connection);
-  void close_listener();
-  void loop();
+  bool setup_listener(On_connection on_connection) override;
+  void close_listener() override;
+  void pre_loop() override;
+  void loop() override;
 
  private:
-  ngs::Operations_factory_interface::Shared_ptr m_operations_factory;
+  std::shared_ptr<iface::Operations_factory> m_operations_factory;
   const std::string m_unix_socket_path;
-  const uint32 m_backlog;
+  const uint32_t m_backlog;
 
   std::string m_last_error;
   Sync_variable_state m_state;
 
   Socket_ptr m_unix_socket;
-  ::ngs::Socket_events_interface &m_event;
+  iface::Socket_events &m_event;
 };
 
 }  // namespace xpl
 
-#endif  // XPL_LISTENER_UNIX_SOCKET_H_
+#endif  // PLUGIN_X_SRC_IO_XPL_LISTENER_UNIX_SOCKET_H_

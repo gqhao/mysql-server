@@ -1,4 +1,4 @@
-/* Copyright (c) 2009, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2009, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -30,9 +30,13 @@
 
 #include "my_dbug.h"
 #include "my_sqlcommand.h"
+#include "sql/select_lex_visitor.h"
 
 class THD;
 class Prepared_statement;
+struct handlerton;
+struct MYSQL_LEX_STRING;
+struct MYSQL_LEX_CSTRING;
 
 /**
   Representation of an SQL command.
@@ -67,17 +71,33 @@ class Sql_cmd {
   */
   virtual enum_sql_command sql_command_code() const = 0;
 
+  /**
+    @return true if object represents a preparable statement, ie. a query
+    that is prepared with a PREPARE statement and executed with an EXECUTE
+    statement. False is returned for regular statements (non-preparable
+    statements) that are executed directly. Also false if statement is part
+    of a stored procedure.
+  */
+  bool needs_explicit_preparation() const {
+    return m_owner != nullptr && !m_part_of_sp;
+  }
+  /**
+    @return true if statement is regular, ie not prepared statement and not
+    part of stored procedure.
+  */
+  bool is_regular() const { return m_owner == nullptr && !m_part_of_sp; }
+
   /// @return true if this statement is prepared
   bool is_prepared() const { return m_prepared; }
 
   /**
     Prepare this SQL statement.
 
-    @param thd the current thread
+    param thd the current thread
 
     @returns false if success, true if error
   */
-  virtual bool prepare(THD *thd MY_ATTRIBUTE((unused))) {
+  virtual bool prepare(THD *) {
     // Default behavior for a statement is to have no preparation code.
     /* purecov: begin inspected */
     DBUG_ASSERT(!is_prepared());
@@ -96,19 +116,29 @@ class Sql_cmd {
   /**
     Command-specific reinitialization before execution of prepared statement
 
-    @see reinit_stmt_before_use()
-
-    @note Currently this function is overloaded for INSERT/REPLACE stmts only.
-
-    @param thd  Current THD.
+    param thd  Current THD.
   */
-  virtual void cleanup(THD *thd MY_ATTRIBUTE((unused))) {}
+  virtual void cleanup(THD *) { m_secondary_engine = nullptr; }
 
   /// Set the owning prepared statement
-  void set_owner(Prepared_statement *stmt) { m_owner = stmt; }
+  void set_owner(Prepared_statement *stmt) {
+    DBUG_ASSERT(!m_part_of_sp);
+    m_owner = stmt;
+  }
 
   /// Get the owning prepared statement
-  Prepared_statement *get_owner() { return m_owner; }
+  Prepared_statement *owner() const { return m_owner; }
+
+  /**
+    Mark statement as part of procedure. Such statements can be executed
+    multiple times, the first execute() call will also prepare it.
+  */
+  void set_as_part_of_sp() {
+    DBUG_ASSERT(!m_part_of_sp && m_owner == nullptr);
+    m_part_of_sp = true;
+  }
+  /// @returns true if statement is part of a stored procedure
+  bool is_part_of_sp() const { return m_part_of_sp; }
 
   /// @return true if SQL command is a DML statement
   virtual bool is_dml() const { return false; }
@@ -121,18 +151,76 @@ class Sql_cmd {
     /* purecov: end */
   }
 
+  virtual bool accept(THD *, Select_lex_visitor *) { return false; }
+
   /**
-    Temporary function used to "unprepare" a prepared statement after
-    preparation, so that a subsequent execute statement will reprepare it.
-    This is done because UNIT::cleanup() will un-resolve all resolved QBs.
+    Is this statement of a type and on a form that makes it eligible
+    for execution in a secondary storage engine?
+
+    @return the name of the secondary storage engine, or nullptr if
+    the statement is not eligible for execution in a secondary storage
+    engine
   */
-  virtual void unprepare(THD *thd MY_ATTRIBUTE((unused))) {
-    DBUG_ASSERT(is_prepared());
-    m_prepared = false;
+  virtual const MYSQL_LEX_CSTRING *eligible_secondary_storage_engine() const {
+    return nullptr;
+  }
+
+  /**
+    Disable use of secondary storage engines in this statement. After
+    a call to this function, the statement will not try to use a
+    secondary storage engine until it is reprepared.
+  */
+  void disable_secondary_storage_engine() {
+    DBUG_ASSERT(m_secondary_engine == nullptr);
+    m_secondary_engine_enabled = false;
+  }
+
+  /**
+    Has use of secondary storage engines been disabled for this statement?
+  */
+  bool secondary_storage_engine_disabled() const {
+    return !m_secondary_engine_enabled;
+  }
+
+  /**
+    Mark the current statement as using a secondary storage engine.
+    This function must be called before the statement starts opening
+    tables in a secondary engine.
+  */
+  void use_secondary_storage_engine(const handlerton *hton) {
+    DBUG_ASSERT(m_secondary_engine_enabled);
+    m_secondary_engine = hton;
+  }
+
+  /**
+    Is this statement using a secondary storage engine?
+    @note that this is reliable during optimization and afterwards; during
+    preparation, if this is an explicit preparation (SQL PREPARE, C API
+    PREPARE, and automatic repreparation), it may be false as RAPID tables have
+    not yet been opened. Therefore, during preparation, it is safer to test
+    THD::secondary_engine_optimization().
+  */
+  bool using_secondary_storage_engine() const {
+    return m_secondary_engine != nullptr;
+  }
+
+  /**
+    Get the handlerton of the secondary engine that is used for
+    executing this statement, or nullptr if a secondary engine is not
+    used.
+  */
+  const handlerton *secondary_engine() const { return m_secondary_engine; }
+
+  void set_optional_transform_prepared(bool value) {
+    m_prepared_with_optional_transform = value;
+  }
+
+  bool is_optional_transform_prepared() {
+    return m_prepared_with_optional_transform;
   }
 
  protected:
-  Sql_cmd() : m_owner(nullptr), m_prepared(false), prepare_only(true) {}
+  Sql_cmd() : m_owner(nullptr), m_part_of_sp(false), m_prepared(false) {}
 
   virtual ~Sql_cmd() {
     /*
@@ -144,25 +232,33 @@ class Sql_cmd {
     DBUG_ASSERT(false);
   }
 
-  /**
-    @return true if object represents a preparable statement, ie. a query
-    that is prepared with a PREPARE statement and executed with an EXECUTE
-    statement. False is returned for regular statements (non-preparable
-    statements) that are executed directly.
-    @todo replace with "m_owner != nullptr" when prepare-once is implemented
-  */
-  bool needs_explicit_preparation() const { return prepare_only; }
-
   /// Set this statement as prepared
   void set_prepared() { m_prepared = true; }
 
  private:
-  Prepared_statement
-      *m_owner;     /// Owning prepared statement, nullptr if non-prep.
-  bool m_prepared;  /// True when statement has been prepared
- protected:
-  bool prepare_only;  /// @see needs_explicit_preparation
-                      /// @todo remove when prepare-once is implemented
+  Prepared_statement *m_owner;  /// Owning prepared statement, NULL if non-prep.
+  bool m_part_of_sp;            /// True when statement is part of stored proc.
+  bool m_prepared;              /// True when statement has been prepared
+
+  /**
+    Tells if a secondary storage engine can be used for this
+    statement. If it is false, use of a secondary storage engine will
+    not be considered for executing this statement.
+  */
+  bool m_secondary_engine_enabled{true};
+
+  /**
+    Keeps track of whether the statement was prepared optional
+    transformation.
+  */
+  bool m_prepared_with_optional_transform{false};
+
+  /**
+    The secondary storage engine to use for execution of this
+    statement, if any, or nullptr if the primary engine is used.
+    This property is reset at the start of each execution.
+  */
+  const handlerton *m_secondary_engine{nullptr};
 };
 
 #endif  // SQL_CMD_INCLUDED

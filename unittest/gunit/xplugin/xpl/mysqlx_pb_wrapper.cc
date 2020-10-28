@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License, version 2.0,
@@ -24,32 +24,32 @@
 
 #include <utility>
 
-#include "plugin/x/ngs/include/ngs_common/to_string.h"
+#include "plugin/x/src/helper/to_string.h"
 
 namespace xpl {
 namespace test {
 
 Identifier::Identifier(const std::string &name,
                        const std::string &schema_name) {
-  if (name.empty() == false) m_base.set_name(name);
+  if (!name.empty()) m_base.set_name(name);
 
-  if (schema_name.empty() == false) m_base.set_schema_name(schema_name);
+  if (!schema_name.empty()) m_base.set_schema_name(schema_name);
 }
 
-ColumnIdentifier::ColumnIdentifier(const std::string &name,
-                                   const std::string &table_name,
-                                   const std::string &schema_name) {
-  if (name.empty() == false) m_base.set_name(name);
+Column_identifier::Column_identifier(const std::string &name,
+                                     const std::string &table_name,
+                                     const std::string &schema_name) {
+  if (!name.empty()) m_base.set_name(name);
 
-  if (table_name.empty() == false) m_base.set_table_name(table_name);
+  if (!table_name.empty()) m_base.set_table_name(table_name);
 
-  if (schema_name.empty() == false) m_base.set_schema_name(schema_name);
+  if (!schema_name.empty()) m_base.set_schema_name(schema_name);
 }
 
-ColumnIdentifier::ColumnIdentifier(const Document_path &path,
-                                   const std::string &name,
-                                   const std::string &table_name,
-                                   const std::string &schema_name) {
+Column_identifier::Column_identifier(const Document_path &path,
+                                     const std::string &name,
+                                     const std::string &table_name,
+                                     const std::string &schema_name) {
   if (!name.empty()) m_base.set_name(name);
 
   if (!table_name.empty()) m_base.set_table_name(table_name);
@@ -84,11 +84,6 @@ Scalar::Scalar(const double value) {
   m_base.set_v_double(value);
 }
 
-Scalar::Scalar(const char *value, unsigned type) {
-  m_base.set_type(Mysqlx::Datatypes::Scalar_Type_V_OCTETS);
-  m_base.mutable_v_octets()->CopyFrom(Scalar::Octets(value, type));
-}
-
 Scalar::Scalar(const Scalar::Octets &value) {
   m_base.set_type(Mysqlx::Datatypes::Scalar_Type_V_OCTETS);
   m_base.mutable_v_octets()->CopyFrom(value);
@@ -99,15 +94,20 @@ Scalar::Scalar(const Scalar::String &value) {
   m_base.mutable_v_string()->CopyFrom(value);
 }
 
+Scalar::Scalar(const char *value) {
+  m_base.set_type(Mysqlx::Datatypes::Scalar_Type_V_STRING);
+  *m_base.mutable_v_string()->mutable_value() = value;
+}
+
 Scalar::Scalar(Scalar::Null) {
   m_base.set_type(Mysqlx::Datatypes::Scalar_Type_V_NULL);
 }
 
 Scalar::String::String(const std::string &value) { m_base.set_value(value); }
 
-Scalar::Octets::Octets(const std::string &value, const unsigned type) {
+Scalar::Octets::Octets(const std::string &value, const Content_type type) {
   m_base.set_value(value);
-  m_base.set_content_type(type);
+  m_base.set_content_type(static_cast<uint32_t>(type));
 }
 
 Any::Any(const Scalar &scalar) {
@@ -135,12 +135,12 @@ Expr::Expr(const Operator &oper) {
   m_base.mutable_operator_()->CopyFrom(oper);
 }
 
-Expr::Expr(const FunctionCall &func) {
+Expr::Expr(const Function_call &func) {
   m_base.set_type(Mysqlx::Expr::Expr_Type_FUNC_CALL);
   m_base.mutable_function_call()->CopyFrom(func);
 }
 
-Expr::Expr(const ColumnIdentifier &id) {
+Expr::Expr(const Column_identifier &id) {
   m_base.set_type(Mysqlx::Expr::Expr_Type_IDENT);
   m_base.mutable_identifier()->CopyFrom(id);
 }
@@ -171,6 +171,12 @@ Any::Object::Object(const std::initializer_list<Any::Object::Fld> &list) {
     item->set_key(f.key);
     item->mutable_value()->CopyFrom(f.value);
   }
+}
+
+Any::Object::Object(const std::string &key, Any *value) {
+  Mysqlx::Datatypes::Object_ObjectField *item = m_base.add_fld();
+  item->set_key(key);
+  if (value) item->mutable_value()->CopyFrom(*value);
 }
 
 Object::Object(const std::string &key, Expr *value) {
@@ -219,8 +225,17 @@ Limit::Limit(const uint64_t row_count, const uint64_t offset) {
   if (offset > 0) m_base.set_offset(offset);
 }
 
+Limit_expr::Limit_expr(const Expr &row_count) {
+  m_base.mutable_row_count()->CopyFrom(row_count);
+}
+
+Limit_expr::Limit_expr(const Expr &row_count, const Expr &offset) {
+  m_base.mutable_row_count()->CopyFrom(row_count);
+  m_base.mutable_offset()->CopyFrom(offset);
+}
+
 Update_operation::Update_operation(const Update_type &update_type,
-                                   const ColumnIdentifier &source,
+                                   const Column_identifier &source,
                                    const Expr &value) {
   m_base.set_operation(update_type);
   m_base.mutable_source()->CopyFrom(source);
@@ -231,18 +246,18 @@ Update_operation::Update_operation(const Update_type &update_type,
                                    const Document_path &source,
                                    const Expr &value) {
   m_base.set_operation(update_type);
-  m_base.mutable_source()->CopyFrom(ColumnIdentifier(source));
+  m_base.mutable_source()->CopyFrom(Column_identifier(source));
   m_base.mutable_value()->CopyFrom(value);
 }
 
 Update_operation::Update_operation(const Update_type &update_type,
                                    const Document_path &source) {
   m_base.set_operation(update_type);
-  m_base.mutable_source()->CopyFrom(ColumnIdentifier(source));
+  m_base.mutable_source()->CopyFrom(Column_identifier(source));
 }
 
 Update_operation::Update_operation(const Update_type &update_type,
-                                   const ColumnIdentifier &source) {
+                                   const Column_identifier &source) {
   m_base.set_operation(update_type);
   m_base.mutable_source()->CopyFrom(source);
 }

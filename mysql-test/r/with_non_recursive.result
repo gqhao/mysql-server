@@ -21,18 +21,18 @@ ERROR 42000: Not unique table/alias: 'qn'
 WITH qn AS (SELECT b as a FROM t1)
 SELECT qn.a, qn2.a  FROM qn, qn as qn2;
 a	a
-NULL	NULL
+3	3
 3	NULL
 NULL	3
-3	3
+NULL	NULL
 WITH qn AS (SELECT b as a FROM t1),
 qn2 AS (SELECT c FROM t1 WHERE a IS NULL or a>0)
 SELECT qn.a, qn2.c  FROM qn, qn2;
 a	c
-NULL	NULL
-NULL	4
-3	NULL
 3	4
+3	NULL
+NULL	4
+NULL	NULL
 # qn2 ref qn:
 WITH qn AS (SELECT 10*a as a FROM t1),
 qn2 AS (SELECT 3*a FROM qn)
@@ -49,18 +49,18 @@ WITH qn AS (SELECT b as a FROM t1),
 qn2 AS (SELECT a FROM qn WHERE a IS NULL or a>0)
 SELECT qn.a, qn2.a  FROM qn, qn2;
 a	a
-NULL	NULL
-NULL	3
-3	NULL
 3	3
+3	NULL
+NULL	3
+NULL	NULL
 EXPLAIN WITH qn AS (SELECT b as a FROM t1),
 qn2 AS (SELECT a FROM qn WHERE a IS NULL or a>0)
 SELECT qn.a, qn2.a  FROM qn, qn2;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	75.00	Using where
-1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 Warnings:
-Note	1003	/* select#1 */ select `test`.`t1`.`b` AS `a`,`test`.`t1`.`b` AS `a` from `test`.`t1` join `test`.`t1` where (isnull(`test`.`t1`.`b`) or (`test`.`t1`.`b` > 0))
+Note	1003	/* select#1 */ select `test`.`t1`.`b` AS `a`,`test`.`t1`.`b` AS `a` from `test`.`t1` join `test`.`t1` where ((`test`.`t1`.`b` is null) or (`test`.`t1`.`b` > 0))
 # forward ref (should error)
 WITH qn2 AS (SELECT a FROM qn WHERE a IS NULL or a>0),
 qn AS (SELECT b as a FROM t1)
@@ -304,13 +304,13 @@ NULL
 with qn as (select "with" as a)
 with qn2 as (select "with" as a)
 select a from test.qn;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'qn2 as (select "with" as a)
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'with qn2 as (select "with" as a)
 select a from test.qn' at line 2
 # with comma
 with qn as (select "with" as a),
 with qn2 as (select "with" as a)
 select a from test.qn;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'qn2 as (select "with" as a)
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'with qn2 as (select "with" as a)
 select a from test.qn' at line 2
 # ORDER BY removed unless there is LIMIT or single table (check "Using filesort")
 explain
@@ -325,7 +325,7 @@ with qn as (select a from t1 order by 1)
 select qn.a from qn, t1 as t2;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a` from `test`.`t1` join `test`.`t1` `t2`
 explain
@@ -333,7 +333,7 @@ with qn as (select a from t1 order by 1 limit 10)
 select qn.a from qn, t1 as t2;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	PRIMARY	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	PRIMARY	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 2	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using filesort
 Warnings:
 Note	1003	with `qn` as (/* select#2 */ select `test`.`t1`.`a` AS `a` from `test`.`t1` order by `test`.`t1`.`a` limit 10) /* select#1 */ select `qn`.`a` AS `a` from `qn` join `test`.`t1` `t2`
@@ -344,7 +344,7 @@ qn2 as (select b from t1)
 select /*+ merge(qn) no_merge(qn2) */ qn.a,qn2.b from qn, qn2;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	PRIMARY	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	PRIMARY	<derived3>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	PRIMARY	<derived3>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 3	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 Warnings:
 Note	1003	with `qn2` as (/* select#3 */ select `test`.`t1`.`b` AS `b` from `test`.`t1`) /* select#1 */ select /*+ MERGE(`qn`@`select#1`) NO_MERGE(`qn2`@`select#1`) */ `test`.`t1`.`a` AS `a`,`qn2`.`b` AS `b` from `test`.`t1` join `qn2`
@@ -353,7 +353,7 @@ with qn as (select a from t1)
 select /*+ merge(qn) no_merge(qn2) */ qn2.a from qn, qn as qn2;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	PRIMARY	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	PRIMARY	<derived3>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	PRIMARY	<derived3>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 3	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 Warnings:
 Note	1003	with `qn` as (/* select#3 */ select `test`.`t1`.`a` AS `a` from `test`.`t1`) /* select#1 */ select /*+ MERGE(`qn`@`select#1`) NO_MERGE(`qn2`@`select#1`) */ `qn2`.`a` AS `a` from `test`.`t1` join `qn` `qn2`
@@ -381,7 +381,7 @@ explain with cte as (select * from t1 as t2 limit 1)
 select * from t1 where t1.a in (select a+0 from cte);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	PRIMARY	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	PRIMARY	<derived3>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where; FirstMatch(t1); Using join buffer (Block Nested Loop)
+1	PRIMARY	<derived3>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using where; FirstMatch(t1); Using join buffer (hash join)
 3	DERIVED	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 Warnings:
 Note	1003	with `cte` as (/* select#3 */ select `test`.`t2`.`a` AS `a`,`test`.`t2`.`b` AS `b`,`test`.`t2`.`c` AS `c` from `test`.`t1` `t2` limit 1) /* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b`,`test`.`t1`.`c` AS `c` from `test`.`t1` semi join (`cte`) where (`test`.`t1`.`a` = (`cte`.`a` + 0))
@@ -392,7 +392,7 @@ explain with cte as (select * from t1 as t2)
 select * from t1 where t1.a in (select a+0 from cte);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where; FirstMatch(t1); Using join buffer (Block Nested Loop)
+1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where; FirstMatch(t1); Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b`,`test`.`t1`.`c` AS `c` from `test`.`t1` semi join (`test`.`t1` `t2`) where (`test`.`t1`.`a` = (`test`.`t2`.`a` + 0))
 with cte as (select * from t1 as t2)
@@ -405,11 +405,11 @@ with qn () as (select 1) select * from qn, qn qn1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near ') as (select 1) select * from qn, qn qn1' at line 1
 # Materialization
 with qn (foo, bar) as (select 1) select * from qn, qn qn1;
-ERROR HY000: View's SELECT and view's field list have different column counts
+ERROR HY000: In definition of view, derived table or common table expression, SELECT list and column names list have different column counts
 explain with qn (foo, bar) as (select 1, 2 from t1 limit 2) select * from qn, qn qn1;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 2	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 Warnings:
 Note	1003	with `qn` (`foo`,`bar`) as (/* select#2 */ select 1 AS `1`,2 AS `2` from `test`.`t1` limit 2) /* select#1 */ select `qn`.`foo` AS `foo`,`qn`.`bar` AS `bar`,`qn1`.`foo` AS `foo`,`qn1`.`bar` AS `bar` from `qn` join `qn` `qn1`
@@ -439,12 +439,12 @@ create table t3
 with qn (foo, bar) as (select a, b from t1 limit 2) select bar,foo from qn;
 desc t3;
 Field	Type	Null	Key	Default	Extra
-bar	int(11)	YES		NULL	
-foo	int(11)	YES		NULL	
+bar	int	YES		NULL	
+foo	int	YES		NULL	
 drop table t3;
 # Merge
 with qn (foo, bar) as (select 1 from t1) select * from qn, qn qn1;
-ERROR HY000: View's SELECT and view's field list have different column counts
+ERROR HY000: In definition of view, derived table or common table expression, SELECT list and column names list have different column counts
 with qn (foo, bar) as (select 1, 2 from t1) select * from qn, qn qn1;
 foo	bar	foo	bar
 1	2	1	2
@@ -454,7 +454,7 @@ foo	bar	foo	bar
 explain with qn (foo, bar) as (select 1, 2 from t1) select * from qn, qn qn1;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select 1 AS `foo`,2 AS `bar`,1 AS `foo`,2 AS `bar` from `test`.`t1` join `test`.`t1`
 with qn (foo, bar) as (select 1 as col, 2 as coll from t1) select * from qn, qn qn1;
@@ -471,8 +471,8 @@ create table t3
 with qn (foo, bar) as (select a, b from t1) select bar,foo from qn;
 desc t3;
 Field	Type	Null	Key	Default	Extra
-bar	int(11)	YES		NULL	
-foo	int(11)	YES		NULL	
+bar	int	YES		NULL	
+foo	int	YES		NULL	
 drop table t3;
 # Disambiguates same-name expressions
 with qn as (select 1,1) select * from qn;
@@ -498,7 +498,7 @@ foo	bar
 NULL	NULL
 2	3
 select * from (select a from t1) dt(foo,bar);
-ERROR HY000: View's SELECT and view's field list have different column counts
+ERROR HY000: In definition of view, derived table or common table expression, SELECT list and column names list have different column counts
 # Column names for QN/DT are printed
 create view v1 as
 with qn (foo, bar) as (select 1,1) select * from qn;
@@ -507,8 +507,8 @@ View	Create View	character_set_client	collation_connection
 v1	CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `v1` AS with `qn` (`foo`,`bar`) as (select 1 AS `1`,1 AS `1`) select `qn`.`foo` AS `foo`,`qn`.`bar` AS `bar` from `qn`	utf8mb4	utf8mb4_0900_ai_ci
 show fields from v1;
 Field	Type	Null	Key	Default	Extra
-foo	int(1)	NO		0	
-bar	int(1)	NO		0	
+foo	int	NO		0	
+bar	int	NO		0	
 select * from v1;
 foo	bar
 1	1
@@ -577,7 +577,7 @@ select 1 AS `foo` group by `foo` union select 2 AS `2` order by `foo`
 drop view v1;
 create view v1 (bar) as
 select 1, 2 from t1;
-ERROR HY000: View's SELECT and view's field list have different column counts
+ERROR HY000: In definition of view, derived table or common table expression, SELECT list and column names list have different column counts
 drop table t1;
 # Prove that a materialized QN is shared among all references:
 create table t1(a int);
@@ -638,9 +638,9 @@ qne.a,qnm.a,alias1.a,alias2.a
 from qne, qnm, qnea as alias1, qnma as alias2;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	PRIMARY	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
-1	PRIMARY	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using join buffer (Block Nested Loop)
-1	PRIMARY	<derived3>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
-1	PRIMARY	<derived5>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	PRIMARY	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using join buffer (hash join)
+1	PRIMARY	<derived3>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
+1	PRIMARY	<derived5>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 5	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
 3	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
 Warnings:
@@ -694,6 +694,107 @@ a	a
 1	2
 drop table t1;
 # Must not create more than 64 indexes.
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 (select max(c1) from qn where qn.c1=1)	(select max(c2) from qn where qn.c2=1)	(select max(c3) from qn where qn.c3=1)	(select max(c4) from qn where qn.c4=1)	(select max(c5) from qn where qn.c5=1)	(select max(c6) from qn where qn.c6=1)	(select max(c7) from qn where qn.c7=1)	(select max(c8) from qn where qn.c8=1)	(select max(c9) from qn where qn.c9=1)	(select max(c10) from qn where qn.c10=1)	(select max(c11) from qn where qn.c11=1)	(select max(c12) from qn where qn.c12=1)	(select max(c13) from qn where qn.c13=1)	(select max(c14) from qn where qn.c14=1)	(select max(c15) from qn where qn.c15=1)	(select max(c16) from qn where qn.c16=1)	(select max(c17) from qn where qn.c17=1)	(select max(c18) from qn where qn.c18=1)	(select max(c19) from qn where qn.c19=1)	(select max(c20) from qn where qn.c20=1)	(select max(c21) from qn where qn.c21=1)	(select max(c22) from qn where qn.c22=1)	(select max(c23) from qn where qn.c23=1)	(select max(c24) from qn where qn.c24=1)	(select max(c25) from qn where qn.c25=1)	(select max(c26) from qn where qn.c26=1)	(select max(c27) from qn where qn.c27=1)	(select max(c28) from qn where qn.c28=1)	(select max(c29) from qn where qn.c29=1)	(select max(c30) from qn where qn.c30=1)	(select max(c31) from qn where qn.c31=1)	(select max(c32) from qn where qn.c32=1)	(select max(c33) from qn where qn.c33=1)	(select max(c34) from qn where qn.c34=1)	(select max(c35) from qn where qn.c35=1)	(select max(c36) from qn where qn.c36=1)	(select max(c37) from qn where qn.c37=1)	(select max(c38) from qn where qn.c38=1)	(select max(c39) from qn where qn.c39=1)	(select max(c40) from qn where qn.c40=1)	(select max(c41) from qn where qn.c41=1)	(select max(c42) from qn where qn.c42=1)	(select max(c43) from qn where qn.c43=1)	(select max(c44) from qn where qn.c44=1)	(select max(c45) from qn where qn.c45=1)	(select max(c46) from qn where qn.c46=1)	(select max(c47) from qn where qn.c47=1)	(select max(c48) from qn where qn.c48=1)	(select max(c49) from qn where qn.c49=1)	(select max(c50) from qn where qn.c50=1)	(select max(c51) from qn where qn.c51=1)	(select max(c52) from qn where qn.c52=1)	(select max(c53) from qn where qn.c53=1)	(select max(c54) from qn where qn.c54=1)	(select max(c55) from qn where qn.c55=1)	(select max(c56) from qn where qn.c56=1)	(select max(c57) from qn where qn.c57=1)	(select max(c58) from qn where qn.c58=1)	(select max(c59) from qn where qn.c59=1)	(select max(c60) from qn where qn.c60=1)	(select max(c61) from qn where qn.c61=1)	(select max(c62) from qn where qn.c62=1)	(select max(c63) from qn where qn.c63=1)	(select max(c64) from qn where qn.c64=1)	(select max(c65) from qn where qn.c65=1)	(select max(c66) from qn where qn.c66=1)	(select max(c67) from qn where qn.c67=1)	(select max(c68) from qn where qn.c68=1)	(select max(c69) from qn where qn.c69=1)	(select max(c70) from qn where qn.c70=1)	(select max(c71) from qn where qn.c71=1)	(select max(c72) from qn where qn.c72=1)	(select max(c73) from qn where qn.c73=1)	(select max(c74) from qn where qn.c74=1)	(select max(c75) from qn where qn.c75=1)	(select max(c76) from qn where qn.c76=1)	(select max(c77) from qn where qn.c77=1)	(select max(c78) from qn where qn.c78=1)	(select max(c79) from qn where qn.c79=1)	(select max(c80) from qn where qn.c80=1)	(select max(c81) from qn where qn.c81=1)	(select max(c82) from qn where qn.c82=1)	(select max(c83) from qn where qn.c83=1)	(select max(c84) from qn where qn.c84=1)	(select max(c85) from qn where qn.c85=1)	(select max(c86) from qn where qn.c86=1)	(select max(c87) from qn where qn.c87=1)	(select max(c88) from qn where qn.c88=1)	(select max(c89) from qn where qn.c89=1)	(select max(c90) from qn where qn.c90=1)	(select max(c91) from qn where qn.c91=1)	(select max(c92) from qn where qn.c92=1)	(select max(c93) from qn where qn.c93=1)	(select max(c94) from qn where qn.c94=1)	(select max(c95) from qn where qn.c95=1)	(select max(c96) from qn where qn.c96=1)	(select max(c97) from qn where qn.c97=1)	(select max(c98) from qn where qn.c98=1)	(select max(c99) from qn where qn.c99=1)	(select max(c100) from qn where qn.c100=1)
 NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL
 drop table t;
@@ -707,10 +808,10 @@ EXPLAIN with t2 as
 SELECT /*+ no_merge(t2) */ * FROM t2
 WHERE (a = a OR b <= 6) AND (a IS NULL);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	PRIMARY	<derived2>	NULL	ref	<auto_key1>	<auto_key1>	5	const	1	100.00	Using where
-2	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
+1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
+2	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where
 Warnings:
-Note	1003	with `t2` as (/* select#2 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b` from `test`.`t1`) /* select#1 */ select /*+ NO_MERGE(`t2`@`select#1`) */ `t2`.`a` AS `a`,`t2`.`b` AS `b` from `t2` where (((`t2`.`a` = `t2`.`a`) or (`t2`.`b` <= 6)) and isnull(`t2`.`a`))
+Note	1003	with `t2` as (/* select#2 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b` from `test`.`t1` where (((`test`.`t1`.`a` = `test`.`t1`.`a`) or (`test`.`t1`.`b` <= 6)) and (`test`.`t1`.`a` is null))) /* select#1 */ select /*+ NO_MERGE(`t2`@`select#1`) */ `t2`.`a` AS `a`,`t2`.`b` AS `b` from `t2`
 with t2 as
 (select * from t1)
 SELECT /*+ no_merge(t2) */ * FROM t2
@@ -738,12 +839,10 @@ create view v1 as
 with qn as (select a from t1),
 qn2 as (select b from t1)
 select /*+ merge(qn) no_merge(qn2) */ qn.a,qn2.b from qn, qn2;
-Warnings:
-Warning	3515	Hints aren't supported in CREATE or ALTER VIEW
 explain select * from v1;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
-1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using join buffer (Block Nested Loop)
+1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b` from `test`.`t1` join `test`.`t1`
 drop view v1;
@@ -756,7 +855,7 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 2	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
 Warnings:
-Note	1003	/* select#1 */ select `v1`.`a` AS `a` from `test`.`v1`
+Note	1003	/* select#1 */ select `test`.`v1`.`a` AS `a` from `test`.`v1`
 drop view v1;
 drop table t1;
 # CTE referenced four times, including in subqueries in other CTEs
@@ -785,11 +884,6 @@ month	total	award
 1	300	best
 3	11	worst
 drop table sales_days;
-# Tmp table cannot be MyISAM
-set global internal_tmp_disk_storage_engine=myisam;
-with qn as (select 1) select * from qn;
-ERROR HY000: 'Materialization of a Common Table Expression' requires @@internal_tmp_disk_storage_engine=InnoDB
-set global internal_tmp_disk_storage_engine=default;
 # Special parser command not allowed to users.
 parse_cte ( select 1 ) ;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'parse_cte ( select 1 )' at line 1
@@ -827,6 +921,8 @@ explain with qn as (select a+2 as a, b from t1) update t1, qn set t1.a=qn.a+10 w
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	UPDATE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
+Warnings:
+Note	1003	update `test`.`t1` join `test`.`t1` set `test`.`t1`.`a` = ((`test`.`t1`.`a` + 2) + 10) where ((`test`.`t1`.`a` - (`test`.`t1`.`a` + 2)) = 0)
 with qn as (select a+2 as a, b from t1) update t1, qn set t1.a=qn.a+10 where t1.a-qn.a=0;
 select * from t1;
 a	b
@@ -837,6 +933,8 @@ explain with qn as (select a+2 as a, b from t2) update t1, qn set t1.a=qn.a+10 w
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	UPDATE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
+Warnings:
+Note	1003	update `test`.`t1` join `test`.`t2` set `test`.`t1`.`a` = ((`test`.`t2`.`a` + 2) + 10) where ((`test`.`t1`.`a` - (`test`.`t2`.`a` + 2)) = 0)
 with qn as (select a+2 as a, b from t2) update t1, qn set t1.a=qn.a+10 where t1.a-qn.a=0;
 select * from t1;
 a	b
@@ -848,6 +946,8 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 1	UPDATE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 2	DERIVED	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
+Warnings:
+Note	1003	with `qn` as (/* select#2 */ select (`test`.`t2`.`a` + 2) AS `a`,`test`.`t2`.`b` AS `b` from `test`.`t2`) update /*+ NO_MERGE(`qn`@`select#1`) */ `test`.`t1` join `qn` set `test`.`t1`.`a` = (`qn`.`a` + 10) where ((`test`.`t1`.`a` - `qn`.`a`) = 0)
 with qn as (select a+2 as a, b from t2) update /*+ no_merge(qn) */ t1, qn set t1.a=qn.a+10 where t1.a-qn.a=0;
 select * from t1;
 a	b
@@ -861,6 +961,8 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 1	UPDATE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where
+Warnings:
+Note	1003	update `test`.`t1` join `test`.`t2` join `test`.`t2` set `test`.`t1`.`a` = ((`test`.`t2`.`a` + 2) + 10) where ((`test`.`t2`.`b` = `test`.`t2`.`b`) and ((`test`.`t1`.`a` - (`test`.`t2`.`a` + 2)) = 0))
 with qn as (select a+2 as a, b from t2)
 update t1, qn, qn as qn2 set t1.a=qn.a+10 where t1.a-qn.a=0 and qn.b=qn2.b;
 select * from t1;
@@ -877,6 +979,7 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 3	DERIVED	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 Warnings:
 Note	1276	Field or reference 'test.t1.a' of SELECT #2 was resolved in SELECT #1
+Note	1003	with `qn` as (/* select#3 */ select (`test`.`t2`.`a` + 2) AS `a`,`test`.`t2`.`b` AS `b` from `test`.`t2`) update `test`.`t1` set `test`.`t1`.`a` = (/* select#2 */ select (`qn`.`a` + 10) from `qn` where ((`test`.`t1`.`a` - `qn`.`a`) = 0) limit 1)
 with qn as (select a+2 as a, b from t2) update t1
 set t1.a=(select qn.a+10 from qn where t1.a-qn.a=0 limit 1);
 select * from t1;
@@ -891,6 +994,7 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 2	DEPENDENT SUBQUERY	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
 Note	1276	Field or reference 'test.t1.a' of SELECT #2 was resolved in SELECT #1
+Note	1003	update /*+ MERGE(`qn`@`select#2`) */ `test`.`t1` set `test`.`t1`.`a` = (/* select#2 */ select ((`test`.`t2`.`a` + 2) + 10) from `test`.`t2` where ((`test`.`t1`.`a` - (`test`.`t2`.`a` + 2)) = 0) limit 1)
 with qn as (select a+2 as a, b from t2) update t1
 set t1.a=(select /*+ merge(qn) */ qn.a+10 from qn where t1.a-qn.a=0 limit 1);
 select * from t1;
@@ -911,6 +1015,8 @@ explain with qn as (select a+2 as a, b from t1) delete t1 from t1, qn where t1.a
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	DELETE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
+Warnings:
+Note	1003	delete `test`.`t1` from `test`.`t1` join `test`.`t1` where ((`test`.`t1`.`a` - (`test`.`t1`.`a` + 2)) = 0)
 with qn as (select a+2 as a, b from t1) delete t1 from t1, qn where t1.a-qn.a=0;
 select * from t1;
 a	b
@@ -920,6 +1026,8 @@ explain with qn as (select a+2 as a, b from t2) delete t1 from t1, qn where t1.a
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	DELETE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
 1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
+Warnings:
+Note	1003	delete `test`.`t1` from `test`.`t1` join `test`.`t2` where ((`test`.`t1`.`a` - (`test`.`t2`.`a` + 2)) = 0)
 with qn as (select a+2 as a, b from t2) delete t1 from t1, qn where t1.a-qn.a=0;
 select * from t1;
 a	b
@@ -930,6 +1038,8 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 1	DELETE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
 1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 2	DERIVED	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
+Warnings:
+Note	1003	with `qn` as (/* select#2 */ select (`test`.`t2`.`a` + 2) AS `a`,`test`.`t2`.`b` AS `b` from `test`.`t2`) delete /*+ NO_MERGE(`qn`@`select#1`) */ `test`.`t1` from `test`.`t1` join `qn` where ((`test`.`t1`.`a` - `qn`.`a`) = 0)
 with qn as (select a+2 as a, b from t2) delete /*+ no_merge(qn) */ t1 from t1, qn where t1.a-qn.a=0;
 select * from t1;
 a	b
@@ -941,6 +1051,8 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 1	DELETE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
 1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where
+Warnings:
+Note	1003	delete `test`.`t1` from `test`.`t1` join `test`.`t2` join `test`.`t2` where ((`test`.`t2`.`b` = `test`.`t2`.`b`) and ((`test`.`t1`.`a` - (`test`.`t2`.`a` + 2)) = 0))
 with qn as (select a+2 as a, b from t2)
 delete t1 from t1, qn, qn as qn2 where t1.a-qn.a=0 and qn.b=qn2.b;
 select * from t1;
@@ -956,6 +1068,7 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 3	DERIVED	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 Warnings:
 Note	1276	Field or reference 'test.t1.a' of SELECT #2 was resolved in SELECT #1
+Note	1003	with `qn` as (/* select#3 */ select (`test`.`t2`.`a` + 2) AS `a`,`test`.`t2`.`b` AS `b` from `test`.`t2`) delete from `test`.`t1` where (`test`.`t1`.`a` = (/* select#2 */ select `qn`.`a` from `qn` where ((`test`.`t1`.`a` - `qn`.`a`) = 0) limit 1))
 with qn as (select a+2 as a, b from t2)
 delete from t1 where t1.a=(select qn.a from qn where t1.a-qn.a=0 limit 1);
 select * from t1;
@@ -969,6 +1082,7 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 2	DEPENDENT SUBQUERY	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
 Note	1276	Field or reference 'test.t1.a' of SELECT #2 was resolved in SELECT #1
+Note	1003	delete /*+ MERGE(`qn`@`select#2`) */ from `test`.`t1` where (`test`.`t1`.`a` = (/* select#2 */ select (`test`.`t2`.`a` + 2) from `test`.`t2` where ((`test`.`t1`.`a` - (`test`.`t2`.`a` + 2)) = 0) limit 1))
 with qn as (select a+2 as a, b from t2)
 delete from t1 where t1.a=(select /*+ merge(qn) */ qn.a from qn where t1.a-qn.a=0 limit 1);
 select * from t1;
@@ -1018,18 +1132,18 @@ ERROR 42000: Not unique table/alias: 'qn'
 WITH qn AS (SELECT b as a FROM t1)
 SELECT qn.a, qn2.a  FROM qn, qn as qn2;
 a	a
-NULL	NULL
+3	3
 3	NULL
 NULL	3
-3	3
+NULL	NULL
 WITH qn AS (SELECT b as a FROM t1),
 qn2 AS (SELECT c FROM t1 WHERE a IS NULL or a>0)
 SELECT qn.a, qn2.c  FROM qn, qn2;
 a	c
-NULL	NULL
-NULL	4
-3	NULL
 3	4
+3	NULL
+NULL	4
+NULL	NULL
 # qn2 ref qn:
 WITH qn AS (SELECT 10*a as a FROM t1),
 qn2 AS (SELECT 3*a FROM qn)
@@ -1046,18 +1160,18 @@ WITH qn AS (SELECT b as a FROM t1),
 qn2 AS (SELECT a FROM qn WHERE a IS NULL or a>0)
 SELECT qn.a, qn2.a  FROM qn, qn2;
 a	a
-NULL	NULL
-NULL	3
-3	NULL
 3	3
+3	NULL
+NULL	3
+NULL	NULL
 EXPLAIN WITH qn AS (SELECT b as a FROM t1),
 qn2 AS (SELECT a FROM qn WHERE a IS NULL or a>0)
 SELECT qn.a, qn2.a  FROM qn, qn2;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	75.00	Using where
-1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 Warnings:
-Note	1003	/* select#1 */ select `test`.`t1`.`b` AS `a`,`test`.`t1`.`b` AS `a` from `test`.`t1` join `test`.`t1` where (isnull(`test`.`t1`.`b`) or (`test`.`t1`.`b` > 0))
+Note	1003	/* select#1 */ select `test`.`t1`.`b` AS `a`,`test`.`t1`.`b` AS `a` from `test`.`t1` join `test`.`t1` where ((`test`.`t1`.`b` is null) or (`test`.`t1`.`b` > 0))
 # forward ref (should error)
 WITH qn2 AS (SELECT a FROM qn WHERE a IS NULL or a>0),
 qn AS (SELECT b as a FROM t1)
@@ -1301,13 +1415,13 @@ NULL
 with qn as (select "with" as a)
 with qn2 as (select "with" as a)
 select a from test.qn;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'qn2 as (select "with" as a)
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'with qn2 as (select "with" as a)
 select a from test.qn' at line 2
 # with comma
 with qn as (select "with" as a),
 with qn2 as (select "with" as a)
 select a from test.qn;
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'qn2 as (select "with" as a)
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'with qn2 as (select "with" as a)
 select a from test.qn' at line 2
 # ORDER BY removed unless there is LIMIT or single table (check "Using filesort")
 explain
@@ -1322,7 +1436,7 @@ with qn as (select a from t1 order by 1)
 select qn.a from qn, t1 as t2;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a` from `test`.`t1` join `test`.`t1` `t2`
 explain
@@ -1330,7 +1444,7 @@ with qn as (select a from t1 order by 1 limit 10)
 select qn.a from qn, t1 as t2;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	PRIMARY	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	PRIMARY	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 2	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using filesort
 Warnings:
 Note	1003	with `qn` as (/* select#2 */ select `test`.`t1`.`a` AS `a` from `test`.`t1` order by `test`.`t1`.`a` limit 10) /* select#1 */ select `qn`.`a` AS `a` from `qn` join `test`.`t1` `t2`
@@ -1341,7 +1455,7 @@ qn2 as (select b from t1)
 select /*+ merge(qn) no_merge(qn2) */ qn.a,qn2.b from qn, qn2;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	PRIMARY	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	PRIMARY	<derived3>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	PRIMARY	<derived3>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 3	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 Warnings:
 Note	1003	with `qn2` as (/* select#3 */ select `test`.`t1`.`b` AS `b` from `test`.`t1`) /* select#1 */ select /*+ MERGE(`qn`@`select#1`) NO_MERGE(`qn2`@`select#1`) */ `test`.`t1`.`a` AS `a`,`qn2`.`b` AS `b` from `test`.`t1` join `qn2`
@@ -1350,7 +1464,7 @@ with qn as (select a from t1)
 select /*+ merge(qn) no_merge(qn2) */ qn2.a from qn, qn as qn2;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	PRIMARY	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	PRIMARY	<derived3>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	PRIMARY	<derived3>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 3	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 Warnings:
 Note	1003	with `qn` as (/* select#3 */ select `test`.`t1`.`a` AS `a` from `test`.`t1`) /* select#1 */ select /*+ MERGE(`qn`@`select#1`) NO_MERGE(`qn2`@`select#1`) */ `qn2`.`a` AS `a` from `test`.`t1` join `qn` `qn2`
@@ -1378,7 +1492,7 @@ explain with cte as (select * from t1 as t2 limit 1)
 select * from t1 where t1.a in (select a+0 from cte);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	PRIMARY	<derived3>	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Start temporary
-1	PRIMARY	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where; End temporary; Using join buffer (Block Nested Loop)
+1	PRIMARY	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where; End temporary; Using join buffer (hash join)
 3	DERIVED	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 Warnings:
 Note	1003	with `cte` as (/* select#3 */ select `test`.`t2`.`a` AS `a`,`test`.`t2`.`b` AS `b`,`test`.`t2`.`c` AS `c` from `test`.`t1` `t2` limit 1) /* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b`,`test`.`t1`.`c` AS `c` from `test`.`t1` semi join (`cte`) where (`test`.`t1`.`a` = (`cte`.`a` + 0))
@@ -1389,7 +1503,7 @@ explain with cte as (select * from t1 as t2)
 select * from t1 where t1.a in (select a+0 from cte);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where; FirstMatch(t1); Using join buffer (Block Nested Loop)
+1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where; FirstMatch(t1); Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b`,`test`.`t1`.`c` AS `c` from `test`.`t1` semi join (`test`.`t1` `t2`) where (`test`.`t1`.`a` = (`test`.`t2`.`a` + 0))
 with cte as (select * from t1 as t2)
@@ -1402,11 +1516,11 @@ with qn () as (select 1) select * from qn, qn qn1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near ') as (select 1) select * from qn, qn qn1' at line 1
 # Materialization
 with qn (foo, bar) as (select 1) select * from qn, qn qn1;
-ERROR HY000: View's SELECT and view's field list have different column counts
+ERROR HY000: In definition of view, derived table or common table expression, SELECT list and column names list have different column counts
 explain with qn (foo, bar) as (select 1, 2 from t1 limit 2) select * from qn, qn qn1;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 2	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 Warnings:
 Note	1003	with `qn` (`foo`,`bar`) as (/* select#2 */ select 1 AS `1`,2 AS `2` from `test`.`t1` limit 2) /* select#1 */ select `qn`.`foo` AS `foo`,`qn`.`bar` AS `bar`,`qn1`.`foo` AS `foo`,`qn1`.`bar` AS `bar` from `qn` join `qn` `qn1`
@@ -1436,12 +1550,12 @@ create table t3
 with qn (foo, bar) as (select a, b from t1 limit 2) select bar,foo from qn;
 desc t3;
 Field	Type	Null	Key	Default	Extra
-bar	int(11)	YES		NULL	
-foo	int(11)	YES		NULL	
+bar	int	YES		NULL	
+foo	int	YES		NULL	
 drop table t3;
 # Merge
 with qn (foo, bar) as (select 1 from t1) select * from qn, qn qn1;
-ERROR HY000: View's SELECT and view's field list have different column counts
+ERROR HY000: In definition of view, derived table or common table expression, SELECT list and column names list have different column counts
 with qn (foo, bar) as (select 1, 2 from t1) select * from qn, qn qn1;
 foo	bar	foo	bar
 1	2	1	2
@@ -1451,7 +1565,7 @@ foo	bar	foo	bar
 explain with qn (foo, bar) as (select 1, 2 from t1) select * from qn, qn qn1;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select 1 AS `foo`,2 AS `bar`,1 AS `foo`,2 AS `bar` from `test`.`t1` join `test`.`t1`
 with qn (foo, bar) as (select 1 as col, 2 as coll from t1) select * from qn, qn qn1;
@@ -1468,8 +1582,8 @@ create table t3
 with qn (foo, bar) as (select a, b from t1) select bar,foo from qn;
 desc t3;
 Field	Type	Null	Key	Default	Extra
-bar	int(11)	YES		NULL	
-foo	int(11)	YES		NULL	
+bar	int	YES		NULL	
+foo	int	YES		NULL	
 drop table t3;
 # Disambiguates same-name expressions
 with qn as (select 1,1) select * from qn;
@@ -1495,7 +1609,7 @@ foo	bar
 NULL	NULL
 2	3
 select * from (select a from t1) dt(foo,bar);
-ERROR HY000: View's SELECT and view's field list have different column counts
+ERROR HY000: In definition of view, derived table or common table expression, SELECT list and column names list have different column counts
 # Column names for QN/DT are printed
 create view v1 as
 with qn (foo, bar) as (select 1,1) select * from qn;
@@ -1504,8 +1618,8 @@ View	Create View	character_set_client	collation_connection
 v1	CREATE ALGORITHM=UNDEFINED DEFINER=`root`@`localhost` SQL SECURITY DEFINER VIEW `v1` AS with `qn` (`foo`,`bar`) as (select 1 AS `1`,1 AS `1`) select `qn`.`foo` AS `foo`,`qn`.`bar` AS `bar` from `qn`	utf8mb4	utf8mb4_0900_ai_ci
 show fields from v1;
 Field	Type	Null	Key	Default	Extra
-foo	int(1)	NO		0	
-bar	int(1)	NO		0	
+foo	int	NO		0	
+bar	int	NO		0	
 select * from v1;
 foo	bar
 1	1
@@ -1574,7 +1688,7 @@ select 1 AS `foo` group by `foo` union select 2 AS `2` order by `foo`
 drop view v1;
 create view v1 (bar) as
 select 1, 2 from t1;
-ERROR HY000: View's SELECT and view's field list have different column counts
+ERROR HY000: In definition of view, derived table or common table expression, SELECT list and column names list have different column counts
 drop table t1;
 # Prove that a materialized QN is shared among all references:
 create table t1(a int);
@@ -1635,9 +1749,9 @@ qne.a,qnm.a,alias1.a,alias2.a
 from qne, qnm, qnea as alias1, qnma as alias2;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	PRIMARY	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
-1	PRIMARY	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using join buffer (Block Nested Loop)
-1	PRIMARY	<derived3>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
-1	PRIMARY	<derived5>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	PRIMARY	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using join buffer (hash join)
+1	PRIMARY	<derived3>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
+1	PRIMARY	<derived5>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 5	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
 3	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
 Warnings:
@@ -1691,6 +1805,107 @@ a	a
 1	2
 drop table t1;
 # Must not create more than 64 indexes.
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 (select max(c1) from qn where qn.c1=1)	(select max(c2) from qn where qn.c2=1)	(select max(c3) from qn where qn.c3=1)	(select max(c4) from qn where qn.c4=1)	(select max(c5) from qn where qn.c5=1)	(select max(c6) from qn where qn.c6=1)	(select max(c7) from qn where qn.c7=1)	(select max(c8) from qn where qn.c8=1)	(select max(c9) from qn where qn.c9=1)	(select max(c10) from qn where qn.c10=1)	(select max(c11) from qn where qn.c11=1)	(select max(c12) from qn where qn.c12=1)	(select max(c13) from qn where qn.c13=1)	(select max(c14) from qn where qn.c14=1)	(select max(c15) from qn where qn.c15=1)	(select max(c16) from qn where qn.c16=1)	(select max(c17) from qn where qn.c17=1)	(select max(c18) from qn where qn.c18=1)	(select max(c19) from qn where qn.c19=1)	(select max(c20) from qn where qn.c20=1)	(select max(c21) from qn where qn.c21=1)	(select max(c22) from qn where qn.c22=1)	(select max(c23) from qn where qn.c23=1)	(select max(c24) from qn where qn.c24=1)	(select max(c25) from qn where qn.c25=1)	(select max(c26) from qn where qn.c26=1)	(select max(c27) from qn where qn.c27=1)	(select max(c28) from qn where qn.c28=1)	(select max(c29) from qn where qn.c29=1)	(select max(c30) from qn where qn.c30=1)	(select max(c31) from qn where qn.c31=1)	(select max(c32) from qn where qn.c32=1)	(select max(c33) from qn where qn.c33=1)	(select max(c34) from qn where qn.c34=1)	(select max(c35) from qn where qn.c35=1)	(select max(c36) from qn where qn.c36=1)	(select max(c37) from qn where qn.c37=1)	(select max(c38) from qn where qn.c38=1)	(select max(c39) from qn where qn.c39=1)	(select max(c40) from qn where qn.c40=1)	(select max(c41) from qn where qn.c41=1)	(select max(c42) from qn where qn.c42=1)	(select max(c43) from qn where qn.c43=1)	(select max(c44) from qn where qn.c44=1)	(select max(c45) from qn where qn.c45=1)	(select max(c46) from qn where qn.c46=1)	(select max(c47) from qn where qn.c47=1)	(select max(c48) from qn where qn.c48=1)	(select max(c49) from qn where qn.c49=1)	(select max(c50) from qn where qn.c50=1)	(select max(c51) from qn where qn.c51=1)	(select max(c52) from qn where qn.c52=1)	(select max(c53) from qn where qn.c53=1)	(select max(c54) from qn where qn.c54=1)	(select max(c55) from qn where qn.c55=1)	(select max(c56) from qn where qn.c56=1)	(select max(c57) from qn where qn.c57=1)	(select max(c58) from qn where qn.c58=1)	(select max(c59) from qn where qn.c59=1)	(select max(c60) from qn where qn.c60=1)	(select max(c61) from qn where qn.c61=1)	(select max(c62) from qn where qn.c62=1)	(select max(c63) from qn where qn.c63=1)	(select max(c64) from qn where qn.c64=1)	(select max(c65) from qn where qn.c65=1)	(select max(c66) from qn where qn.c66=1)	(select max(c67) from qn where qn.c67=1)	(select max(c68) from qn where qn.c68=1)	(select max(c69) from qn where qn.c69=1)	(select max(c70) from qn where qn.c70=1)	(select max(c71) from qn where qn.c71=1)	(select max(c72) from qn where qn.c72=1)	(select max(c73) from qn where qn.c73=1)	(select max(c74) from qn where qn.c74=1)	(select max(c75) from qn where qn.c75=1)	(select max(c76) from qn where qn.c76=1)	(select max(c77) from qn where qn.c77=1)	(select max(c78) from qn where qn.c78=1)	(select max(c79) from qn where qn.c79=1)	(select max(c80) from qn where qn.c80=1)	(select max(c81) from qn where qn.c81=1)	(select max(c82) from qn where qn.c82=1)	(select max(c83) from qn where qn.c83=1)	(select max(c84) from qn where qn.c84=1)	(select max(c85) from qn where qn.c85=1)	(select max(c86) from qn where qn.c86=1)	(select max(c87) from qn where qn.c87=1)	(select max(c88) from qn where qn.c88=1)	(select max(c89) from qn where qn.c89=1)	(select max(c90) from qn where qn.c90=1)	(select max(c91) from qn where qn.c91=1)	(select max(c92) from qn where qn.c92=1)	(select max(c93) from qn where qn.c93=1)	(select max(c94) from qn where qn.c94=1)	(select max(c95) from qn where qn.c95=1)	(select max(c96) from qn where qn.c96=1)	(select max(c97) from qn where qn.c97=1)	(select max(c98) from qn where qn.c98=1)	(select max(c99) from qn where qn.c99=1)	(select max(c100) from qn where qn.c100=1)
 NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL
 drop table t;
@@ -1704,10 +1919,10 @@ EXPLAIN with t2 as
 SELECT /*+ no_merge(t2) */ * FROM t2
 WHERE (a = a OR b <= 6) AND (a IS NULL);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	PRIMARY	<derived2>	NULL	ref	<auto_key1>	<auto_key1>	5	const	1	100.00	Using where
-2	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
+1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
+2	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where
 Warnings:
-Note	1003	with `t2` as (/* select#2 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b` from `test`.`t1`) /* select#1 */ select /*+ NO_MERGE(`t2`@`select#1`) */ `t2`.`a` AS `a`,`t2`.`b` AS `b` from `t2` where (((`t2`.`a` = `t2`.`a`) or (`t2`.`b` <= 6)) and isnull(`t2`.`a`))
+Note	1003	with `t2` as (/* select#2 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b` from `test`.`t1` where (((`test`.`t1`.`a` = `test`.`t1`.`a`) or (`test`.`t1`.`b` <= 6)) and (`test`.`t1`.`a` is null))) /* select#1 */ select /*+ NO_MERGE(`t2`@`select#1`) */ `t2`.`a` AS `a`,`t2`.`b` AS `b` from `t2`
 with t2 as
 (select * from t1)
 SELECT /*+ no_merge(t2) */ * FROM t2
@@ -1735,12 +1950,10 @@ create view v1 as
 with qn as (select a from t1),
 qn2 as (select b from t1)
 select /*+ merge(qn) no_merge(qn2) */ qn.a,qn2.b from qn, qn2;
-Warnings:
-Warning	3515	Hints aren't supported in CREATE or ALTER VIEW
 explain select * from v1;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
-1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using join buffer (Block Nested Loop)
+1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b` from `test`.`t1` join `test`.`t1`
 drop view v1;
@@ -1753,7 +1966,7 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 2	DERIVED	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
 Warnings:
-Note	1003	/* select#1 */ select `v1`.`a` AS `a` from `test`.`v1`
+Note	1003	/* select#1 */ select `test`.`v1`.`a` AS `a` from `test`.`v1`
 drop view v1;
 drop table t1;
 # CTE referenced four times, including in subqueries in other CTEs
@@ -1782,11 +1995,6 @@ month	total	award
 1	300	best
 3	11	worst
 drop table sales_days;
-# Tmp table cannot be MyISAM
-set global internal_tmp_disk_storage_engine=myisam;
-with qn as (select 1) select * from qn;
-ERROR HY000: 'Materialization of a Common Table Expression' requires @@internal_tmp_disk_storage_engine=InnoDB
-set global internal_tmp_disk_storage_engine=default;
 # Special parser command not allowed to users.
 parse_cte ( select 1 ) ;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'parse_cte ( select 1 )' at line 1
@@ -1824,6 +2032,8 @@ explain with qn as (select a+2 as a, b from t1) update t1, qn set t1.a=qn.a+10 w
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	UPDATE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
+Warnings:
+Note	1003	update `test`.`t1` join `test`.`t1` set `test`.`t1`.`a` = ((`test`.`t1`.`a` + 2) + 10) where ((`test`.`t1`.`a` - (`test`.`t1`.`a` + 2)) = 0)
 with qn as (select a+2 as a, b from t1) update t1, qn set t1.a=qn.a+10 where t1.a-qn.a=0;
 select * from t1;
 a	b
@@ -1834,6 +2044,8 @@ explain with qn as (select a+2 as a, b from t2) update t1, qn set t1.a=qn.a+10 w
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	UPDATE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
+Warnings:
+Note	1003	update `test`.`t1` join `test`.`t2` set `test`.`t1`.`a` = ((`test`.`t2`.`a` + 2) + 10) where ((`test`.`t1`.`a` - (`test`.`t2`.`a` + 2)) = 0)
 with qn as (select a+2 as a, b from t2) update t1, qn set t1.a=qn.a+10 where t1.a-qn.a=0;
 select * from t1;
 a	b
@@ -1845,6 +2057,8 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 1	UPDATE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 2	DERIVED	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
+Warnings:
+Note	1003	with `qn` as (/* select#2 */ select (`test`.`t2`.`a` + 2) AS `a`,`test`.`t2`.`b` AS `b` from `test`.`t2`) update /*+ NO_MERGE(`qn`@`select#1`) */ `test`.`t1` join `qn` set `test`.`t1`.`a` = (`qn`.`a` + 10) where ((`test`.`t1`.`a` - `qn`.`a`) = 0)
 with qn as (select a+2 as a, b from t2) update /*+ no_merge(qn) */ t1, qn set t1.a=qn.a+10 where t1.a-qn.a=0;
 select * from t1;
 a	b
@@ -1858,6 +2072,8 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 1	UPDATE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where
+Warnings:
+Note	1003	update `test`.`t1` join `test`.`t2` join `test`.`t2` set `test`.`t1`.`a` = ((`test`.`t2`.`a` + 2) + 10) where ((`test`.`t2`.`b` = `test`.`t2`.`b`) and ((`test`.`t1`.`a` - (`test`.`t2`.`a` + 2)) = 0))
 with qn as (select a+2 as a, b from t2)
 update t1, qn, qn as qn2 set t1.a=qn.a+10 where t1.a-qn.a=0 and qn.b=qn2.b;
 select * from t1;
@@ -1874,6 +2090,7 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 3	DERIVED	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 Warnings:
 Note	1276	Field or reference 'test.t1.a' of SELECT #2 was resolved in SELECT #1
+Note	1003	with `qn` as (/* select#3 */ select (`test`.`t2`.`a` + 2) AS `a`,`test`.`t2`.`b` AS `b` from `test`.`t2`) update `test`.`t1` set `test`.`t1`.`a` = (/* select#2 */ select (`qn`.`a` + 10) from `qn` where ((`test`.`t1`.`a` - `qn`.`a`) = 0) limit 1)
 with qn as (select a+2 as a, b from t2) update t1
 set t1.a=(select qn.a+10 from qn where t1.a-qn.a=0 limit 1);
 select * from t1;
@@ -1888,6 +2105,7 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 2	DEPENDENT SUBQUERY	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
 Note	1276	Field or reference 'test.t1.a' of SELECT #2 was resolved in SELECT #1
+Note	1003	update /*+ MERGE(`qn`@`select#2`) */ `test`.`t1` set `test`.`t1`.`a` = (/* select#2 */ select ((`test`.`t2`.`a` + 2) + 10) from `test`.`t2` where ((`test`.`t1`.`a` - (`test`.`t2`.`a` + 2)) = 0) limit 1)
 with qn as (select a+2 as a, b from t2) update t1
 set t1.a=(select /*+ merge(qn) */ qn.a+10 from qn where t1.a-qn.a=0 limit 1);
 select * from t1;
@@ -1908,6 +2126,8 @@ explain with qn as (select a+2 as a, b from t1) delete t1 from t1, qn where t1.a
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	DELETE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
+Warnings:
+Note	1003	delete `test`.`t1` from `test`.`t1` join `test`.`t1` where ((`test`.`t1`.`a` - (`test`.`t1`.`a` + 2)) = 0)
 with qn as (select a+2 as a, b from t1) delete t1 from t1, qn where t1.a-qn.a=0;
 select * from t1;
 a	b
@@ -1917,6 +2137,8 @@ explain with qn as (select a+2 as a, b from t2) delete t1 from t1, qn where t1.a
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	DELETE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
 1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
+Warnings:
+Note	1003	delete `test`.`t1` from `test`.`t1` join `test`.`t2` where ((`test`.`t1`.`a` - (`test`.`t2`.`a` + 2)) = 0)
 with qn as (select a+2 as a, b from t2) delete t1 from t1, qn where t1.a-qn.a=0;
 select * from t1;
 a	b
@@ -1927,6 +2149,8 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 1	DELETE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
 1	PRIMARY	<derived2>	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 2	DERIVED	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
+Warnings:
+Note	1003	with `qn` as (/* select#2 */ select (`test`.`t2`.`a` + 2) AS `a`,`test`.`t2`.`b` AS `b` from `test`.`t2`) delete /*+ NO_MERGE(`qn`@`select#1`) */ `test`.`t1` from `test`.`t1` join `qn` where ((`test`.`t1`.`a` - `qn`.`a`) = 0)
 with qn as (select a+2 as a, b from t2) delete /*+ no_merge(qn) */ t1 from t1, qn where t1.a-qn.a=0;
 select * from t1;
 a	b
@@ -1938,6 +2162,8 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 1	DELETE	t1	NULL	ALL	NULL	NULL	NULL	NULL	1	100.00	NULL
 1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where
+Warnings:
+Note	1003	delete `test`.`t1` from `test`.`t1` join `test`.`t2` join `test`.`t2` where ((`test`.`t2`.`b` = `test`.`t2`.`b`) and ((`test`.`t1`.`a` - (`test`.`t2`.`a` + 2)) = 0))
 with qn as (select a+2 as a, b from t2)
 delete t1 from t1, qn, qn as qn2 where t1.a-qn.a=0 and qn.b=qn2.b;
 select * from t1;
@@ -1953,6 +2179,7 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 3	DERIVED	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
 Warnings:
 Note	1276	Field or reference 'test.t1.a' of SELECT #2 was resolved in SELECT #1
+Note	1003	with `qn` as (/* select#3 */ select (`test`.`t2`.`a` + 2) AS `a`,`test`.`t2`.`b` AS `b` from `test`.`t2`) delete from `test`.`t1` where (`test`.`t1`.`a` = (/* select#2 */ select `qn`.`a` from `qn` where ((`test`.`t1`.`a` - `qn`.`a`) = 0) limit 1))
 with qn as (select a+2 as a, b from t2)
 delete from t1 where t1.a=(select qn.a from qn where t1.a-qn.a=0 limit 1);
 select * from t1;
@@ -1966,6 +2193,7 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 2	DEPENDENT SUBQUERY	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
 Note	1276	Field or reference 'test.t1.a' of SELECT #2 was resolved in SELECT #1
+Note	1003	delete /*+ MERGE(`qn`@`select#2`) */ from `test`.`t1` where (`test`.`t1`.`a` = (/* select#2 */ select (`test`.`t2`.`a` + 2) from `test`.`t2` where ((`test`.`t1`.`a` - (`test`.`t2`.`a` + 2)) = 0) limit 1))
 with qn as (select a+2 as a, b from t2)
 delete from t1 where t1.a=(select /*+ merge(qn) */ qn.a from qn where t1.a-qn.a=0 limit 1);
 select * from t1;
@@ -1991,4 +2219,4 @@ with qn as (select 1) select * from qn;
 use test;
 show status like 'Created_tmp_disk_tables';
 Variable_name	Value
-Created_tmp_disk_tables	23
+Created_tmp_disk_tables	17

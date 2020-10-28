@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2013, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -81,7 +81,7 @@ class Find_THD_Impl {
 class Find_thd_with_id : public Find_THD_Impl {
  public:
   Find_thd_with_id(my_thread_id value) : m_thread_id(value) {}
-  virtual bool operator()(THD *thd);
+  bool operator()(THD *thd) override;
 
   const my_thread_id m_thread_id;
 };
@@ -110,7 +110,7 @@ class Global_THD_manager {
     Retrieves singleton instance
   */
   static Global_THD_manager *get_instance() {
-    DBUG_ASSERT(thd_manager != NULL);
+    DBUG_ASSERT(thd_manager != nullptr);
     return thd_manager;
   }
 

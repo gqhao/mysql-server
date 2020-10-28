@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -22,6 +22,8 @@
 
 #ifndef RPL_SERVICE_INTERFACE_INCLUDE
 #define RPL_SERVICE_INTERFACE_INCLUDE
+
+#include <string>
 
 // Channel errors
 
@@ -72,6 +74,7 @@ struct Channel_ssl_info {
   char *ssl_cipher;            // list of permissible ciphers to use for SSL
   int ssl_verify_server_cert;  // check the server's Common Name value
   char *tls_version;           // TLS version to use for SSL
+  char *tls_ciphersuites;      // list of permissible ciphersuites for TLS 1.3
 };
 
 void initialize_channel_ssl_info(Channel_ssl_info *channel_ssl_info);
@@ -100,6 +103,10 @@ struct Channel_creation_info {
   char *public_key_path;     // RSA Public key information
   int get_public_key;        // Preference to get public key from donor if not
                              // available
+  char *compression_algorithm;
+  unsigned int zstd_compression_level;
+  /* to enable async connection failover */
+  int m_source_connection_auto_failover{0};
 };
 
 void initialize_channel_creation_info(Channel_creation_info *channel_info);
@@ -186,6 +193,14 @@ int channel_start(const char *channel, Channel_connection_info *connection_info,
 int channel_stop(const char *channel, int threads_to_stop, long timeout);
 
 /**
+  Kills the Binlog Dump threads.
+
+  @return the operation status
+    @retval 0      OK
+*/
+int binlog_dump_thread_kill();
+
+/**
   Stops all the running channel threads according to the given options.
 
   @param threads_to_stop      The types of threads to be stopped
@@ -196,8 +211,8 @@ int channel_stop(const char *channel, int threads_to_stop, long timeout);
     @retval 0      OK
     @retval !=0    Error
 */
-int channel_stop_all(int threads_to_stop, long timeout, char **error_message);
-
+int channel_stop_all(int threads_to_stop, long timeout,
+                     std::string *error_message);
 /**
   Purges the channel logs
 
@@ -298,6 +313,25 @@ int channel_queue_packet(const char *channel, const char *buf,
 int channel_wait_until_apply_queue_applied(const char *channel, double timeout);
 
 /**
+  Checks if all the transactions in the given set were executed.
+
+  @param channel  the channel name
+  @param gtid_set the set in string format of transaction to wait for
+  @param timeout  the time (seconds) after which the method returns if the
+                  above condition was not satisfied
+  @param update_THD_status     Shall the method update the THD stage
+
+  @return the operation status
+    @retval 0   All transactions were executed
+    @retval REPLICATION_THREAD_WAIT_TIMEOUT_ERROR     A timeout occurred
+    @retval REPLICATION_THREAD_WAIT_NO_INFO_ERROR     An error occurred
+*/
+int channel_wait_until_transactions_applied(const char *channel,
+                                            const char *gtid_set,
+                                            double timeout,
+                                            bool update_THD_status = true);
+
+/**
   Checks if the applier, and its workers when parallel applier is
   enabled, has already consumed all relay log, that is, applier is
   waiting for transactions to be queued.
@@ -376,9 +410,8 @@ bool channel_is_stopping(const char *channel, enum_channel_thread_types type);
 
   @param channel  The channel name
 
-  @return
-    @retval true    If relaylog contains partial transcation.
-    @retval false   If relaylog does not contain partial transaction.
+  @retval true    If relaylog contains partial transcation.
+  @retval false   If relaylog does not contain partial transaction.
 */
 bool is_partial_transaction_on_channel_relay_log(const char *channel);
 
@@ -387,10 +420,62 @@ bool is_partial_transaction_on_channel_relay_log(const char *channel);
 
   @param[in]        thread_mask       type of slave thread- IO/SQL or any
 
-  @return
-    @retval          true               atleast one channel threads are running.
-    @retval          false              none of the the channels are running.
+  @retval          true               atleast one channel threads are running.
+  @retval          false              none of the the channels are running.
 */
 bool is_any_slave_channel_running(int thread_mask);
 
+/**
+  Method to get the credentials configured for a channel
+
+  @param[in]  channel       The channel name
+  @param[out] user          The user to extract
+  @param[out] password      The password to extract
+
+  @return the operation status
+    @retval false   OK
+    @retval true    Error, channel not found
+*/
+int channel_get_credentials(const char *channel, std::string &user,
+                            std::string &password);
+
+/**
+  Return type for function
+  has_any_slave_channel_open_temp_table_or_is_its_applier_running()
+*/
+enum enum_slave_channel_status {
+  /*
+    None of all slave channel appliers are running and none
+    of all slave channels have open temporary table(s).
+  */
+  SLAVE_CHANNEL_NO_APPLIER_RUNNING_AND_NO_OPEN_TEMPORARY_TABLE = 0,
+  /* At least one slave channel applier is running. */
+  SLAVE_CHANNEL_APPLIER_IS_RUNNING,
+  /* At least one slave channel has open temporary table(s). */
+  SLAVE_CHANNEL_HAS_OPEN_TEMPORARY_TABLE
+};
+
+/**
+  Checks if any slave channel applier is running or any slave channel has open
+  temporary table(s). This holds handled appliers' run_locks until finding a
+  running slave channel applier or a slave channel which has open temporary
+  table(s), or handling all slave channels.
+
+  @return SLAVE_CHANNEL_NO_APPLIER_RUNNING_AND_NO_OPEN_TEMPORARY_TABLE,
+          SLAVE_CHANNEL_APPLIER_IS_RUNNING or
+          SLAVE_CHANNEL_HAS_OPEN_TEMPORARY_TABLE.
+*/
+enum_slave_channel_status
+has_any_slave_channel_open_temp_table_or_is_its_applier_running();
+
+/**
+  Delete stored credentials from Slave_credentials
+  @param[in]  channel_name  The channel name
+
+  @return the operation status
+    @retval 0  OK
+    @retval 1  Error, channel not found
+
+ */
+int channel_delete_credentials(const char *channel_name);
 #endif  // RPL_SERVICE_INTERFACE_INCLUDE

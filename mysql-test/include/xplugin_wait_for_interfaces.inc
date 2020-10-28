@@ -22,10 +22,21 @@ if ($wait_for_tcpsocket_status != "no_wait")
 
   let $wait_condition=
     SELECT 1 FROM performance_schema.global_status WHERE
-      VARIABLE_NAME like "Mysqlx_address" AND
-      VARIABLE_VALUE != "" AND
-      VARIABLE_VALUE $wait_operation "UNDEFINED";
-  --source include/wait_condition_or_abort.inc
+      VARIABLE_NAME like 'Mysqlx_address' AND
+      VARIABLE_VALUE != '' AND
+      VARIABLE_VALUE $wait_operation 'UNDEFINED';
+  --source include/wait_condition.inc
+
+  if (!$success)
+  {
+    echo Script executed with:;
+    echo - wait_for_tcpsocket_status=$wait_for_tcpsocket_status;
+    echo - wait_for_unixsocket_status=$wait_for_unixsocket_status;
+    echo;
+    echo Some status variables returned unexpected data:;
+    SELECT * FROM performance_schema.global_status WHERE VARIABLE_NAME like "Mysqlx_address" OR VARIABLE_NAME like "Mysqlx_socket" OR VARIABLE_NAME like "Mysqlx_port";
+    die;
+  }
 }
 
 if ($wait_for_unixsocket_status != "no_wait")
@@ -38,10 +49,23 @@ if ($wait_for_unixsocket_status != "no_wait")
 
   let $wait_condition=
     SELECT 1 FROM performance_schema.global_status WHERE
-      (VARIABLE_NAME like "Mysqlx_socket" AND
-       VARIABLE_VALUE != "" AND
-       VARIABLE_VALUE $wait_operation "UNDEFINED") OR
-      CONVERT(@@version_compile_os using latin1) IN ("Win32","Win64","Windows");
+      (VARIABLE_NAME like 'Mysqlx_socket' AND
+       VARIABLE_VALUE != '' AND
+       VARIABLE_VALUE $wait_operation 'UNDEFINED') OR
+      CONVERT(@@version_compile_os using latin1) IN ('Win32','Win64','Windows');
+  --source include/wait_condition.inc
+
+  if (!$success)
+  {
+    echo Script executed with:;
+    echo - wait_for_tcpsocket_status=$wait_for_tcpsocket_status;
+    echo - wait_for_unixsocket_status=$wait_for_unixsocket_status;
+    echo;
+    echo Some status variables returned unexpected data:;
+    SELECT * FROM performance_schema.global_status WHERE VARIABLE_NAME like "Mysqlx_address" OR VARIABLE_NAME like "Mysqlx_socket" OR VARIABLE_NAME like "Mysqlx_port";
+    die;
+  }
+
   --source include/wait_condition_or_abort.inc
 }
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -27,6 +27,8 @@
 #include "sql/dd/types/column.h"   // dd::Column::enum_column_types
 #include "sql/dd/types/routine.h"  // dd::Routine
 
+struct MDL_key;
+
 namespace dd {
 
 class Function_impl;
@@ -37,7 +39,7 @@ class Function : virtual public Routine {
  public:
   typedef Function_impl Impl;
 
-  virtual bool update_name_key(Name_key *key) const {
+  bool update_name_key(Name_key *key) const override {
     return update_routine_name_key(key, schema_id(), name());
   }
 
@@ -45,7 +47,7 @@ class Function : virtual public Routine {
                               const String_type &name);
 
  public:
-  virtual ~Function(){};
+  ~Function() override {}
 
  public:
   /////////////////////////////////////////////////////////////////////////
@@ -124,7 +126,12 @@ class Function : virtual public Routine {
 
     @return pointer to dynamically allocated copy
   */
-  virtual Function *clone() const = 0;
+  Function *clone() const override = 0;
+
+  static void create_mdl_key(const String_type &schema_name,
+                             const String_type &name, MDL_key *key) {
+    Routine::create_mdl_key(RT_FUNCTION, schema_name, name, key);
+  }
 };
 
 ///////////////////////////////////////////////////////////////////////////

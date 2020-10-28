@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -123,6 +123,7 @@ public:
 
   // tables are shared and can also be added outside job context
   int add_table(const char* database, const char* table, uint& tabid);
+  int remove_table(uint table_id);
 
   // job
 
@@ -142,16 +143,19 @@ public:
     };
   };
 
+  // a selection of stats (full details are in stats file t1.stt)
   struct JobStats {
     JobStats();
+    // from all resumed runs
     uint64 m_rows;
     uint64 m_reject;
-    uint m_temperrors;  // sum of values from m_errormap
-    std::map<uint, uint> m_errormap;
     uint64 m_runtime;
     uint64 m_rowssec;
-    uint64 m_utime;
-    uint64 m_stime;
+    // from latest run
+    uint64 m_new_rows;
+    uint64 m_new_reject;
+    uint m_temperrors;  // sum of values from m_errormap
+    std::map<uint, uint> m_errormap;
   };
 
   struct Job {
@@ -164,10 +168,12 @@ public:
     void do_destroy();
     int add_table(const char* database, const char* table, uint& tabid);
     void set_table(uint tabid);
+    int remove_table(uint table_id);
     bool has_error() const;
     const Error& get_error() const;
     NdbImport& m_imp;
     uint m_jobno;
+    uint m_runno;       // run number i.e. resume count
     JobStatus::Status m_status;
     const char* m_str_status;
     JobStats m_stats;

@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1997, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1997, 2019, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -40,7 +40,6 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "ibuf0ibuf.h"
 #include "log0log.h"
 #include "mach0data.h"
-#include "my_inttypes.h"
 #include "que0que.h"
 #include "row0log.h"
 #include "row0row.h"
@@ -51,8 +50,6 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "trx0roll.h"
 #include "trx0trx.h"
 #include "trx0undo.h"
-
-#include "current_thd.h"
 
 /*************************************************************************
 IMPORTANT NOTE: Any operation that generates redo MUST check that there
@@ -75,7 +72,7 @@ static MY_ATTRIBUTE((warn_unused_result)) dberr_t
   dberr_t err;
   ulint n_tries = 0;
   mtr_t mtr;
-  dict_index_t *index = node->pcur.btr_cur.index;
+  dict_index_t *index = node->pcur.m_btr_cur.index;
   bool online;
 
   ut_ad(index->is_clustered());
@@ -112,13 +109,14 @@ static MY_ATTRIBUTE((warn_unused_result)) dberr_t
 
   if (online && dict_index_is_online_ddl(index)) {
     const rec_t *rec = btr_cur_get_rec(btr_cur);
-    mem_heap_t *heap = NULL;
+    mem_heap_t *heap = nullptr;
     const ulint *offsets =
-        rec_get_offsets(rec, index, NULL, ULINT_UNDEFINED, &heap);
-    row_log_table_delete(node->trx, rec, node->row, index, offsets, NULL);
+        rec_get_offsets(rec, index, nullptr, ULINT_UNDEFINED, &heap);
+    row_log_table_delete(node->trx, rec, node->row, index, offsets, nullptr);
     mem_heap_free(heap);
   }
 
+  row_convert_impl_to_expl_if_needed(btr_cur, node);
   if (btr_cur_optimistic_delete(btr_cur, 0, &mtr)) {
     err = DB_SUCCESS;
     goto func_exit;
@@ -136,7 +134,7 @@ retry:
   ut_a(success);
 
   btr_cur_pessimistic_delete(&err, FALSE, btr_cur, 0, true, node->trx->id,
-                             node->undo_no, node->rec_type, &mtr);
+                             node->undo_no, node->rec_type, &mtr, &node->pcur);
 
   /* The delete operation may fail if we have little
   file space left: TODO: easiest to crash the database
@@ -159,21 +157,25 @@ func_exit:
 }
 
 /** Removes a secondary index entry if found.
- @return DB_SUCCESS, DB_FAIL, or DB_OUT_OF_FILE_SPACE */
-static MY_ATTRIBUTE((warn_unused_result)) dberr_t row_undo_ins_remove_sec_low(
-    ulint mode,          /*!< in: BTR_MODIFY_LEAF or BTR_MODIFY_TREE,
-                         depending on whether we wish optimistic or
-                         pessimistic descent down the index tree */
-    dict_index_t *index, /*!< in: index */
-    dtuple_t *entry,     /*!< in: index entry to remove */
-    que_thr_t *thr)      /*!< in: query thread */
-{
+@param[in]	mode	BTR_MODIFY_LEAF or BTR_MODIFY_TREE,
+                        depending on whether we wish optimistic or
+                        pessimistic descent down the index tree
+@param[in]	index	index
+@param[in]	entry	index entry to remove
+@param[in]	thr	query thread
+@param[in]	node	undo node
+@return DB_SUCCESS, DB_FAIL, or DB_OUT_OF_FILE_SPACE */
+static MY_ATTRIBUTE((warn_unused_result)) dberr_t
+    row_undo_ins_remove_sec_low(ulint mode, dict_index_t *index,
+                                dtuple_t *entry, que_thr_t *thr,
+                                undo_node_t *node) {
   btr_pcur_t pcur;
   btr_cur_t *btr_cur;
   dberr_t err = DB_SUCCESS;
   mtr_t mtr;
   enum row_search_result search_result;
   ibool modify_leaf = false;
+  ulint rec_deleted;
 
   log_free_check();
 
@@ -218,15 +220,26 @@ static MY_ATTRIBUTE((warn_unused_result)) dberr_t row_undo_ins_remove_sec_low(
       ut_error;
   }
 
+  rec_deleted = rec_get_deleted_flag(btr_pcur_get_rec(&pcur),
+                                     dict_table_is_comp(index->table));
+
   if (search_result == ROW_FOUND && dict_index_is_spatial(index)) {
-    rec_t *rec = btr_pcur_get_rec(&pcur);
-    if (rec_get_deleted_flag(rec, dict_table_is_comp(index->table))) {
+    if (rec_deleted) {
       ib::error(ER_IB_MSG_1036) << "Record found in index " << index->name
                                 << " is deleted marked on insert rollback.";
     }
   }
 
   btr_cur = btr_pcur_get_btr_cur(&pcur);
+
+  if (rec_deleted == 0) {
+    /* This record is not delete marked and has an implicit
+    lock on it. For delete marked record, INSERT has not
+    modified it yet and we don't have implicit lock on it.
+    We must convert to explicit if and only if we have
+    implicit lock on the record.*/
+    row_convert_impl_to_expl_if_needed(btr_cur, node);
+  }
 
   if (modify_leaf) {
     err = btr_cur_optimistic_delete(btr_cur, 0, &mtr) ? DB_SUCCESS : DB_FAIL;
@@ -248,27 +261,29 @@ func_exit_no_pcur:
 
 /** Removes a secondary index entry from the index if found. Tries first
  optimistic, then pessimistic descent down the tree.
- @return DB_SUCCESS or DB_OUT_OF_FILE_SPACE */
+@param[in]	index	index
+@param[in]	entry	index entry to insert
+@param[in]	thr	query thread
+@param[in]	node	undo node
+@return DB_SUCCESS or DB_OUT_OF_FILE_SPACE */
 static MY_ATTRIBUTE((warn_unused_result)) dberr_t
-    row_undo_ins_remove_sec(dict_index_t *index, /*!< in: index */
-                            dtuple_t *entry, /*!< in: index entry to insert */
-                            que_thr_t *thr)  /*!< in: query thread */
-{
+    row_undo_ins_remove_sec(dict_index_t *index, dtuple_t *entry,
+                            que_thr_t *thr, undo_node_t *node) {
   dberr_t err;
   ulint n_tries = 0;
 
   /* Try first optimistic descent to the B-tree */
 
-  err = row_undo_ins_remove_sec_low(BTR_MODIFY_LEAF, index, entry, thr);
+  err = row_undo_ins_remove_sec_low(BTR_MODIFY_LEAF, index, entry, thr, node);
 
   if (err == DB_SUCCESS) {
     return (err);
   }
 
-  /* Try then pessimistic descent to the B-tree */
+/* Try then pessimistic descent to the B-tree */
 retry:
   err = row_undo_ins_remove_sec_low(BTR_MODIFY_TREE | BTR_LATCH_FOR_DELETE,
-                                    index, entry, thr);
+                                    index, entry, thr, node);
 
   /* The delete operation may fail if we have little
   file space left: TODO: easiest to crash the database
@@ -287,8 +302,10 @@ retry:
 
 /** Parses the row reference and other info in a fresh insert undo record.
 @param[in,out]	node	row undo node
+@param[in]      thd     THD associated with the node
 @param[in,out]	mdl	MDL ticket or nullptr if unnecessary */
-static void row_undo_ins_parse_undo_rec(undo_node_t *node, MDL_ticket **mdl) {
+static void row_undo_ins_parse_undo_rec(undo_node_t *node, THD *thd,
+                                        MDL_ticket **mdl) {
   dict_index_t *clust_index;
   byte *ptr;
   undo_no_t undo_no;
@@ -296,31 +313,32 @@ static void row_undo_ins_parse_undo_rec(undo_node_t *node, MDL_ticket **mdl) {
   ulint type;
   ulint dummy;
   bool dummy_extern;
+  type_cmpl_t type_cmpl;
 
   ut_ad(node);
 
   ptr = trx_undo_rec_get_pars(node->undo_rec, &type, &dummy, &dummy_extern,
-                              &undo_no, &table_id);
+                              &undo_no, &table_id, type_cmpl);
   ut_ad(type == TRX_UNDO_INSERT_REC);
   node->rec_type = type;
 
-  node->update = NULL;
+  node->update = nullptr;
 
-  node->table = dd_table_open_on_id(table_id, current_thd, mdl, false, true);
+  node->table = dd_table_open_on_id(table_id, thd, mdl, false, true);
 
   /* Skip the UNDO if we can't find the table or the .ibd file. */
-  if (node->table == NULL) {
+  if (node->table == nullptr) {
   } else if (node->table->ibd_file_missing) {
   close_table:
-    dd_table_close(node->table, current_thd, mdl, false);
+    dd_table_close(node->table, thd, mdl, false);
 
-    node->table = NULL;
+    node->table = nullptr;
   } else {
     ut_ad(!node->table->skip_alter_undo);
 
     clust_index = node->table->first_index();
 
-    if (clust_index != NULL) {
+    if (clust_index != nullptr) {
       ptr = trx_undo_rec_get_row_ref(ptr, clust_index, &node->ref, node->heap);
 
       if (!row_undo_search_clust_to_pcur(node)) {
@@ -328,7 +346,7 @@ static void row_undo_ins_parse_undo_rec(undo_node_t *node, MDL_ticket **mdl) {
       }
       if (node->table->n_v_cols) {
         trx_undo_read_v_cols(node->table, ptr, node->row, false, false, nullptr,
-                             nullptr);
+                             node->heap);
       }
 
     } else {
@@ -338,6 +356,34 @@ static void row_undo_ins_parse_undo_rec(undo_node_t *node, MDL_ticket **mdl) {
       goto close_table;
     }
   }
+}
+
+/** Removes a secondary index entry from the index, which is built on
+multi-value field, if found. For each value, it tries first optimistic,
+then pessimistic descent down the tree.
+@param[in,out]	index	multi-value index
+@param[in]	node	undo node
+@param[in]	thr	query thread
+@param[in,out]	heap	memory heap
+@return DB_SUCCESS or error code */
+static dberr_t row_undo_ins_remove_multi_sec(dict_index_t *index,
+                                             undo_node_t *node, que_thr_t *thr,
+                                             mem_heap_t *heap) {
+  dberr_t err = DB_SUCCESS;
+  Multi_value_entry_builder_normal mv_entry_builder(node->row, node->ext, index,
+                                                    heap, true, false);
+
+  ut_ad(index->is_multi_value());
+
+  for (dtuple_t *entry = mv_entry_builder.begin(); entry != nullptr;
+       entry = mv_entry_builder.next()) {
+    err = row_undo_ins_remove_sec(index, entry, thr, node);
+    if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
+      break;
+    }
+  }
+
+  return (err);
 }
 
 /** Removes secondary index records.
@@ -352,10 +398,20 @@ static MY_ATTRIBUTE((warn_unused_result)) dberr_t
 
   heap = mem_heap_create(1024);
 
-  while (index != NULL) {
+  while (index != nullptr) {
     dtuple_t *entry;
 
     if (index->type & DICT_FTS) {
+      dict_table_next_uncorrupted_index(index);
+      continue;
+    }
+
+    if (index->is_multi_value()) {
+      err = row_undo_ins_remove_multi_sec(index, node, thr, heap);
+      if (err != DB_SUCCESS) {
+        goto func_exit;
+      }
+      mem_heap_empty(heap);
       dict_table_next_uncorrupted_index(index);
       continue;
     }
@@ -378,7 +434,7 @@ static MY_ATTRIBUTE((warn_unused_result)) dberr_t
       assume that the secondary index record does
       not exist. */
     } else {
-      err = row_undo_ins_remove_sec(index, entry, thr);
+      err = row_undo_ins_remove_sec(index, entry, thr, node);
 
       if (UNIV_UNLIKELY(err != DB_SUCCESS)) {
         goto func_exit;
@@ -411,10 +467,12 @@ dberr_t row_undo_ins(undo_node_t *node, /*!< in: row undo node */
   ut_ad(node->trx->in_rollback);
   ut_ad(trx_undo_roll_ptr_is_insert(node->roll_ptr));
 
-  row_undo_ins_parse_undo_rec(node,
+  THD *thd = dd_thd_for_undo(node->trx);
+
+  row_undo_ins_parse_undo_rec(node, thd,
                               dd_mdl_for_undo(node->trx) ? &mdl : nullptr);
 
-  if (node->table == NULL) {
+  if (node->table == nullptr) {
     return (DB_SUCCESS);
   }
 
@@ -437,9 +495,9 @@ dberr_t row_undo_ins(undo_node_t *node, /*!< in: row undo node */
     err = row_undo_ins_remove_clust_rec(node);
   }
 
-  dd_table_close(node->table, current_thd, &mdl, false);
+  dd_table_close(node->table, thd, &mdl, false);
 
-  node->table = NULL;
+  node->table = nullptr;
 
   return (err);
 }

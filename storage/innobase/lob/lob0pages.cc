@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2016, 2017, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2016, 2020, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -31,13 +31,29 @@ this program; if not, write to the Free Software Foundation, Inc.,
 
 namespace lob {
 
+void data_page_t::replace_inline(trx_t *trx, ulint offset, const byte *&ptr,
+                                 ulint &want, mtr_t *mtr) {
+  byte *old_ptr = data_begin() + offset;
+
+  ulint data_len = get_data_len();
+  ut_ad(data_len > offset);
+
+  /** Copy the new data to page. */
+  ulint data_avail = data_len - offset;
+  ulint data_to_copy = want > data_avail ? data_avail : want;
+  mlog_write_string(old_ptr, ptr, data_to_copy, mtr);
+
+  ptr += data_to_copy;
+  want -= data_to_copy;
+}
+
 /** Create a new data page and replace some or all parts of the old data
 with data.
-@param[in]	trx	the current transaction.
-@param[in]	offset	the offset where replace begins.
-@param[in,out]	ptr	pointer to new data.
-@param[in]	want	amount of data the caller wants to replace.
-@param[in]	mtr	the mini transaction context.
+@param[in]      trx     Current transaction.
+@param[in]      offset  Offset where replace begins.
+@param[in,out]  ptr     Pointer to new data.
+@param[in]      want    Amount of data the caller wants to replace.
+@param[in]      mtr     Mini-transaction context.
 @return the buffer block of the new data page. */
 buf_block_t *data_page_t::replace(trx_t *trx, ulint offset, const byte *&ptr,
                                   ulint &want, mtr_t *mtr) {
@@ -48,6 +64,10 @@ buf_block_t *data_page_t::replace(trx_t *trx, ulint offset, const byte *&ptr,
   /** Allocate a new data page. */
   data_page_t new_page(mtr, m_index);
   new_block = new_page.alloc(mtr, false);
+
+  if (new_block == nullptr) {
+    return (nullptr);
+  }
 
   byte *new_ptr = new_page.data_begin();
   byte *old_ptr = data_begin();
@@ -93,7 +113,7 @@ buf_block_t *data_page_t::replace(trx_t *trx, ulint offset, const byte *&ptr,
 @param[in,out]	len	length of data.
 @return number of bytes appended. */
 ulint data_page_t::append(trx_id_t trxid, byte *&data, ulint &len) {
-  DBUG_ENTER("append_page");
+  DBUG_TRACE;
 
   ulint old_data_len = get_data_len();
 
@@ -101,7 +121,7 @@ ulint data_page_t::append(trx_id_t trxid, byte *&data, ulint &len) {
   ulint space_available = max_space_available() - old_data_len;
 
   if (space_available == 0 || len == 0) {
-    DBUG_RETURN(0);
+    return 0;
   }
 
   ulint written = (len > space_available) ? space_available : len;
@@ -114,7 +134,7 @@ ulint data_page_t::append(trx_id_t trxid, byte *&data, ulint &len) {
   data += written;
   len -= written;
 
-  DBUG_RETURN(written);
+  return written;
 }
 
 ulint data_page_t::space_left() const { return (payload() - get_data_len()); }
@@ -126,7 +146,16 @@ buf_block_t *data_page_t::alloc(mtr_t *alloc_mtr, bool is_bulk) {
   ut_ad(alloc_mtr != nullptr);
 
   page_no_t hint = FIL_NULL;
+
+  /* For testing purposes, pretend that the LOB page allocation failed.*/
+  DBUG_EXECUTE_IF("innodb_lob_data_page_alloc_failed", return (nullptr););
+
   m_block = alloc_lob_page(m_index, alloc_mtr, hint, is_bulk);
+
+  if (m_block == nullptr) {
+    return (m_block);
+  }
+
   set_page_type();
   set_version_0();
   set_next_page_null();
@@ -138,10 +167,10 @@ buf_block_t *data_page_t::alloc(mtr_t *alloc_mtr, bool is_bulk) {
 }
 
 /** Write data into a data page.
-@param[in]      trxid  the transaction identifier of the session writing data.
-@param[in,out]  data   the data to be written.  it will be updated to point
-                       to the byte not yet written.
-@param[in,out]  len    length of data available to be written.
+@param[in]	trxid	the transaction identifier of the session writing data.
+@param[in,out]	data	the data to be written.  it will be updated to point
+to the byte not yet written.
+@param[in,out]	len	length of data to be written.
 @return amount of data actually written into the page. */
 ulint data_page_t::write(trx_id_t trxid, const byte *&data, ulint &len) {
   byte *ptr = data_begin();
@@ -175,7 +204,7 @@ buf_block_t *data_page_t::load_x(page_no_t page_no) {
 @param[in]	want	bytes to read
 @return bytes actually read. */
 ulint data_page_t::read(ulint offset, byte *ptr, ulint want) {
-  DBUG_ENTER("data_page_t::read");
+  DBUG_TRACE;
 
   byte *start = data_begin();
   start += offset;
@@ -187,7 +216,7 @@ ulint data_page_t::read(ulint offset, byte *ptr, ulint want) {
   DBUG_LOG("lob", "page_no=" << get_page_no());
   DBUG_LOG("lob", PrintBuffer(ptr, copy_len));
 
-  DBUG_RETURN(copy_len);
+  return copy_len;
 }
 
-};  // namespace lob
+}  // namespace lob

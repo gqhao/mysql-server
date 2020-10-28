@@ -1,4 +1,4 @@
-/* Copyright (c) 2010, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2010, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -30,10 +30,12 @@
 #include "my_dbug.h"
 #include "my_sqlcommand.h"
 #include "sql/histograms/histogram.h"
-#include "sql/memroot_allocator.h"
+#include "sql/mem_root_allocator.h"
 #include "sql/sql_cmd.h"            // Sql_cmd
 #include "sql/sql_cmd_ddl_table.h"  // Sql_cmd_ddl_table
+#include "sql/sql_plugin_ref.h"
 
+class Clone_handler;
 class String;
 class THD;
 
@@ -77,8 +79,6 @@ class Sql_cmd_analyze_table : public Sql_cmd_ddl_table {
                         Histogram_command histogram_command,
                         int histogram_buckets);
 
-  ~Sql_cmd_analyze_table() {}
-
   bool execute(THD *thd) override;
 
   enum_sql_command sql_command_code() const override { return SQLCOM_ANALYZE; }
@@ -91,7 +91,7 @@ class Sql_cmd_analyze_table : public Sql_cmd_ddl_table {
 
  private:
   using columns_set =
-      std::set<String *, Column_name_comparator, Memroot_allocator<String *>>;
+      std::set<String *, Column_name_comparator, Mem_root_allocator<String *>>;
 
   /// Which histogram command (if any) is specified
   Histogram_command m_histogram_command = Histogram_command::NONE;
@@ -170,9 +170,9 @@ class Sql_cmd_check_table : public Sql_cmd_ddl_table {
  public:
   using Sql_cmd_ddl_table::Sql_cmd_ddl_table;
 
-  bool execute(THD *thd);
+  bool execute(THD *thd) override;
 
-  virtual enum_sql_command sql_command_code() const { return SQLCOM_CHECK; }
+  enum_sql_command sql_command_code() const override { return SQLCOM_CHECK; }
 };
 
 /**
@@ -185,9 +185,9 @@ class Sql_cmd_optimize_table : public Sql_cmd_ddl_table {
  public:
   using Sql_cmd_ddl_table::Sql_cmd_ddl_table;
 
-  bool execute(THD *thd);
+  bool execute(THD *thd) override;
 
-  virtual enum_sql_command sql_command_code() const { return SQLCOM_OPTIMIZE; }
+  enum_sql_command sql_command_code() const override { return SQLCOM_OPTIMIZE; }
 };
 
 /**
@@ -200,9 +200,9 @@ class Sql_cmd_repair_table : public Sql_cmd_ddl_table {
  public:
   using Sql_cmd_ddl_table::Sql_cmd_ddl_table;
 
-  bool execute(THD *thd);
+  bool execute(THD *thd) override;
 
-  virtual enum_sql_command sql_command_code() const { return SQLCOM_REPAIR; }
+  enum_sql_command sql_command_code() const override { return SQLCOM_REPAIR; }
 };
 
 /**
@@ -210,8 +210,8 @@ class Sql_cmd_repair_table : public Sql_cmd_ddl_table {
 */
 class Sql_cmd_shutdown : public Sql_cmd {
  public:
-  virtual bool execute(THD *thd);
-  virtual enum_sql_command sql_command_code() const { return SQLCOM_SHUTDOWN; }
+  bool execute(THD *thd) override;
+  enum_sql_command sql_command_code() const override { return SQLCOM_SHUTDOWN; }
 };
 
 enum class role_enum { ROLE_NONE, ROLE_DEFAULT, ROLE_ALL, ROLE_NAME };
@@ -230,18 +230,18 @@ class Sql_cmd_set_role : public Sql_cmd {
   Sql_cmd_set_role(role_enum role_type_arg,
                    const List<LEX_USER> *except_roles_arg)
       : role_type(role_type_arg),
-        role_list(NULL),
+        role_list(nullptr),
         except_roles(except_roles_arg) {
     DBUG_ASSERT(role_type == role_enum::ROLE_NONE ||
                 role_type == role_enum::ROLE_DEFAULT ||
                 role_type == role_enum::ROLE_ALL);
-    DBUG_ASSERT(role_type == role_enum::ROLE_ALL || except_roles == NULL);
+    DBUG_ASSERT(role_type == role_enum::ROLE_ALL || except_roles == nullptr);
   }
   explicit Sql_cmd_set_role(const List<LEX_USER> *role_arg)
       : role_type(role_enum::ROLE_NAME), role_list(role_arg) {}
 
-  virtual bool execute(THD *thd);
-  virtual enum_sql_command sql_command_code() const { return SQLCOM_SET_ROLE; }
+  bool execute(THD *thd) override;
+  enum_sql_command sql_command_code() const override { return SQLCOM_SET_ROLE; }
 };
 
 /**
@@ -258,8 +258,8 @@ class Sql_cmd_create_role : public Sql_cmd {
                                const List<LEX_USER> *roles_arg)
       : if_not_exists(if_not_exists_arg), roles(roles_arg) {}
 
-  virtual bool execute(THD *thd);
-  virtual enum_sql_command sql_command_code() const {
+  bool execute(THD *thd) override;
+  enum_sql_command sql_command_code() const override {
     return SQLCOM_CREATE_ROLE;
   }
 };
@@ -278,8 +278,10 @@ class Sql_cmd_drop_role : public Sql_cmd {
                              const List<LEX_USER> *roles_arg)
       : ignore_errors(ignore_errors_arg), roles(roles_arg) {}
 
-  virtual bool execute(THD *thd);
-  virtual enum_sql_command sql_command_code() const { return SQLCOM_DROP_ROLE; }
+  bool execute(THD *thd) override;
+  enum_sql_command sql_command_code() const override {
+    return SQLCOM_DROP_ROLE;
+  }
 };
 
 /**
@@ -298,8 +300,8 @@ class Sql_cmd_grant_roles : public Sql_cmd {
         users(users_arg),
         with_admin_option(with_admin_option_arg) {}
 
-  virtual bool execute(THD *thd);
-  virtual enum_sql_command sql_command_code() const {
+  bool execute(THD *thd) override;
+  enum_sql_command sql_command_code() const override {
     return SQLCOM_GRANT_ROLE;
   }
 };
@@ -316,8 +318,8 @@ class Sql_cmd_revoke_roles : public Sql_cmd {
                                 const List<LEX_USER> *users_arg)
       : roles(roles_arg), users(users_arg) {}
 
-  virtual bool execute(THD *thd);
-  virtual enum_sql_command sql_command_code() const {
+  bool execute(THD *thd) override;
+  enum_sql_command sql_command_code() const override {
     return SQLCOM_REVOKE_ROLE;
   }
 };
@@ -343,35 +345,20 @@ class Sql_cmd_alter_user_default_role : public Sql_cmd {
         roles(roles_arg),
         role_type(role_type_arg) {}
 
-  virtual bool execute(THD *thd);
-  virtual enum_sql_command sql_command_code() const {
+  bool execute(THD *thd) override;
+  enum_sql_command sql_command_code() const override {
     return SQLCOM_ALTER_USER_DEFAULT_ROLE;
-  }
-};
-
-/**
-  Sql_cmd_show_grants SHOW GRANTS ... statement.
-*/
-class Sql_cmd_show_grants : public Sql_cmd {
-  friend class PT_show_grants;
-
-  const LEX_USER *for_user;
-  const List<LEX_USER> *using_users;
-
- public:
-  Sql_cmd_show_grants(const LEX_USER *for_user_arg,
-                      const List<LEX_USER> *using_users_arg)
-      : for_user(for_user_arg), using_users(using_users_arg) {}
-
-  virtual bool execute(THD *thd);
-  virtual enum_sql_command sql_command_code() const {
-    return SQLCOM_SHOW_GRANTS;
   }
 };
 
 enum alter_instance_action_enum {
   ROTATE_INNODB_MASTER_KEY,
-  LAST_MASTER_KEY /* Add new master key type before this */
+  ALTER_INSTANCE_RELOAD_TLS,
+  ALTER_INSTANCE_RELOAD_TLS_ROLLBACK_ON_ERROR,
+  ROTATE_BINLOG_MASTER_KEY,
+  LAST_MASTER_KEY, /* Add new master key type before this */
+  ALTER_INSTANCE_ENABLE_INNODB_REDO,
+  ALTER_INSTANCE_DISABLE_INNODB_REDO
 };
 
 /**
@@ -383,64 +370,102 @@ class Alter_instance;
 class Sql_cmd_alter_instance : public Sql_cmd {
   friend class PT_alter_instance;
   const enum alter_instance_action_enum alter_instance_action;
+  LEX_CSTRING channel_name_;
   Alter_instance *alter_instance;
 
  public:
   explicit Sql_cmd_alter_instance(
-      enum alter_instance_action_enum alter_instance_action_arg)
+      enum alter_instance_action_enum alter_instance_action_arg,
+      const LEX_CSTRING &channel_name)
       : alter_instance_action(alter_instance_action_arg),
-        alter_instance(NULL) {}
+        channel_name_(channel_name),
+        alter_instance(nullptr) {}
 
-  virtual bool execute(THD *thd);
-  virtual enum_sql_command sql_command_code() const {
+  bool execute(THD *thd) override;
+  enum_sql_command sql_command_code() const override {
     return SQLCOM_ALTER_INSTANCE;
   }
 };
 
 /**
-  Sql_cmd_clone_local implements the CLONE LOCAL ... statement.
+  Sql_cmd_clone implements CLONE ... statement.
 */
 
-class Sql_cmd_clone_local : public Sql_cmd {
-  const char *clone_dir;
-
+class Sql_cmd_clone : public Sql_cmd {
  public:
-  explicit Sql_cmd_clone_local(const char *clone_dir) : clone_dir(clone_dir) {}
+  /** Construct clone command for clone server */
+  explicit Sql_cmd_clone()
+      : m_host(),
+        m_port(),
+        m_user(),
+        m_passwd(),
+        m_data_dir(),
+        m_clone(),
+        m_is_local(false) {}
 
-  virtual enum_sql_command sql_command_code() const { return SQLCOM_CLONE; }
+  /** Construct clone command for clone client
+  @param[in]  user_info user, password and remote host information
+  @param[in]  port port for remote server
+  @param[in]  data_dir data directory to clone */
+  explicit Sql_cmd_clone(LEX_USER *user_info, ulong port, LEX_CSTRING data_dir);
 
-  virtual bool execute(THD *thd);
-};
+  /** Construct clone command for local clone
+  @param[in]  data_dir data directory to clone */
+  explicit Sql_cmd_clone(LEX_CSTRING data_dir)
+      : m_host(),
+        m_port(),
+        m_user(),
+        m_passwd(),
+        m_data_dir(data_dir),
+        m_clone(),
+        m_is_local(true) {}
 
-/**
-  Sql_cmd_clone_remote implements the CLONE REMOTE ... statement.
-*/
+  enum_sql_command sql_command_code() const override { return SQLCOM_CLONE; }
 
-class Sql_cmd_clone_remote : public Sql_cmd {
-  const bool is_for_replication;
-  const char *clone_dir;
+  bool execute(THD *thd) override;
 
- public:
-  explicit Sql_cmd_clone_remote(const bool is_for_replication,
-                                const char *clone_dir)
-      : is_for_replication(is_for_replication), clone_dir(clone_dir) {}
+  /** Execute clone server.
+  @param[in] thd server session
+  @return true, if error */
+  bool execute_server(THD *thd);
 
-  virtual enum_sql_command sql_command_code() const { return SQLCOM_CLONE; }
+  /** Load clone plugin for clone server.
+  @param[in] thd server session
+  @return true, if error */
+  bool load(THD *thd);
 
-  virtual bool execute(THD *thd);
-};
+  /** Re-write clone statement to hide password.
+  @param[in,out] thd server session
+  @param[in,out] rlb the buffer to return the rewritten query in. empty if none.
+  @return true iff query is re-written */
+  bool rewrite(THD *thd, String &rlb);
 
-/**
-  Sql_cmd_show represents the SHOW COLUMNS/SHOW INDEX statements.
-*/
-class Sql_cmd_show : public Sql_cmd {
- public:
-  Sql_cmd_show(enum_sql_command sql_command) : m_sql_command(sql_command) {}
-  virtual bool execute(THD *thd);
-  virtual enum_sql_command sql_command_code() const { return m_sql_command; }
-  virtual bool prepare(THD *thd);
+  /** @return true, if it is local clone command */
+  bool is_local() const { return (m_is_local); }
 
  private:
-  enum_sql_command m_sql_command;
+  /** Remote server IP */
+  LEX_CSTRING m_host;
+
+  /** Remote server port */
+  const ulong m_port;
+
+  /** User name for remote connection */
+  LEX_CSTRING m_user;
+
+  /** Password for remote connection */
+  LEX_CSTRING m_passwd;
+
+  /** Data directory for cloned data */
+  LEX_CSTRING m_data_dir;
+
+  /** Clone handle in server */
+  Clone_handler *m_clone;
+
+  /** Loaded clone plugin reference */
+  plugin_ref m_plugin;
+
+  /** If it is local clone operation */
+  bool m_is_local;
 };
 #endif

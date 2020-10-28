@@ -4,6 +4,8 @@
 # ./mysql-test-run.pl --mysqld=--binlog-format=mixed
 #########################################
 
+--let $rpl_privilege_checks_user_grant_option = 1
+--source include/set_privilege_checks_user_as_system_user.inc
 --source include/master-slave.inc
 
 # Check MIXED on both master and slave
@@ -324,6 +326,7 @@ DROP VIEW v2;
 --echo
 --echo
 --echo ******************** SHOW BINLOG EVENTS ********************
+--let $mask_grant_as_events=1
 --source include/show_binlog_events.inc
 sync_slave_with_master;
 # as we're using UUID we don't SELECT but use "diff" like in rpl_row_UUID
@@ -340,4 +343,7 @@ sync_slave_with_master;
 # the files your self to see what is not matching
 
 --diff_files $MYSQLTEST_VARDIR/tmp/rpl_switch_stm_row_mixed_master.sql $MYSQLTEST_VARDIR/tmp/rpl_switch_stm_row_mixed_slave.sql
+# Cleanup
+--remove_file $MYSQLTEST_VARDIR/tmp/rpl_switch_stm_row_mixed_master.sql
+--remove_file $MYSQLTEST_VARDIR/tmp/rpl_switch_stm_row_mixed_slave.sql
 --source include/rpl_end.inc

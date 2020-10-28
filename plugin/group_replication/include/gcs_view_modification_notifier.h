@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -43,19 +43,12 @@ class Plugin_gcs_view_modification_notifier {
   void start_view_modification();
 
   /**
-    Signals that a injected view modification, usually to
-    unblock a group that did lost majority, is about to start.
-   */
-  void start_injected_view_modification();
+    Checks if there is a view modification ongoing.
 
-  /**
-    Checks if the view modification is a injected one.
-
-    @return
-      @retval true  if the current view modification is a injected one
-      @retval false otherwise
+    @retval true  there is a view modification ongoing
+    @retval false otherwise
    */
-  bool is_injected_view_modification();
+  bool is_view_modification_ongoing();
 
   /**
     Signals that a view modification has ended
@@ -75,9 +68,8 @@ class Plugin_gcs_view_modification_notifier {
     Check if view modification was cancelled.
     This method must only be called after view modification is complete.
 
-    @return
-      @retval true   view modification was cancelled
-      @retval false  otherwise
+    @retval true   view modification was cancelled
+    @retval false  otherwise
   */
   bool is_cancelled();
 
@@ -105,7 +97,6 @@ class Plugin_gcs_view_modification_notifier {
  private:
   bool view_changing;
   bool cancelled_view_change;
-  bool injected_view_modification;
   int error;
 
   mysql_cond_t wait_for_view_cond;

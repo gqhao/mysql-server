@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2019, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -173,11 +173,17 @@ be less than 256 */
 #define DATA_ROW_ID 0     /* row id: a 48-bit integer */
 #define DATA_ROW_ID_LEN 6 /* stored length for row id */
 
-#define DATA_TRX_ID 1 /* transaction id: 6 bytes */
-#define DATA_TRX_ID_LEN 6
+/** Transaction id: 6 bytes */
+constexpr size_t DATA_TRX_ID = 1;
 
-#define DATA_ROLL_PTR 2 /* rollback data pointer: 7 bytes */
-#define DATA_ROLL_PTR_LEN 7
+/** Transaction ID type size in bytes. */
+constexpr size_t DATA_TRX_ID_LEN = 6;
+
+/** Rollback data pointer: 7 bytes */
+constexpr size_t DATA_ROLL_PTR = 2;
+
+/** Rollback data pointer type size in bytes. */
+constexpr size_t DATA_ROLL_PTR_LEN = 7;
 
 #define DATA_N_SYS_COLS 3 /* number of system columns defined above */
 
@@ -208,12 +214,13 @@ temporary table */
 #define DATA_GIS_MBR 2048                        /* Used as GIS MBR column */
 #define DATA_MBR_LEN SPDIMS * 2 * sizeof(double) /* GIS MBR length*/
 
-#define DATA_LONG_TRUE_VARCHAR                                \
-  4096                    /* this is ORed to the precise data \
-                  type when the column is true VARCHAR where \
-                  MySQL uses 2 bytes to store the data len;  \
-                  for shorter VARCHARs MySQL uses only 1 byte */
-#define DATA_VIRTUAL 8192 /* Virtual column */
+#define DATA_LONG_TRUE_VARCHAR                                     \
+  4096                         /* this is ORed to the precise data \
+                       type when the column is true VARCHAR where \
+                       MySQL uses 2 bytes to store the data len;  \
+                       for shorter VARCHARs MySQL uses only 1 byte */
+#define DATA_VIRTUAL 8192      /* Virtual column */
+#define DATA_MULTI_VALUE 16384 /* Multi-value Virtual column */
 
 /*-------------------------------------------*/
 
@@ -512,7 +519,23 @@ struct dtype_t {
                             DATA_MBMINMAXLEN(mbminlen,mbmaxlen);
                             mbminlen=DATA_MBMINLEN(mbminmaxlen);
                             mbmaxlen=DATA_MBMINLEN(mbminmaxlen) */
+
+  bool is_virtual() const { return ((prtype & DATA_VIRTUAL) == DATA_VIRTUAL); }
+
+  std::ostream &print(std::ostream &out) const;
 };
+
+inline std::ostream &operator<<(std::ostream &out, const dtype_t &obj) {
+  return (obj.print(out));
+}
+
+static_assert(TRUE == 1, "TRUE != 1");
+
+static_assert(DATA_TRX_ID_LEN == 6, "DATA_TRX_ID_LEN != 6!");
+
+static_assert(DATA_ROLL_PTR_LEN == 7, "DATA_PTR_LEN != 7!");
+
+static_assert(DATA_TRX_ID + 1 == DATA_ROLL_PTR, "DATA_TRX_ID value invalid!");
 
 #include "data0type.ic"
 

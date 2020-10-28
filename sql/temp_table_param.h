@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -23,16 +23,25 @@
 #ifndef TEMP_TABLE_PARAM_INCLUDED
 #define TEMP_TABLE_PARAM_INCLUDED
 
-#include "my_base.h"
-#include "sql/mem_root_array.h"
-#include "sql/sql_list.h"
-#include "sql/window.h"
+#include <sys/types.h>
+#include <vector>
 
-struct MI_COLUMNDEF;
+#include "my_base.h"
+#include "my_inttypes.h"
+#include "sql/field.h"
+#include "sql/mem_root_allocator.h"
+#include "sql/mem_root_array.h"
+#include "sql/thr_malloc.h"
+
 class KEY;
-class Copy_field;
 class Item;
+class Item_copy;
 class Window;
+struct CHARSET_INFO;
+struct MEM_ROOT;
+
+template <typename T>
+using Mem_root_vector = std::vector<T, Mem_root_allocator<T>>;
 
 /**
    Helper class for copy_funcs(); represents an Item to copy from table to
@@ -40,21 +49,17 @@ class Window;
 */
 class Func_ptr {
  public:
-  Func_ptr(Item *f) : m_func(f), m_contains_alias_of_expr(false) {}
-  /**
-    Calculates if m_func contains an alias to an expression of the SELECT list
-    of 'select'.
-    @param          select     query block to search in.
-    @returns the true/false result and also stores it in the object.
-  */
-  bool set_contains_alias_of_expr(const SELECT_LEX *select);
-  /// @returns the previously calculated information.
-  bool contains_alias_of_expr() const { return m_contains_alias_of_expr; }
+  explicit Func_ptr(Item *f) : m_func(f) {}
   Item *func() const { return m_func; }
+  void set_override_result_field(Field *f) { m_override_result_field = f; }
+  Field *override_result_field() const { return m_override_result_field; }
 
  private:
   Item *m_func;
-  bool m_contains_alias_of_expr;
+
+  /// If not nullptr, copy_funcs() will save the result of m_func here instead
+  /// of in m_func's usual designated result field.
+  Field *m_override_result_field = nullptr;
 };
 
 /// Used by copy_funcs()
@@ -68,12 +73,18 @@ typedef Mem_root_array<Func_ptr> Func_ptr_array;
 
 class Temp_table_param {
  public:
-  /// Is used by copy_fields() to copy non-column expressions.
-  List<Item> copy_funcs;
-  Copy_field *copy_field, *copy_field_end;
+  /**
+    Used to store the values of grouped non-column-reference expressions in
+    between groups, so they can be retreived when the group changes.
+
+    @see setup_copy_fields
+    @see copy_fields
+  */
+  Mem_root_vector<Item_copy *> grouped_expressions;
+  Mem_root_vector<Copy_field> copy_fields;
+
   uchar *group_buff;
   Func_ptr_array *items_to_copy; /* Fields in tmp table */
-  MI_COLUMNDEF *recinfo, *start_recinfo;
 
   /**
     After temporary table creation, points to an index on the table
@@ -81,7 +92,13 @@ class Temp_table_param {
     duplicate elimination, etc. There is at most one such index.
   */
   KEY *keyinfo;
-  ha_rows end_write_records;
+
+  /**
+    LIMIT (maximum number of rows) for this temp table, or HA_POS_ERROR
+    for no limit. Enforced by MaterializeIterator when writing to the table.
+   */
+  ha_rows end_write_records{HA_POS_ERROR};
+
   /**
     Number of normal fields in the query, including those referred to
     from aggregate functions. Hence, "SELECT `field1`,
@@ -106,12 +123,22 @@ class Temp_table_param {
     replacing them with constants, in which case sum_func_count will
     need to be updated.
 
-    @see opt_sum_query, count_field_types
+    @see optimize_aggregated_query, count_field_types
   */
   uint sum_func_count;
   uint hidden_field_count;
   uint group_parts, group_length, group_null_parts;
-  uint quick_group;
+  /**
+    Whether we allow running GROUP BY processing into a temporary table,
+    i.e., keeping many different aggregations going at once without
+    having ordered input. This is usually the case, but is currently not
+    supported for aggregation UDFs, aggregates with DISTINCT, or ROLLUP.
+
+    Note that even if this is true, the optimizer may choose to not use
+    a temporary table, as it is often more efficient to just read along
+    an index.
+   */
+  bool allow_group_via_temp_table{true};
   /**
     Number of outer_sum_funcs i.e the number of set functions that are
     aggregated in a query block outer to this subquery.
@@ -149,23 +176,31 @@ class Temp_table_param {
     that MEMORY tables cannot index BIT columns.
   */
   bool bit_fields_as_long;
+
   /// Whether the UNIQUE index can be promoted to PK
   bool can_use_pk_for_unique;
 
-  bool
-      m_window_short_circuit;  ///< (Last) window's tmp file step can be skipped
+  /// Whether UNIQUE keys should always be implemented by way of a hidden
+  /// hash field, never a unique index. Needed for materialization of mixed
+  /// UNION ALL / UNION DISTINCT queries (see comments in
+  /// create_result_table()).
+  bool force_hash_field_for_unique{false};
+
+  /// (Last) window's tmp file step can be skipped
+  bool m_window_short_circuit;
+
+  /// This tmp table is used for a window's frame buffer
+  bool m_window_frame_buffer{false};
+
   /// If this is the out table of a window: the said window
   Window *m_window;
 
-  Temp_table_param()
-      : copy_field(NULL),
-        copy_field_end(NULL),
+  Temp_table_param(MEM_ROOT *mem_root = *THR_MALLOC)
+      : grouped_expressions(Mem_root_allocator<Item_copy *>(mem_root)),
+        copy_fields(Mem_root_allocator<Copy_field>(mem_root)),
         group_buff(nullptr),
         items_to_copy(nullptr),
-        recinfo(NULL),
-        start_recinfo(NULL),
-        keyinfo(NULL),
-        end_write_records(0),
+        keyinfo(nullptr),
         field_count(0),
         func_count(0),
         sum_func_count(0),
@@ -173,10 +208,9 @@ class Temp_table_param {
         group_parts(0),
         group_length(0),
         group_null_parts(0),
-        quick_group(1),
         outer_sum_func_count(0),
         using_outer_summary_function(false),
-        table_charset(NULL),
+        table_charset(nullptr),
         schema_table(false),
         precomputed_group_by(false),
         force_copy_fields(false),
@@ -185,9 +219,11 @@ class Temp_table_param {
         can_use_pk_for_unique(true),
         m_window_short_circuit(false),
         m_window(nullptr) {}
-  ~Temp_table_param() { cleanup(); }
 
-  void cleanup(void);
+  void cleanup() {
+    grouped_expressions.clear();
+    copy_fields.clear();
+  }
 };
 
 #endif  // TEMP_TABLE_PARAM_INCLUDED

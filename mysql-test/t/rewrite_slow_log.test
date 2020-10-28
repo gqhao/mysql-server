@@ -32,6 +32,14 @@ SET SESSION long_query_time=  0;
 
 # 1.1.1.1
 CREATE USER test_user2 IDENTIFIED BY 'azundris2';
+connect(con1,localhost,test_user2,'azundris2',);
+SET SESSION long_query_time = 0;
+# Verification of WL#11544
+ALTER USER test_user2 IDENTIFIED BY 'azundris2' REPLACE 'azundris2';
+SET PASSWORD='azundris2' REPLACE 'azundris2';
+SET PASSWORD FOR test_user2='azundris2' REPLACE 'azundris2';
+disconnect con1;
+connection default;
 
 # 1.1.1.2
 # need TABLE so we can test FOR CHANNEL
@@ -39,6 +47,10 @@ SET GLOBAL master_info_repository = 'TABLE';
 SET GLOBAL relay_log_info_repository = 'TABLE';
 
 --disable_warnings
+CHANGE MASTER TO MASTER_PASSWORD='azundris3',
+  MASTER_BIND = 'eth4n',
+  MASTER_TLS_CIPHERSUITES = ''
+  FOR CHANNEL 'chan_jackie';
 CHANGE MASTER TO MASTER_PASSWORD='azundris3',
   MASTER_CONNECT_RETRY = 1, MASTER_HEARTBEAT_PERIOD = 1.01,
   MASTER_LOG_FILE = 'master_log_name', MASTER_LOG_POS = 0,
@@ -48,6 +60,7 @@ CHANGE MASTER TO MASTER_PASSWORD='azundris3',
   MASTER_SSL_CIPHER = 'cipher_list', MASTER_SSL_VERIFY_SERVER_CERT = 1,
   MASTER_SSL_CRL = 'crl_file_name', MASTER_SSL_CRLPATH = 'crl_directory_name',
   IGNORE_SERVER_IDS = (99,100), MASTER_TLS_VERSION = 'TLSv1.2',
+  MASTER_TLS_CIPHERSUITES = NULL,
   MASTER_BIND = 'eth4n', MASTER_RETRY_COUNT = 7,
   MASTER_DELAY = 4711, MASTER_AUTO_POSITION = 0 FOR CHANNEL 'chan_jackie';
 --enable_warnings
@@ -83,14 +96,18 @@ SELECT sql_text FROM test_log WHERE sql_text LIKE CONCAT('%azun','dris%');
 # same for logging to table
 SELECT sql_text FROM mysql.slow_log WHERE sql_text LIKE CONCAT('%azun','dris%');
 
+# WL#11544 verification : Replace clause should be seen in the log.
+# In case of ps-protocol, it will be seen twice.
+SELECT count(*)=1 OR count(*)=2 FROM mysql.slow_log WHERE sql_text LIKE '%REPLACE%';
+
 --echo ------ from file ------
-SELECT count(*) FROM test_log WHERE sql_text like '%AS %' AND sql_text NOT LIKE '%<secret>%';
-SELECT sql_text FROM test_log WHERE sql_text like 'CHANGE MASTER TO MASTER_BIND %';
-SELECT count(*) FROM test_log WHERE sql_text like '%SET PASSWORD %'; 
+SELECT count(*)=1 OR count(*)=2 FROM test_log WHERE sql_text LIKE 'CREATE USER %' AND sql_text LIKE '%<secret>%';
+SELECT sql_text FROM test_log WHERE sql_text LIKE 'CHANGE MASTER TO MASTER_BIND %';
+SELECT count(*) FROM test_log WHERE sql_text LIKE 'SET PASSWORD %' AND sql_text LIKE '%<secret>%';
 --echo ------ from table ------
-SELECT count(*) FROM mysql.slow_log WHERE sql_text like '%AS %' AND sql_text NOT LIKE '%<secret>%';
-SELECT sql_text FROM test_log WHERE sql_text like 'CHANGE MASTER TO MASTER_BIND %';
-SELECT count(*) FROM test_log WHERE sql_text like '%SET PASSWORD %';
+SELECT count(*)=1 OR count(*)=2 FROM mysql.slow_log WHERE sql_text LIKE 'CREATE USER %' AND sql_text LIKE '%<secret>%';
+SELECT sql_text FROM test_log WHERE sql_text LIKE 'CHANGE MASTER TO MASTER_BIND %';
+SELECT count(*) FROM test_log WHERE sql_text LIKE 'SET PASSWORD %' AND sql_text LIKE '%<secret>%';
 --echo ------ done ------
 
 DROP TABLE test_log;

@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -61,11 +61,10 @@ class Column_statistics_impl final : public Entity_object_impl,
     init_alloc_root(key_memory_DD_column_statistics, &m_mem_root, 256, 0);
   }
 
-  virtual ~Column_statistics_impl() { free_root(&m_mem_root, MYF(0)); }
-
  private:
   Column_statistics_impl(const Column_statistics_impl &column_statistics)
-      : Entity_object_impl(column_statistics),
+      : Weak_object(column_statistics),
+        Entity_object_impl(column_statistics),
         m_schema_name(column_statistics.m_schema_name),
         m_table_name(column_statistics.m_table_name),
         m_column_name(column_statistics.m_column_name),
@@ -77,7 +76,7 @@ class Column_statistics_impl final : public Entity_object_impl,
   }
 
  public:
-  virtual const Object_table &object_table() const override;
+  const Object_table &object_table() const override;
 
   static void register_tables(Open_dictionary_tables_ctx *otx);
 

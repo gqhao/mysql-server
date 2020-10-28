@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2016, 2017, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2016, 2020, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -135,7 +135,7 @@ struct z_index_entry_t {
       : m_node(node), m_mtr(mtr), m_index(index) {}
 
   /** Constructor
-  @param[in]	mtr	the mini transaction
+  @param[in]	mtr	the mini-transaction
   @param[in]	index	the clustered index to which LOB belongs. */
   z_index_entry_t(mtr_t *mtr, dict_index_t *index)
       : m_node(nullptr),
@@ -148,6 +148,14 @@ struct z_index_entry_t {
   @param[in]	node	the location where index entry starts. */
   z_index_entry_t(flst_node_t *node)
       : m_node(node),
+        m_mtr(nullptr),
+        m_index(nullptr),
+        m_block(nullptr),
+        m_page_no(FIL_NULL) {}
+
+  /** Default constructor */
+  z_index_entry_t()
+      : m_node(nullptr),
         m_mtr(nullptr),
         m_index(nullptr),
         m_block(nullptr),
@@ -264,7 +272,8 @@ struct z_index_entry_t {
     return (flst_read_addr(m_node + OFFSET_PREV, m_mtr));
   }
 
-  /** Get the location of next index entry. */
+  /** Get the location of next index entry.
+  @return the file address of the next index entry. */
   fil_addr_t get_next() const {
     return (flst_read_addr(m_node + OFFSET_NEXT, m_mtr));
   }
@@ -372,6 +381,19 @@ struct z_index_entry_t {
     return (mach_read_from_4(m_node + OFFSET_Z_PAGE_NO));
   }
 
+  /** Set the page number pointed to by this index entry to FIL_NULL.
+   @param[in]   mtr    The mini-transaction used for this modification. */
+  void set_z_page_no_null(mtr_t *mtr) {
+    mlog_write_ulint(m_node + OFFSET_Z_PAGE_NO, FIL_NULL, MLOG_4BYTES, mtr);
+  }
+
+  /** Free the data pages pointed to by this index entry.
+  @param[in]   mtr   the mini-transaction used to free the pages.
+  @return the number of pages freed. */
+  size_t free_data_pages(mtr_t *mtr);
+
+  /** Set the page number pointed to by this index entry to given value.
+   @param[in]   page_no    Page number to be put in index entry. */
   void set_z_page_no(page_no_t page_no) {
     ut_ad(m_mtr != nullptr);
     mlog_write_ulint(m_node + OFFSET_Z_PAGE_NO, page_no, MLOG_4BYTES, m_mtr);
@@ -411,7 +433,7 @@ struct z_index_entry_t {
   }
 
   /** Get the LOB version. */
-  ulint get_lob_version() const {
+  uint32_t get_lob_version() const {
     return (mach_read_from_4(m_node + OFFSET_LOB_VERSION));
   }
 
@@ -434,8 +456,8 @@ struct z_index_entry_t {
   current entry to older entry.
   @param[in]	index	the index in which LOB exists.
   @param[in]	trxid	The transaction identifier.
-  @param[in]	first	The first lob page containing index list
-                          and free list. */
+  @param[in]	first	The first lob page containing index list and free
+  list. */
   fil_addr_t make_old_version_current(dict_index_t *index, trx_id_t trxid,
                                       z_first_page_t &first);
 
@@ -498,7 +520,7 @@ struct z_index_entry_t {
   /** The file list node in a db page. This node is persisted. */
   flst_node_t *m_node;
 
-  /** A mini transaction. */
+  /** A mini-transaction. */
   mtr_t *m_mtr;
 
   /** The index containing the LOB. */
@@ -518,6 +540,6 @@ inline std::ostream &operator<<(std::ostream &out, const z_index_entry_t &obj) {
   return (obj.print(out));
 }
 
-}; /* namespace lob */
+} /* namespace lob */
 
 #endif /* zlob0index_h */

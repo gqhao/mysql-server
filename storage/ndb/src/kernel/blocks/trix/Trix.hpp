@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -51,7 +51,7 @@ class Trix : public SimulatedBlock
 {
 public:
   Trix(Block_context&);
-  virtual ~Trix();
+  ~Trix() override;
 
 public:
   // Subscription data, when communicating with SUMA
@@ -247,7 +247,7 @@ private:
       Util() {
         m_prepareId = RNIL;
         m_not_found = false; // read + ZNOT_FOUND
-      };
+      }
     };
     struct Clean {
       Uint32 m_cleanCount;
@@ -291,7 +291,7 @@ private:
       m_subRecPtrI = RNIL;
       m_errorCode = 0;
       m_errorLine = 0;
-    };
+    }
   };
   typedef Ptr<StatOp> StatOpPtr;
   typedef ArrayPool<StatOp> StatOp_pool;

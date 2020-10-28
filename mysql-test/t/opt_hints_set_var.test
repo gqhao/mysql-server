@@ -34,7 +34,10 @@ explain SELECT /*+ SET_VAR(max_allowed_packet = 1M) */ * FROM t1;
 # Testing warning messages for the variables with incorrect values
 explain SELECT /*+ SET_VAR(optimizer_switch = 'batched_key_acces=off') SET_VAR(range_alloc_block_size=amba)*/ * FROM t1;
 # Testing warning message for the variables with truncated value
+--disable_warnings
 SELECT /*+ SET_VAR(range_alloc_block_size=7000) */ 1;
+SHOW WARNINGS LIMIT 1;
+--enable_warnings
 
 DROP TABLE t1;
 
@@ -107,10 +110,10 @@ CALL test_hint("SET_VAR(bulk_insert_buffer_size=0)", "bulk_insert_buffer_size");
 # Testing default_tmp_storage_engine variable.
 CREATE TEMPORARY TABLE t1 SELECT 1;
 SHOW CREATE TABLE t1;
-CREATE TEMPORARY TABLE t2 SELECT /*+ SET_VAR(default_tmp_storage_engine=MyISAM)*/ 1;
+CREATE TEMPORARY TABLE t2 SELECT /*+ SET_VAR(default_tmp_storage_engine=InnoDB)*/ 1;
 SHOW CREATE TABLE t2;
 DROP TABLE t1, t2;
-CALL test_hint("SET_VAR(default_tmp_storage_engine=MyISAM)", "default_tmp_storage_engine");
+CALL test_hint("SET_VAR(default_tmp_storage_engine=InnoDB)", "default_tmp_storage_engine");
 
 # Testing div_precision_increment
 SELECT /*+ SET_VAR(div_precision_increment=12) */ 1/2;
@@ -158,7 +161,7 @@ CALL test_hint("SET_VAR(insert_id=10)", "insert_id");
 CALL test_hint("SET_VAR(join_buffer_size=128)", "join_buffer_size");
 
 # Testing lock_wait_timeout variable, ER_LOCK_WAIT_TIMEOUT error should be issued.
-CREATE TABLE t1(i INT) ENGINE MYISAM;
+CREATE TABLE t1(i INT) ENGINE InnoDB;
 LOCK TABLES t1 WRITE;
 connect (con1,localhost,root,,);
 --error ER_LOCK_WAIT_TIMEOUT
@@ -222,9 +225,6 @@ DROP TABLE t1;
 CALL test_hint("SET_VAR(max_heap_table_size=16384)", "max_heap_table_size");
 CALL test_hint("SET_VAR(internal_tmp_mem_storage_engine=MEMORY)", "internal_tmp_mem_storage_engine");
 
-# Testing max_length_for_sort_data variable, no functional test.
-CALL test_hint("SET_VAR(max_length_for_sort_data=4)", "max_length_for_sort_data");
-
 # Testing max_points_in_geometry variable, the value in error message is 1048576.
 --error ER_GIS_MAX_POINTS_IN_GEOMETRY_OVERFLOWED
 SELECT /*+ SET_VAR(max_points_in_geometry=1048576) */
@@ -234,13 +234,6 @@ CALL test_hint("SET_VAR(max_points_in_geometry=1048576)", "max_points_in_geometr
 # Testing max_seeks_for_key variable, no functional test.
 --replace_result 18446744073709551615 DEFAULT 4294967295 DEFAULT
 CALL test_hint("SET_VAR(max_seeks_for_key=1)", "max_seeks_for_key");
-
-# Testing max_sort_length variable, order is changed with the hint.
-CREATE TABLE t1 (f1 VARCHAR(10));
-INSERT INTO t1 VALUES ('aaaaac'), ('aaaaab'), ('aaaaaa');
-SELECT /*+ SET_VAR(max_sort_length=4) */ f1 FROM t1 ORDER BY f1;
-DROP TABLE t1;
-CALL test_hint("SET_VAR(max_sort_length=4)", "max_sort_length");
 
 # Testing optimizer_prune_level, optimizer_search_depth variables,
 # EXPLAIN output is different depending on SET_VAR hint use.
@@ -286,11 +279,13 @@ set optimizer_switch='mrr=on,mrr_cost_based=off';
 --echo # Check statistics without hint
 FLUSH STATUS;
 SELECT * FROM t1 WHERE f2 <= 3 AND 3 <= f3;
+--skip_if_hypergraph  # Does not support hints yet.
 SHOW STATUS LIKE 'handler_read%';
 
 --echo # Check statistics with hint
 FLUSH STATUS;
 SELECT /*+ SET_VAR(optimizer_switch='mrr=off') */ * FROM t1 WHERE f2 <= 3 AND 3 <= f3;
+--skip_if_hypergraph  # Does not support hints yet.
 SHOW STATUS LIKE 'handler_read%';
 
 set optimizer_switch=default;
@@ -322,15 +317,22 @@ INSERT INTO t1 SELECT * FROM t1;
 INSERT INTO t1 SELECT * FROM t1;
 INSERT INTO t1 SELECT * FROM t1;
 INSERT INTO t1 SELECT * FROM t1;
+INSERT INTO t1 SELECT * FROM t1;
+INSERT INTO t1 SELECT * FROM t1;
+INSERT INTO t1 SELECT * FROM t1;
+INSERT INTO t1 SELECT * FROM t1;
+INSERT INTO t1 SELECT * FROM t1;
 FLUSH STATUS;
 --disable_result_log
 SELECT /*+ SET_VAR(sort_buffer_size=32768) */f1 FROM t1 ORDER BY f1;
 --enable_result_log
+--skip_if_hypergraph  # Depends on the query plan.
 SHOW STATUS LIKE 'Sort_merge_passes';
 FLUSH STATUS;
 --disable_result_log
 SELECT f1 FROM t1 ORDER BY f1;
 --enable_result_log
+--skip_if_hypergraph  # Depends on the query plan.
 SHOW STATUS LIKE 'Sort_merge_passes';
 DROP TABLE t1;
 CALL test_hint("SET_VAR(sort_buffer_size=32768)", "sort_buffer_size");
@@ -351,6 +353,7 @@ INSERT INTO t1 VALUES (1, 'string');
 INSERT INTO t1 SELECT * FROM t1;
 INSERT INTO t1 SELECT * FROM t1;
 INSERT INTO t1 SELECT * FROM t1;
+--skip_if_hypergraph  # Does not support these hints.
 --error ER_TOO_BIG_SELECT
 SELECT /*+ SET_VAR(sql_big_selects=0) SET_VAR(max_join_size=1) */ * FROM t1 a, t1 b;
 DROP TABLE t1;
@@ -457,3 +460,28 @@ DROP PROCEDURE test_hint;
 
 SELECT /*+ SET_VAR(sql_select_limit = 18446744073709551616) */ 1;
 SELECT /*+ SET_VAR(sql_select_limit = 18446744073709551615) */ 1;
+
+--echo #
+--echo # Bug#29776464 MAKE 'TIME_ZONE' VARIABLE OPTIMIZER HINT SETTABLE.
+--echo #
+
+SET time_zone = '-01:00';
+
+SELECT TIMEDIFF(NOW(), UTC_TIMESTAMP);
+SELECT /*+ SET_VAR(time_zone = '+04:00') */ TIMEDIFF(NOW(), UTC_TIMESTAMP);
+SELECT @@time_zone;
+SELECT /*+ SET_VAR(time_zone = 'UTC') */ TIMEDIFF(NOW(), UTC_TIMESTAMP);
+SELECT @@time_zone;
+CREATE TABLE t1(f1 VARCHAR(10));
+INSERT INTO t1 VALUES (@@time_zone);
+SELECT * FROM t1;
+UPDATE /*+ SET_VAR(time_zone = 'UTC') */ t1 SET f1 = TIMEDIFF(NOW(), UTC_TIMESTAMP);
+SELECT * FROM t1;
+INSERT /*+ SET_VAR(time_zone = 'UTC') */ t1 VALUES (TIMEDIFF(NOW(), UTC_TIMESTAMP));
+SELECT * FROM t1;
+DELETE /*+ SET_VAR(time_zone = 'UTC') */ FROM t1 WHERE f1 = TIMEDIFF(NOW(), UTC_TIMESTAMP);
+SELECT * FROM t1;
+SELECT @@time_zone;
+DROP TABLE t1;
+
+SET time_zone = default;

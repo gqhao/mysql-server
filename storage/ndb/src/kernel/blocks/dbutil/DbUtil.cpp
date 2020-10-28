@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -467,13 +467,29 @@ DbUtil::execCONTINUEB(Signal* signal){
   jamEntry();
   //const Uint32 Tdata0 = signal->theData[0];
 
-  ndbrequire(0);
+  ndbabort();
 }
 
 void
 DbUtil::execNODE_FAILREP(Signal* signal){
   jamEntry();
-  const NodeFailRep * rep = (NodeFailRep*)signal->getDataPtr();
+  NodeFailRep * rep = (NodeFailRep*)signal->getDataPtr();
+  if(signal->getLength() == NodeFailRep::SignalLength)
+  {
+    ndbrequire(signal->getNoOfSections() == 1);
+    ndbrequire(ndbd_send_node_bitmask_in_section(
+        getNodeInfo(refToNode(signal->getSendersBlockRef())).m_version));
+    SegmentedSectionPtr ptr;
+    SectionHandle handle(this, signal);
+    handle.getSection(ptr, 0);
+    memset(rep->theNodes, 0, sizeof(rep->theNodes));
+    copy(rep->theNodes, ptr);
+    releaseSections(handle);
+  }
+  else
+  {
+    memset(rep->theNodes + NdbNodeBitmask48::Size, 0, _NDB_NBM_DIFF_BYTES);
+  }
   NdbNodeBitmask failed; 
   failed.assign(NdbNodeBitmask::Size, rep->theNodes);
 
@@ -708,7 +724,7 @@ DbUtil::execDUMP_STATE_ORD(Signal* signal){
 	     << "216 : PREPARE_REQ UPDATE SYSTAB_0 SYSKEY_0 NEXTID using id" << endl
 	     << "217 : PREPARE_REQ READ   SYSTAB_0 SYSKEY_0 using id" << endl
 	     << "220 : EXECUTE_REQ <PrepId> <Len> <Val1> <Val2a> <Val2b>" <<endl
-	     << "299 : Crash system (using ndbrequire(0))" 
+	     << "299 : Crash system (using ndbabort())" 
 	     << endl
 	     << "Ex. \"dump 220 3 5 1 0 17 \" prints Prepare record no 2." 
 	     << endl;
@@ -887,44 +903,51 @@ void DbUtil::execDBINFO_SCANREQ(Signal *signal)
         c_pagePool.getSize(),
         c_pagePool.getEntrySize(),
         c_pagePool.getUsedHi(),
-        { 0,0,0,0 }},
+        { 0,0,0,0 },
+        0},
       { "Prepare",
         c_preparePool.getUsed(),
         c_preparePool.getSize(),
         c_preparePool.getEntrySize(),
         c_preparePool.getUsedHi(),
-        { 0,0,0,0 }},
+        { 0,0,0,0 },
+        0},
       { "Prepared Operation",
         c_preparedOperationPool.getUsed(),
         c_preparedOperationPool.getSize(),
         c_preparedOperationPool.getEntrySize(),
         c_preparedOperationPool.getUsedHi(),
-        { 0,0,0,0 }},
+        { 0,0,0,0 },
+        0},
       { "Operation",
         c_operationPool.getUsed(),
         c_operationPool.getSize(),
         c_operationPool.getEntrySize(),
         c_operationPool.getUsedHi(),
-        { 0,0,0,0 }},
+        { 0,0,0,0 },
+        0},
       { "Transaction",
         c_transactionPool.getUsed(),
         c_transactionPool.getSize(),
         c_transactionPool.getEntrySize(),
         c_transactionPool.getUsedHi(),
-        { 0,0,0,0 }},
+        { 0,0,0,0 },
+        0},
       { "Attribute Mapping",
         c_attrMappingPool.getUsed(),
         c_attrMappingPool.getSize(),
         c_attrMappingPool.getEntrySize(),
         c_attrMappingPool.getUsedHi(),
-        { 0,0,0,0 }},
+        { 0,0,0,0 },
+        0},
       { "Data Buffer",
         c_dataBufPool.getUsed(),
         c_dataBufPool.getSize(),
         c_dataBufPool.getEntrySize(),
         c_dataBufPool.getUsedHi(),
-        { 0,0,0,0 }},
-      { NULL, 0,0,0,0, { 0,0,0,0 }}
+        { 0,0,0,0 },
+        0},
+      { NULL, 0,0,0,0, { 0,0,0,0 }, 0}
     };
 
     const size_t num_config_params =
@@ -945,6 +968,8 @@ void DbUtil::execDBINFO_SCANREQ(Signal *signal)
       row.write_uint64(pools[pool].entry_size);
       for (size_t i = 0; i < num_config_params; i++)
         row.write_uint32(pools[pool].config_params[i]);
+      row.write_uint32(GET_RG(pools[pool].record_type));
+      row.write_uint32(GET_TID(pools[pool].record_type));
       ndbinfo_send_row(signal, req, row, rl);
       pool++;
       if (rl.need_break(req))
@@ -1154,11 +1179,12 @@ DbUtil::execUTIL_PREPARE_REQ(Signal* signal)
   // Release long signal sections
   releaseSections(handle);
   // Check table properties with DICT
-  SimplePropertiesSectionReader reader(ptr, getSectionSegmentPool());
+  SimplePropertiesLinearReader reader(&prepPtr.p->preparePages.getPtr(0)->data[0],
+                                      prepPtr.p->prepDataLen);
   prepPtr.p->clientRef = senderRef;
   prepPtr.p->clientData = senderData;
   prepPtr.p->schemaTransId = schemaTransId;
-  // Release long signal sections
+  // Read the properties
   readPrepareProps(signal, &reader, prepPtr);
 }
 
@@ -1474,8 +1500,7 @@ DbUtil::prepareOperation(Signal* signal,
     SimpleProperties::UnpackStatus unpackStatus;
     unpackStatus = SimpleProperties::unpack(dictInfoReader, &tableDesc, 
 					    DictTabInfo::TableMapping, 
-					    DictTabInfo::TableMappingSize, 
-					    true, true);
+					    DictTabInfo::TableMappingSize);
     ndbrequire(unpackStatus == SimpleProperties::Break);
     
     /************************
@@ -1503,8 +1528,7 @@ DbUtil::prepareOperation(Signal* signal,
       }
       unpackStatus = SimpleProperties::unpack(dictInfoReader, &attrDesc, 
 					      DictTabInfo::AttributeMapping, 
-					      DictTabInfo::AttributeMappingSize,
-					      true, true);
+					      DictTabInfo::AttributeMappingSize);
       ndbrequire(unpackStatus == SimpleProperties::Break);
       //attrDesc.print(stdout);
       
@@ -1927,7 +1951,7 @@ DbUtil::execUTIL_SEQUENCE_REQ(Signal* signal){
     break;
   }
   default:
-    ndbrequire(false);
+    ndbabort();
     prepOp = 0; // remove warning
   }
   
@@ -2073,8 +2097,10 @@ DbUtil::reportSequence(Signal* signal, const Transaction * transP){
       break;
     }
     case UtilSequenceReq::SetVal:
-      ok = true;
+      jam();
+      // Fall through
     case UtilSequenceReq::Create:
+      jam();
       ok = true;
       ret->sequenceValue[0] = 0;
       ret->sequenceValue[1] = 0;
@@ -2837,8 +2863,7 @@ DbUtil::finishTransaction(Signal* signal, TransactionPtr transPtr){
     } 
     break;
   default:
-    ndbrequire(0);
-    break;
+    ndbabort();
   }
   releaseTransaction(transPtr);
 }
@@ -2915,6 +2940,7 @@ DbUtil::execUTIL_UNLOCK_REQ(Signal* signal)
   switch(res){
   case UtilUnlockRef::OK:
     jam();
+    // Fall through
   case UtilUnlockRef::NotLockOwner: {
     jam();
     UtilUnlockConf * conf = (UtilUnlockConf*)signal->getDataPtrSend();
@@ -2927,6 +2953,7 @@ DbUtil::execUTIL_UNLOCK_REQ(Signal* signal)
   }
   case UtilUnlockRef::NotInLockQueue:
     jam();
+    // Fall through
   default:
     jam();
     ndbassert(false);

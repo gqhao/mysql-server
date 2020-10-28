@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -53,13 +53,20 @@ const Collations &Collations::instance() {
 
 ///////////////////////////////////////////////////////////////////////////
 
+const CHARSET_INFO *Collations::name_collation() {
+  return &my_charset_utf8_general_ci;
+}
+
+///////////////////////////////////////////////////////////////////////////
+
 Collations::Collations() {
   m_target_def.set_table_name("collations");
 
   m_target_def.add_field(FIELD_ID, "FIELD_ID",
                          "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT");
   m_target_def.add_field(FIELD_NAME, "FIELD_NAME",
-                         "name VARCHAR(64) NOT NULL COLLATE utf8_general_ci");
+                         "name VARCHAR(64) NOT NULL COLLATE " +
+                             String_type(name_collation()->name));
   m_target_def.add_field(FIELD_CHARACTER_SET_ID, "FIELD_CHARACTER_SET_ID",
                          "character_set_id BIGINT UNSIGNED NOT NULL");
   m_target_def.add_field(FIELD_IS_COMPILED, "FIELD_IS_COMPILED",
@@ -67,7 +74,7 @@ Collations::Collations() {
   m_target_def.add_field(FIELD_SORT_LENGTH, "FIELD_SORT_LENGTH",
                          "sort_length INT UNSIGNED NOT NULL");
   m_target_def.add_field(FIELD_PAD_ATTRIBUTE, "FIELD_PAD_ATTRIBUTE",
-                         "pad_attribute VARCHAR(9) NOT NULL");
+                         "pad_attribute ENUM('PAD SPACE', 'NO PAD') NOT NULL");
   m_target_def.add_field(FIELD_OPTIONS, "FIELD_OPTIONS", "options MEDIUMTEXT");
 
   m_target_def.add_index(INDEX_PK_ID, "INDEX_PK_ID", "PRIMARY KEY(id)");
@@ -87,6 +94,7 @@ Collations::Collations() {
 
 bool Collations::populate(THD *thd) const {
   // Obtain a list of the previously stored collations.
+  cache::Dictionary_client::Auto_releaser releaser(thd->dd_client());
   std::vector<const Collation *> prev_coll;
   if (thd->dd_client()->fetch_global_components(&prev_coll)) return true;
 
@@ -136,9 +144,9 @@ bool Collations::populate(THD *thd) const {
           new_collation->set_is_compiled((cl->state & MY_CS_COMPILED));
           new_collation->set_sort_length(cl->strxfrm_multiply);
           if (cl->pad_attribute == PAD_SPACE)
-            new_collation->set_pad_attribute("PAD SPACE");
+            new_collation->set_pad_attribute(Collation::PA_PAD_SPACE);
           else
-            new_collation->set_pad_attribute("NO PAD");
+            new_collation->set_pad_attribute(Collation::PA_NO_PAD);
 
           // If the collation exists, it will be updated; otherwise,
           // it will be inserted.
@@ -152,10 +160,9 @@ bool Collations::populate(THD *thd) const {
 
   // The remaining ids in the prev_coll_ids set were not updated, and must
   // therefore be deleted from the DD since they are not supported anymore.
-  cache::Dictionary_client::Auto_releaser releaser(thd->dd_client());
   for (std::set<Object_id>::const_iterator del_it = prev_coll_ids.begin();
        del_it != prev_coll_ids.end(); ++del_it) {
-    const Collation *del_coll = NULL;
+    const Collation *del_coll = nullptr;
     if (thd->dd_client()->acquire(*del_it, &del_coll)) return true;
 
     DBUG_ASSERT(del_coll);
@@ -175,7 +182,7 @@ Collation *Collations::create_entity_object(const Raw_record &) const {
 
 bool Collations::update_object_key(Global_name_key *key,
                                    const String_type &collation_name) {
-  key->update(FIELD_NAME, collation_name);
+  key->update(FIELD_NAME, collation_name, name_collation());
   return false;
 }
 

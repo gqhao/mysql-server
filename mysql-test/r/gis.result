@@ -10,35 +10,35 @@ CREATE TABLE gis_geometrycollection  (fid INTEGER NOT NULL PRIMARY KEY, g GEOMET
 CREATE TABLE gis_geometry (fid INTEGER NOT NULL PRIMARY KEY, g GEOMETRY);
 SHOW FIELDS FROM gis_point;
 Field	Type	Null	Key	Default	Extra
-fid	int(11)	NO	PRI	NULL	
+fid	int	NO	PRI	NULL	
 g	point	YES		NULL	
 SHOW FIELDS FROM gis_line;
 Field	Type	Null	Key	Default	Extra
-fid	int(11)	NO	PRI	NULL	
+fid	int	NO	PRI	NULL	
 g	linestring	YES		NULL	
 SHOW FIELDS FROM gis_polygon;
 Field	Type	Null	Key	Default	Extra
-fid	int(11)	NO	PRI	NULL	
+fid	int	NO	PRI	NULL	
 g	polygon	YES		NULL	
 SHOW FIELDS FROM gis_multi_point;
 Field	Type	Null	Key	Default	Extra
-fid	int(11)	NO	PRI	NULL	
+fid	int	NO	PRI	NULL	
 g	multipoint	YES		NULL	
 SHOW FIELDS FROM gis_multi_line;
 Field	Type	Null	Key	Default	Extra
-fid	int(11)	NO	PRI	NULL	
+fid	int	NO	PRI	NULL	
 g	multilinestring	YES		NULL	
 SHOW FIELDS FROM gis_multi_polygon;
 Field	Type	Null	Key	Default	Extra
-fid	int(11)	NO	PRI	NULL	
+fid	int	NO	PRI	NULL	
 g	multipolygon	YES		NULL	
 SHOW FIELDS FROM gis_geometrycollection;
 Field	Type	Null	Key	Default	Extra
-fid	int(11)	NO	PRI	NULL	
+fid	int	NO	PRI	NULL	
 g	geomcollection	YES		NULL	
 SHOW FIELDS FROM gis_geometry;
 Field	Type	Null	Key	Default	Extra
-fid	int(11)	NO	PRI	NULL	
+fid	int	NO	PRI	NULL	
 g	geometry	YES		NULL	
 INSERT INTO gis_point VALUES 
 (101, ST_PointFromText('POINT(10 10)')),
@@ -396,7 +396,7 @@ MBRIntersects(g1.g, g2.g) as i, ST_Crosses(g1.g, g2.g) as r
 FROM gis_geometrycollection g1, gis_geometrycollection g2 ORDER BY first, second;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	g1	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using temporary; Using filesort
-1	SIMPLE	g2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (Block Nested Loop)
+1	SIMPLE	g2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select `test`.`g1`.`fid` AS `first`,`test`.`g2`.`fid` AS `second`,mbrwithin(`test`.`g1`.`g`,`test`.`g2`.`g`) AS `w`,mbrcontains(`test`.`g1`.`g`,`test`.`g2`.`g`) AS `c`,mbroverlaps(`test`.`g1`.`g`,`test`.`g2`.`g`) AS `o`,mbrequals(`test`.`g1`.`g`,`test`.`g2`.`g`) AS `e`,mbrdisjoint(`test`.`g1`.`g`,`test`.`g2`.`g`) AS `d`,st_touches(`test`.`g1`.`g`,`test`.`g2`.`g`) AS `t`,mbrintersects(`test`.`g1`.`g`,`test`.`g2`.`g`) AS `i`,st_crosses(`test`.`g1`.`g`,`test`.`g2`.`g`) AS `r` from `test`.`gis_geometrycollection` `g1` join `test`.`gis_geometrycollection` `g2` order by `first`,`second`
 DROP TABLE gis_point, gis_line, gis_polygon, gis_multi_point, gis_multi_line, gis_multi_polygon, gis_geometrycollection, gis_geometry;
@@ -431,7 +431,7 @@ mln	multilinestring	YES		NULL
 mpg	multipolygon	YES		NULL	
 gc	geomcollection	YES		NULL	
 gm	geometry	YES		NULL	
-fid	int(11)	NO		NULL	
+fid	int	NO		NULL	
 DROP TABLE t1;
 SELECT ST_AsText(ST_GeometryFromWKB(ST_AsWKB(ST_GeometryFromText('POINT(1 4)'))));
 ST_AsText(ST_GeometryFromWKB(ST_AsWKB(ST_GeometryFromText('POINT(1 4)'))))
@@ -584,6 +584,8 @@ t1	CREATE TABLE `t1` (
 drop table t1;
 CREATE TABLE `t1` (`object_id` bigint(20) unsigned NOT NULL default '0', `geo`
 geometry NOT NULL) ENGINE=MyISAM ;
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 insert into t1 values ('85984',ST_GeomFromText('MULTIPOLYGON(((-115.006363
 36.305435,-114.992394 36.305202,-114.991219 36.305975,-114.991163
 36.306845,-114.989432 36.309452,-114.978275 36.312642,-114.977363
@@ -679,7 +681,7 @@ def	test	t1	t1	g	g	255	4294967295	0	Y	144	0	63
 g
 select ST_asbinary(g) from t1;
 Catalog	Database	Table	Table_alias	Column	Column_alias	Type	Length	Max length	Is_null	Flags	Decimals	Charsetnr
-def					ST_asbinary(g)	252	4294967295	0	Y	128	31	63
+def					ST_asbinary(g)	251	4294967295	0	Y	128	31	63
 ST_asbinary(g)
 drop table t1;
 create table t1 (a TEXT, b GEOMETRY NOT NULL SRID 0, SPATIAL KEY(b));
@@ -756,7 +758,7 @@ drop table t1;
 drop table t2;
 drop table t3;
 create table t1(col1 geometry default null,col15 geometrycollection not
-null SRID 0,spatial index(col15),index(col1(15)))engine=myisam;
+null SRID 0,spatial index(col15))engine=myisam;
 insert into t1 set col15 = ST_GeomFromText('POINT(6 5)');
 ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
 insert into t1 set col15 = ST_GeomFromText('POINT(6 5)');
@@ -784,11 +786,13 @@ POINT(1 1)
 drop function fn3;
 create table t1(pt POINT);
 alter table t1 add primary key pti(pt);
+ERROR HY000: Spatial indexes can't be primary or unique indexes.
 drop table t1;
 create table t1(pt GEOMETRY);
 alter table t1 add primary key pti(pt);
-ERROR 42000: BLOB/TEXT column 'pt' used in key specification without a key length
+ERROR HY000: Spatial indexes can't be primary or unique indexes.
 alter table t1 add primary key pti(pt(20));
+ERROR HY000: Incorrect prefix key; the used key part isn't a string, the used length is longer than the key part, or the storage engine doesn't support unique prefix keys
 drop table t1;
 create table t1 select ST_GeomFromText('point(1 1)');
 desc t1;
@@ -925,7 +929,7 @@ SELECT 1;
 1
 1
 CREATE TABLE t1 (p POINT);
-CREATE TABLE t2 (p POINT, INDEX(p));
+CREATE TABLE t2 (p POINT);
 INSERT INTO t1 VALUES (ST_POINTFROMTEXT('POINT(1 2)'));
 INSERT INTO t2 VALUES (ST_POINTFROMTEXT('POINT(1 2)'));
 SELECT COUNT(*) FROM t1 WHERE p=ST_POINTFROMTEXT('POINT(1 2)');
@@ -934,9 +938,9 @@ COUNT(*)
 EXPLAIN 
 SELECT COUNT(*) FROM t2 WHERE p=ST_POINTFROMTEXT('POINT(1 2)');
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t2	NULL	system	p	NULL	NULL	NULL	1	100.00	NULL
+1	SIMPLE	t2	NULL	system	NULL	NULL	NULL	NULL	1	100.00	NULL
 Warnings:
-Note	1003	/* select#1 */ select count(0) AS `COUNT(*)` from dual where 1
+Note	1003	/* select#1 */ select count(0) AS `COUNT(*)` from dual where true
 SELECT COUNT(*) FROM t2 WHERE p=ST_POINTFROMTEXT('POINT(1 2)');
 COUNT(*)
 1
@@ -954,19 +958,19 @@ COUNT(*)
 EXPLAIN 
 SELECT COUNT(*) FROM t2 WHERE p=ST_POINTFROMTEXT('POINT(1 2)');
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t2	NULL	ref	p	p	28	const	1	100.00	Using where
+1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where
 Warnings:
 Note	1003	/* select#1 */ select count(0) AS `COUNT(*)` from `test`.`t2` where (`test`.`t2`.`p` = <cache>(st_pointfromtext('POINT(1 2)')))
 SELECT COUNT(*) FROM t2 WHERE p=ST_POINTFROMTEXT('POINT(1 2)');
 COUNT(*)
 2
 EXPLAIN 
-SELECT COUNT(*) FROM t2 IGNORE INDEX(p) WHERE p=ST_POINTFROMTEXT('POINT(1 2)');
+SELECT COUNT(*) FROM t2 WHERE p=ST_POINTFROMTEXT('POINT(1 2)');
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where
 Warnings:
-Note	1003	/* select#1 */ select count(0) AS `COUNT(*)` from `test`.`t2` IGNORE INDEX (`p`) where (`test`.`t2`.`p` = <cache>(st_pointfromtext('POINT(1 2)')))
-SELECT COUNT(*) FROM t2 IGNORE INDEX(p) WHERE p=ST_POINTFROMTEXT('POINT(1 2)');
+Note	1003	/* select#1 */ select count(0) AS `COUNT(*)` from `test`.`t2` where (`test`.`t2`.`p` = <cache>(st_pointfromtext('POINT(1 2)')))
+SELECT COUNT(*) FROM t2 WHERE p=ST_POINTFROMTEXT('POINT(1 2)');
 COUNT(*)
 2
 DROP TABLE t1, t2;
@@ -977,10 +981,10 @@ End of 5.0 tests
 #
 drop table if exists t1;
 # The minimal test case.
-create table t1 (a int not null, b linestring not null, unique key b (b(12)), unique key a (a));
+create table t1 (a int not null, b linestring not null, unique key a (a));
 drop table t1;
 # The original test case.
-create table t1 (a int not null, b linestring not null, unique key b (b(12)));
+create table t1 (a int not null, b linestring not null);
 create unique index a on t1(a);
 drop table t1;
 create table `t1` (`col002` point)engine=myisam;
@@ -1015,6 +1019,8 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 DROP TABLE t2;
 End of 5.0 tests
 create table t1 (f1 tinyint(1), f2 char(1), f3 varchar(1), f4 geometry, f5 datetime);
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 create view v1 as select * from t1;
 desc v1;
 Field	Type	Null	Key	Default	Extra
@@ -1104,13 +1110,11 @@ End of 5.1 tests
 # Bug#11908153: CRASH AND/OR VALGRIND ERRORS IN FIELD_BLOB::GET_KEY_IMAGE
 #
 CREATE TABLE g1
-(a geometry NOT NULL, UNIQUE KEY i (a(151))) engine=myisam;
+(a geometry NOT NULL) engine=myisam;
 INSERT INTO g1 VALUES (ST_geomfromtext('point(1 1)'));
 INSERT INTO g1 VALUES (ST_geomfromtext('point(1 2)'));
 FLUSH TABLES;
-SELECT 1 FROM g1 
-FORCE INDEX(i) WHERE a = date_sub(now(), interval 2808.4 year_month)
-;
+SELECT 1 FROM g1 WHERE a = date_sub(now(), interval 2808.4 year_month);
 1
 Warnings:
 Warning	1292	Truncated incorrect datetime value: '\x00\x00\x00\x00\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\xF0?\x00\x00\x00\x00\x00\x00\xF0?'
@@ -2135,7 +2139,6 @@ a INT NOT NULL,
 p POINT NOT NULL SRID 0,
 l LINESTRING NOT NULL SRID 0,
 g GEOMETRY NOT NULL SRID 0,
-PRIMARY KEY(p),
 SPATIAL KEY idx2 (p),
 SPATIAL KEY idx3 (l),
 SPATIAL KEY idx4 (g)
@@ -2150,7 +2153,7 @@ ST_GeomFromText('LINESTRING(2 3, 7 8, 9 10, 15 16)'),
 ST_GeomFromText('POLYGON((10 30, 30 40, 40 50, 40 30, 30 20, 10 30))'));
 EXPLAIN SELECT ST_AsText(p) FROM t1 WHERE ST_Within(p, @poly1);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t1	NULL	range	PRIMARY,idx2	idx2	34	NULL	2	100.00	Using where
+1	SIMPLE	t1	NULL	range	idx2	idx2	34	NULL	2	100.00	Using where
 Warnings:
 Note	1003	/* select#1 */ select st_astext(`test`.`t1`.`p`) AS `ST_AsText(p)` from `test`.`t1` where st_within(`test`.`t1`.`p`,<cache>((@`poly1`)))
 SELECT ST_AsText(p) FROM t1 WHERE ST_Within(p, @poly1);
@@ -2158,7 +2161,7 @@ ST_AsText(p)
 POINT(30 30)
 EXPLAIN SELECT ST_AsText(p) FROM t1 WHERE ST_Equals(p, ST_PointFromText('POINT(20 20)'));
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t1	NULL	range	PRIMARY,idx2	idx2	34	NULL	1	100.00	Using where
+1	SIMPLE	t1	NULL	range	idx2	idx2	34	NULL	1	100.00	Using where
 Warnings:
 Note	1003	/* select#1 */ select st_astext(`test`.`t1`.`p`) AS `ST_AsText(p)` from `test`.`t1` where st_equals(`test`.`t1`.`p`,<cache>(st_pointfromtext('POINT(20 20)')))
 SELECT ST_AsText(p) FROM t1 WHERE ST_Equals(p, ST_PointFromText('POINT(20 20)'));
@@ -2169,7 +2172,6 @@ a INT NOT NULL,
 p POINT NOT NULL SRID 0,
 l LINESTRING NOT NULL SRID 0,
 g GEOMETRY NOT NULL SRID 0,
-PRIMARY KEY(p),
 SPATIAL KEY idx2 (p),
 SPATIAL KEY idx3 (l),
 SPATIAL KEY idx4 (g)
@@ -2184,7 +2186,7 @@ ST_GeomFromText('LINESTRING(2 3, 7 8, 9 10, 15 16)'),
 ST_GeomFromText('POLYGON((10 30, 30 40, 40 50, 40 30, 30 20, 10 30))'));
 EXPLAIN SELECT ST_AsText(p) FROM t1 WHERE ST_Within(p, @poly1);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t1	NULL	range	PRIMARY,idx2	idx2	34	NULL	1	100.00	Using where
+1	SIMPLE	t1	NULL	range	idx2	idx2	34	NULL	1	100.00	Using where
 Warnings:
 Note	1003	/* select#1 */ select st_astext(`test`.`t1`.`p`) AS `ST_AsText(p)` from `test`.`t1` where st_within(`test`.`t1`.`p`,<cache>((@`poly1`)))
 SELECT ST_AsText(p) FROM t1 WHERE ST_Within(p, @poly1);
@@ -2192,7 +2194,7 @@ ST_AsText(p)
 POINT(30 30)
 EXPLAIN SELECT ST_AsText(p) FROM t1 WHERE ST_Equals(p, ST_PointFromText('POINT(20 20)'));
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t1	NULL	range	PRIMARY,idx2	idx2	34	NULL	1	100.00	Using where
+1	SIMPLE	t1	NULL	range	idx2	idx2	34	NULL	1	100.00	Using where
 Warnings:
 Note	1003	/* select#1 */ select st_astext(`test`.`t1`.`p`) AS `ST_AsText(p)` from `test`.`t1` where st_equals(`test`.`t1`.`p`,<cache>(st_pointfromtext('POINT(20 20)')))
 SELECT ST_AsText(p) FROM t1 WHERE ST_Equals(p, ST_PointFromText('POINT(20 20)'));
@@ -2201,7 +2203,7 @@ DROP TABLE t1;
 #
 # Bug #21067378 GEOMETRIC OPERATION RETURNS ERROR INSTEAD OF RESULT
 #
-CREATE TABLE t1 (p POINT NOT NULL UNIQUE) ENGINE=InnoDB;
+CREATE TABLE t1 (p POINT NOT NULL) ENGINE=InnoDB;
 INSERT INTO t1 VALUES (ST_GEOMFROMTEXT('POINT(1 1)'));
 SELECT ST_ASTEXT(p) FROM t1
 WHERE MBRCOVEREDBY
@@ -2212,7 +2214,7 @@ ST_GEOMFROMTEXT('POLYGON((1 1, 1 2, 2 2, 2 1, 1 1))')
 ST_ASTEXT(p)
 POINT(1 1)
 DROP TABLE t1;
-CREATE TABLE t1 (p POINT NOT NULL UNIQUE) ENGINE=MyISAM;
+CREATE TABLE t1 (p POINT NOT NULL) ENGINE=MyISAM;
 INSERT INTO t1 VALUES (ST_GEOMFROMTEXT('POINT(1 1)'));
 SELECT ST_ASTEXT(p) FROM t1
 WHERE MBRCOVEREDBY
@@ -2378,10 +2380,7 @@ Warning	1292	Incorrect date value: '\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00
 SELECT ST_GeomFromText('POINT(0 0)') > (SELECT b FROM t) AS result;
 ERROR HY000: Incorrect arguments to >
 SELECT ST_AsWKB(ST_GeomFromText('POINT(0 0)')) > (SELECT b FROM t) AS result;
-result
-0
-Warnings:
-Warning	1292	Truncated incorrect date value: '\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
+ERROR HY000: Incorrect DATE value: ''
 DROP TABLE t;
 CREATE TABLE t1(a BLOB NOT NULL, b INT NOT NULL) ENGINE=Innodb;
 SELECT NOT EXISTS
@@ -2434,7 +2433,7 @@ ALTER TABLE t1 ADD COLUMN g5 GEOMETRY NOT NULL;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
+  `i` int NOT NULL,
   `g` geometry NOT NULL,
   `g2` geometry NOT NULL,
   `g3` geometry NOT NULL,
@@ -2457,7 +2456,7 @@ ERROR 22004: Invalid use of NULL value
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
+  `i` int NOT NULL,
   `g` geometry DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 SELECT i, g FROM t1;
@@ -2468,7 +2467,7 @@ ALTER TABLE t1 MODIFY COLUMN g GEOMETRY NOT NULL;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
+  `i` int NOT NULL,
   `g` geometry NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 SELECT i, ST_ASTEXT(g) FROM t1;
@@ -2486,7 +2485,7 @@ ALTER TABLE t1 MODIFY COLUMN g GEOMETRY NOT NULL;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
+  `i` int NOT NULL,
   `g` geometry NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 DROP TABLE t1;
@@ -2509,7 +2508,7 @@ SET SESSION innodb_strict_mode=@save_innodb_strict_mode;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
+  `i` int NOT NULL,
   `h` geometry NOT NULL,
   `h2` geometry NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
@@ -2524,8 +2523,8 @@ ALTER TABLE t1 ADD COLUMN g INT;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
-  `g` int(11) DEFAULT NULL
+  `i` int NOT NULL,
+  `g` int DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 SELECT i, g FROM t1;
 i	g
@@ -2539,7 +2538,7 @@ ERROR 22004: Invalid use of NULL value
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
+  `i` int NOT NULL,
   `g` geometry DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 SELECT i, g FROM t1;
@@ -2555,8 +2554,8 @@ ALTER TABLE t1 ADD COLUMN g INT;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
-  `g` int(11) DEFAULT NULL
+  `i` int NOT NULL,
+  `g` int DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 SELECT i, g FROM t1;
 i	g
@@ -2578,8 +2577,8 @@ SET SESSION innodb_strict_mode=@save_innodb_strict_mode;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
-  `g` int(11) DEFAULT NULL
+  `i` int NOT NULL,
+  `g` int DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 SELECT i, g FROM t1;
 i	g
@@ -2594,8 +2593,8 @@ ALTER TABLE t1 ADD COLUMN g INT DEFAULT 1;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
-  `g` int(11) DEFAULT '1'
+  `i` int NOT NULL,
+  `g` int DEFAULT '1'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 SELECT i, g FROM t1;
 i	g
@@ -2607,8 +2606,8 @@ ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
-  `g` int(11) DEFAULT '1'
+  `i` int NOT NULL,
+  `g` int DEFAULT '1'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 SELECT i, g FROM t1;
 i	g
@@ -2628,8 +2627,8 @@ ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
-  `g` int(11) DEFAULT '1'
+  `i` int NOT NULL,
+  `g` int DEFAULT '1'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 SELECT * FROM t1;
 i	g
@@ -2644,7 +2643,7 @@ ALTER TABLE t1 ADD COLUMN g VARCHAR(20) NOT NULL;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
+  `i` int NOT NULL,
   `g` varchar(20) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 SELECT i, g FROM t1;
@@ -2657,7 +2656,7 @@ ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
+  `i` int NOT NULL,
   `g` varchar(20) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 SELECT i, g FROM t1;
@@ -2674,7 +2673,7 @@ ALTER TABLE t1 ADD COLUMN g VARCHAR(20) NOT NULL;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
+  `i` int NOT NULL,
   `g` varchar(20) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 SELECT i, g FROM t1;
@@ -2687,7 +2686,7 @@ ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `i` int(11) NOT NULL,
+  `i` int NOT NULL,
   `g` varchar(20) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 SELECT i, g FROM t1;
@@ -3800,7 +3799,7 @@ CREATE TABLE t1 (a DECIMAL(54,20));
 INSERT INTO t1 VALUES (0);
 SELECT (SELECT MULTILINESTRING(d.a, d.a, d.a) FROM t1)
 FROM t1 AS d GROUP BY d.a;
-ERROR 22023: Invalid GIS data provided to function multilinestring.
+ERROR 22007: Illegal non geometric '`test`.`d`.`a`' value found during parsing
 DROP TABLE t1;
 #
 # Bug #23280574 ASSERTION FAILED: !NO_DATA(NBYTES) IN
@@ -4040,6 +4039,30 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	No tables used
 Warnings:
 Note	1003	/* select#1 */ select geomcollection() AS `GEOMETRYCOLLECTION()`
+#
+# Bug #26174808 BG::UNION_(MPY, PY) RETURNS EMPTY RESULT
+#
+SELECT ST_Contains(
+ST_GeomFromText('LINESTRING(79 63,65 -51)', '4326','axis-order=long-lat'),
+ST_GeomFromText(
+'GEOMETRYCOLLECTION(POLYGON((16 -15,-132 -22,-56 89,67 -29,16 -15)),
+     POLYGON((101 49,117 -61,-164 -21,12 40,101 49)))',
+'4326', 'axis-order=long-lat'
+  )
+) AS result;
+ERROR 22023: Function st_contains encountered a polygon that was too large. Polygons must cover less than half the planet.
+SELECT ST_Touches(
+ST_GeomFromText(
+'GEOMETRYCOLLECTION(POLYGON((-31 144,-74 -125,60 -89,53 60,-31 144)),
+     POLYGON((1 23,23 105,14 -134,1 23)))',
+'4326'
+  ),
+ST_GeomFromText(
+'MULTIPOLYGON(((-12 -12,-17 -157,-77 -132,-12 -12)))',
+'4326'
+  )
+) AS result;
+ERROR 22023: Function st_touches encountered a polygon that was too large. Polygons must cover less than half the planet.
 #
 # Bug #27252609 UNABLE TO CREATE INDEX WHEN SPATIAL DATATYPES ARE USED
 # WITH REQUIRED OPTION
@@ -4471,3 +4494,215 @@ ST_GEOMFROMGEOJSON(col1->>'$.geojson')
 ) VIRTUAL NOT NULL;
 DROP TABLE t1;
 SET SESSION sql_mode=@saved_sql_mode;
+#
+# Bug#27756083 "INSERT INTO SELECT" QUERY INSERTS GEOMETRY OF DIFFERENT
+#              TYPE
+#
+CREATE TABLE t1(c1 POINT);
+INSERT INTO t1 VALUES (POINT(0,0));
+CREATE TABLE t2(c1 LINESTRING);
+INSERT INTO t2 VALUES (LINESTRING(POINT(0,0),POINT(1,1)));
+SHOW CREATE TABLE t1;
+Table	Create Table
+t1	CREATE TABLE `t1` (
+  `c1` point DEFAULT NULL
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+SHOW CREATE TABLE t2;
+Table	Create Table
+t2	CREATE TABLE `t2` (
+  `c1` linestring DEFAULT NULL
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+CREATE TABLE t3 SELECT * FROM t1;
+SHOW CREATE TABLE t3;
+Table	Create Table
+t3	CREATE TABLE `t3` (
+  `c1` point DEFAULT NULL
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+INSERT INTO t3 SELECT * FROM t2;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+SELECT ST_AsText(c1) FROM t3;
+ST_AsText(c1)
+POINT(0 0)
+DROP TABLE t1, t2, t3;
+CREATE TABLE t1 (
+point_col POINT SRID 4326
+, multipoint_col MULTIPOINT SRID 4326
+, linestring_col LINESTRING SRID 4326
+, multilinestring_col MULTILINESTRING SRID 4326
+, polygon_col POLYGON SRID 4326
+, multipolygon_col MULTIPOLYGON SRID 4326
+, geometrycollection_col GEOMETRYCOLLECTION SRID 4326
+, geometry_col GEOMETRY SRID 4326) ENGINE = InnoDB;
+CREATE TABLE t2 LIKE t1;
+INSERT INTO t1 VALUES (
+ST_GeomFromText('POINT(1 1)', 4326)
+, ST_GeomFromText('MULTIPOINT((1 1))', 4326)
+, ST_GeomFromText('LINESTRING(1 1, 2 2)', 4326)
+, ST_GeomFromText('MULTILINESTRING((1 1, 2 2))', 4326)
+, ST_GeomFromText('POLYGON((1 1, 1 2, 2 2, 2 1, 1 1))', 4326)
+, ST_GeomFromText('MULTIPOLYGON(((1 1, 1 2, 2 2, 2 1, 1 1)))', 4326)
+, ST_GeomFromText('GEOMETRYCOLLECTION(POINT(1 1), LINESTRING(3 3, 4 4))', 4326)
+, ST_GeomFromText('POINT(1 1)', 4326));
+# POINT should only be allowed in POINT and GEOMETRY column
+INSERT INTO t2 (point_col) SELECT point_col FROM t1;
+INSERT INTO t2 (multipoint_col) SELECT point_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (linestring_col) SELECT point_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multilinestring_col) SELECT point_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (polygon_col) SELECT point_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multipolygon_col) SELECT point_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (geometrycollection_col) SELECT point_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (geometry_col) SELECT point_col FROM t1;
+# MULTIPOINT should only be allowed in MULTIPOINT, GEOMETRY and
+# GEOMETRYCOLLECTION column
+INSERT INTO t2 (point_col) SELECT multipoint_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multipoint_col) SELECT multipoint_col FROM t1;
+INSERT INTO t2 (linestring_col) SELECT multipoint_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multilinestring_col) SELECT multipoint_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (polygon_col) SELECT multipoint_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multipolygon_col) SELECT multipoint_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (geometrycollection_col) SELECT multipoint_col FROM t1;
+INSERT INTO t2 (geometry_col) SELECT multipoint_col FROM t1;
+# LINESTRING should only be allowed in LINESTRING and GEOMETRY column
+INSERT INTO t2 (point_col) SELECT linestring_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multipoint_col) SELECT linestring_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (linestring_col) SELECT linestring_col FROM t1;
+INSERT INTO t2 (multilinestring_col) SELECT linestring_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (polygon_col) SELECT linestring_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multipolygon_col) SELECT linestring_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (geometrycollection_col) SELECT linestring_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (geometry_col) SELECT linestring_col FROM t1;
+# MULTILINESTRING should only be allowed in MULTILINESTRING, GEOMETRY and
+# GEOMETRYCOLLECTION column
+INSERT INTO t2 (point_col) SELECT multilinestring_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multipoint_col) SELECT multilinestring_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (linestring_col) SELECT multilinestring_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multilinestring_col) SELECT multilinestring_col FROM t1;
+INSERT INTO t2 (polygon_col) SELECT multilinestring_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multipolygon_col) SELECT multilinestring_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (geometrycollection_col) SELECT multilinestring_col FROM t1;
+INSERT INTO t2 (geometry_col) SELECT multilinestring_col FROM t1;
+# POLYGON should only be allowed in POLYGON and GEOMETRY column
+INSERT INTO t2 (point_col) SELECT polygon_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multipoint_col) SELECT polygon_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (linestring_col) SELECT polygon_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multilinestring_col) SELECT polygon_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (polygon_col) SELECT polygon_col FROM t1;
+INSERT INTO t2 (multipolygon_col) SELECT polygon_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (geometrycollection_col) SELECT polygon_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (geometry_col) SELECT polygon_col FROM t1;
+# MULTIPOLYGON should only be allowed in MULTIPOLYGON, GEOMETRY and
+# GEOMETRYCOLLECTION column
+INSERT INTO t2 (point_col) SELECT multipolygon_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multipoint_col) SELECT multipolygon_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (linestring_col) SELECT multipolygon_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multilinestring_col) SELECT multipolygon_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (polygon_col) SELECT multipolygon_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multipolygon_col) SELECT multipolygon_col FROM t1;
+INSERT INTO t2 (geometrycollection_col) SELECT multipolygon_col FROM t1;
+INSERT INTO t2 (geometry_col) SELECT multipolygon_col FROM t1;
+# GEOMETRYCOLLECTION should only be allowed in GEOMETRYCOLLECTION and
+# GEOMETRY column
+INSERT INTO t2 (point_col) SELECT geometrycollection_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multipoint_col) SELECT geometrycollection_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (linestring_col) SELECT geometrycollection_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multilinestring_col) SELECT geometrycollection_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (polygon_col) SELECT geometrycollection_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (multipolygon_col) SELECT geometrycollection_col FROM t1;
+ERROR 22003: Cannot get geometry object from data you send to the GEOMETRY field
+INSERT INTO t2 (geometrycollection_col) SELECT geometrycollection_col FROM t1;
+INSERT INTO t2 (geometry_col) SELECT geometrycollection_col FROM t1;
+SELECT
+ST_AsText(point_col) AS point_col
+, ST_AsText(multipoint_col) AS multipoint_col
+, ST_AsText(linestring_col) AS linestring_col
+, ST_AsText(multilinestring_col) AS multilinestring_col
+, ST_AsText(polygon_col) AS polygon_col
+, ST_AsText(multipolygon_col) AS multipolygon_col
+, ST_AsText(geometrycollection_col) AS geometrycollection_col
+, ST_AsText(geometry_col) AS geometry_col
+FROM t2;
+point_col	multipoint_col	linestring_col	multilinestring_col	polygon_col	multipolygon_col	geometrycollection_col	geometry_col
+POINT(1 1)	NULL	NULL	NULL	NULL	NULL	NULL	NULL
+NULL	NULL	NULL	NULL	NULL	NULL	NULL	POINT(1 1)
+NULL	MULTIPOINT((1 1))	NULL	NULL	NULL	NULL	NULL	NULL
+NULL	NULL	NULL	NULL	NULL	NULL	MULTIPOINT((1 1))	NULL
+NULL	NULL	NULL	NULL	NULL	NULL	NULL	MULTIPOINT((1 1))
+NULL	NULL	LINESTRING(1 1,2 2)	NULL	NULL	NULL	NULL	NULL
+NULL	NULL	NULL	NULL	NULL	NULL	NULL	LINESTRING(1 1,2 2)
+NULL	NULL	NULL	MULTILINESTRING((1 1,2 2))	NULL	NULL	NULL	NULL
+NULL	NULL	NULL	NULL	NULL	NULL	MULTILINESTRING((1 1,2 2))	NULL
+NULL	NULL	NULL	NULL	NULL	NULL	NULL	MULTILINESTRING((1 1,2 2))
+NULL	NULL	NULL	NULL	POLYGON((1 1,1 2,2 2,2 1,1 1))	NULL	NULL	NULL
+NULL	NULL	NULL	NULL	NULL	NULL	NULL	POLYGON((1 1,1 2,2 2,2 1,1 1))
+NULL	NULL	NULL	NULL	NULL	MULTIPOLYGON(((1 1,1 2,2 2,2 1,1 1)))	NULL	NULL
+NULL	NULL	NULL	NULL	NULL	NULL	MULTIPOLYGON(((1 1,1 2,2 2,2 1,1 1)))	NULL
+NULL	NULL	NULL	NULL	NULL	NULL	NULL	MULTIPOLYGON(((1 1,1 2,2 2,2 1,1 1)))
+NULL	NULL	NULL	NULL	NULL	NULL	GEOMETRYCOLLECTION(POINT(1 1),LINESTRING(3 3,4 4))	NULL
+NULL	NULL	NULL	NULL	NULL	NULL	NULL	GEOMETRYCOLLECTION(POINT(1 1),LINESTRING(3 3,4 4))
+DROP TABLE t1, t2;
+#
+# Bug #27808412 UBSAN: ITEM_FUNC_AS_WKB::VAL_STR, NULL POINTER PASSED AS
+# ARGUMENT
+#
+DO ST_ASWKB(JSON_UNQUOTE(JSON_SET('{"a":""}', '$', '')));
+ERROR 22023: Invalid GIS data provided to function st_aswkb.
+#
+# Bug #29047811 ASSERTION FAILED:
+#               CURRENT_THD->IS_ERROR(), SQL\ITEM_GEOFUNC.CC, LINE 5358
+#
+CREATE TABLE t(a INT PRIMARY KEY) ENGINE=INNODB
+PARTITION BY KEY(a) PARTITIONS 10;
+INSERT t(a) VALUES(
+is_uuid(
+st_distance_sphere(
+multipoint(
+point(-6682,10942),
+point(-6033,-22659),
+point(-14161,-22192),
+point(3074,1.717753e+308),
+point(-12593,562949953421315)
+),
+point(2051,8192)
+)
+)
+);
+ERROR 22S02: Longitude -6682.000000 is out of range in function st_distance_sphere. It must be within (-180.000000, 180.000000].
+DROP TABLE t;

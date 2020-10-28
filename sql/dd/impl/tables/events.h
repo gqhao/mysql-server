@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -44,6 +44,8 @@ class Events : public Entity_object_table_impl {
  public:
   static const Events &instance();
 
+  static const CHARSET_INFO *name_collation();
+
   enum enum_fields {
     FIELD_ID = static_cast<uint>(Common_field::ID),
     FIELD_SCHEMA_ID,
@@ -68,7 +70,8 @@ class Events : public Entity_object_table_impl {
     FIELD_CLIENT_COLLATION_ID,
     FIELD_CONNECTION_COLLATION_ID,
     FIELD_SCHEMA_COLLATION_ID,
-    FIELD_OPTIONS
+    FIELD_OPTIONS,
+    NUMBER_OF_FIELDS  // Always keep this entry at the end of the enum
   };
 
   enum enum_indexes {
@@ -76,7 +79,8 @@ class Events : public Entity_object_table_impl {
     INDEX_UK_SCHEMA_ID_NAME = static_cast<uint>(Common_index::UK_NAME),
     INDEX_K_CLIENT_COLLATION_ID,
     INDEX_K_CONNECTION_COLLATION_ID,
-    INDEX_K_SCHEMA_COLLATION_ID
+    INDEX_K_SCHEMA_COLLATION_ID,
+    INDEX_K_DEFINER
   };
 
   enum enum_foreign_keys {
@@ -88,12 +92,21 @@ class Events : public Entity_object_table_impl {
 
   Events();
 
-  virtual Event *create_entity_object(const Raw_record &) const;
+  Event *create_entity_object(const Raw_record &) const override;
 
   static bool update_object_key(Item_name_key *key, Object_id schema_id,
                                 const String_type &event_name);
 
   static Object_key *create_key_by_schema_id(Object_id schema_id);
+
+  /**
+    Create a key to find all events for a given definer.
+
+    @param definer   Name of the definer.
+
+    @returns Pointer to Object_key.
+  */
+  static Object_key *create_key_by_definer(const String_type &definer);
 };
 
 ///////////////////////////////////////////////////////////////////////////

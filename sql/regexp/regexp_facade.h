@@ -1,7 +1,7 @@
 #ifndef SQL_REGEXP_REGEXP_FACADE_H_
 #define SQL_REGEXP_REGEXP_FACADE_H_
 
-/* Copyright (c) 2017, 2018 Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -31,6 +31,8 @@
 
 #include <stdint.h>
 
+#include <string>
+
 #include "nullable.h"
 #include "sql/item.h"
 #include "sql/regexp/regexp_engine.h"
@@ -40,35 +42,6 @@ extern int32_t opt_regexp_time_limit;
 extern int32_t opt_regexp_stack_limit;
 
 namespace regexp {
-
-/**
-   Evaluates an expression to a string value, performing character set
-   conversion to regexp_lib_charset if necessary. There are three cases:
-
-   -# If the expression expr is a string constant already in the needed
-   character set, a shallow pointer to its character data is returned.
-
-   -# If the expression expr is a string constant not in the needed
-   character set, the same process as in #4 is employed.
-
-   -# If the expression is not a string, but the server's character set
-   matches that if the library. the function attempts to render it as a
-   string directly in the out buffer.
-
-   -# If the expression is not a string, and the server's character set
-   differs from that if the library. the function attempts to render it as
-   a string to an intermediate buffer. The buffer is then copied as part of
-   conversion into the output buffer.
-
-   All of the above follows how the server generally handles character set
-   conversion, but is usually not documented.
-
-   @param expr The expression to be printed.
-
-   @param[out] out The String object whose internal buffer will contain the
-   result in case of copying.
-*/
-String *EvalExprToCharset(Item *expr, String *out);
 
 /**
   This class handles
@@ -87,11 +60,6 @@ String *EvalExprToCharset(Item *expr, String *out);
 */
 class Regexp_facade {
  public:
-  explicit Regexp_facade(uint flags)
-      : m_flags(flags),
-        m_current_subject(static_cast<const char *>(nullptr), 0,
-                          regexp_lib_charset) {}
-
   /**
     Sets the pattern if called for the first time or the pattern_expr is
     non-constant. This function is meant to be called for every row in a
@@ -108,7 +76,7 @@ class Regexp_facade {
     The `regexp_column` expression is non-constant and hence we have to
     recompile the regular expression for each row.
   */
-  bool SetPattern(Item *pattern_expr);
+  bool SetPattern(Item *pattern_expr, uint32_t flags);
 
   /**
     Tries to match the subject against the compiled regular expression.
@@ -149,40 +117,60 @@ class Regexp_facade {
     @param occurrence Which occurrence of the pattern should be searched for.
     @param[in,out] result Holds the buffer for writing the result.
   */
-  String *Replace(Item *subject_expr, Item *replacement_expr, int64_t start,
+  String *Replace(Item *subject_expr, Item *replacement_expr, int start,
                   int occurrence, String *result);
 
   String *Substr(Item *subject_expr, int start, int occurrence, String *result);
 
-  /**
-    Returns the substring that was matched by the previous call to find() or
-    matches().
-
-    @param[out] result A string we can write to.
-    @return A pointer to result.
-  */
-  String *MatchedSubstring(String *result) {
-    return m_engine->MatchedSubstring(result);
-  }
+  /// Delete the "engine" data structure after execution.
+  void cleanup() { m_engine = nullptr; }
 
  private:
   /**
     Resets the compiled regular expression with a new string.
 
     @param subject_expr The new string to search.
+    @param start If present, start on this code point.
 
     @retval false OK.
     @retval true Either there is no compiled regular expression, or the
     expression evaluated to `NULL`.
   */
-  bool Reset(Item *subject_expr);
+  bool Reset(Item *subject_expr, int start = 1);
 
   /**
     Actually compiles the regular expression.
   */
   bool SetupEngine(Item *pattern_expr, uint flags);
 
-  uint m_flags;
+  /**
+    Converts a string position in m_current_subject.
+    @param position One-based code point position.
+    @return Zero-based byte position.
+  */
+  int ConvertCodePointToLibPosition(int position) const;
+
+  /**
+    Converts a string position in m_current_subject.
+    @param position Zero-based UTF-16 position.
+    @return Zero-based code point position.
+  */
+  int ConvertLibPositionToCodePoint(int position) const;
+
+  /**
+    Helper function for setting the result from SQL regular expression
+    functions that return a string value. Depending on character sets used by
+    arguments and result, this function may copy, convert or just set the
+    result. In particular, it handles the special case of the BINARY character
+    set being interpreted as CP-1252.
+
+     @param str The result string from the regexp function.
+     @param length Length in bytes.
+     @param[out] result The result string.
+     @return A pointer to the same string as the argument, or nullptr in case of
+    failure.
+   */
+  String *AssignResult(const char *str, size_t length, String *result);
 
   /**
     Used for all the actual regular expression matching, search-and-replace,
@@ -192,24 +180,12 @@ class Regexp_facade {
   unique_ptr_destroy_only<Regexp_engine> m_engine;
 
   /**
-    ICU does not copy the subject string, so we keep the buffer here. It is
-    overwritten in reset(). It is treated as a UChar buffer inside ICU, and is
-    expected to be aligned as such. So we construct this class with
-    regexp_lib_charset.
+    ICU does not copy the subject string, so we keep the subject buffer
+    here. A call to Reset() causes it to be overwritten.
 
     @see Regexp_engine::reset()
   */
-  String m_current_subject;
-
-  /**
-    `NULL` handling. In case the reset() function is called with a `NULL`
-    value, or some expression that evaluates to it, all matching functions
-    will return `NULL`. This avoids having to handle the case in all the
-    val_xxx() function in the Item_func_regexp subclasses.
-  */
-  bool m_is_reset_with_null_string;
-
-  Item *m_pattern{nullptr};
+  std::u16string m_current_subject;
 };
 
 }  // namespace regexp

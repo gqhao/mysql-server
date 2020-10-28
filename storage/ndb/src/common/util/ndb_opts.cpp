@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2008, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2008, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -149,22 +149,6 @@ bool ndb_is_load_default_arg_separator(const char* arg)
   return FALSE;
 }
 
-extern "C"
-int
-ndb_load_defaults(const char* conf_file, const char** groups,
-                  int *argc, char*** argv, MEM_ROOT *mem_root)
-{
-  return my_load_defaults(conf_file ? conf_file : MYSQL_CONFIG_NAME,
-                          groups, argc, argv, mem_root, NULL);
-}
-
-extern "C"
-void
-ndb_free_defaults(MEM_ROOT *mem_root)
-{
-  free_root(mem_root, MYF(0));
-}
-
 static Ndb_opts * registeredNdbOpts;
 
 static void ndb_opts_usage()
@@ -194,35 +178,35 @@ Ndb_opts::Ndb_opts(int & argc_ref, char** & argv_ref,
   main_argv_ptr(& argv_ref),
   mycnf_default_groups(default_groups ? default_groups : load_default_groups),
   options(long_options),
-  short_usage_fn(g_ndb_opt_short_usage)
+  short_usage_fn(g_ndb_opt_short_usage),
+  long_usage_extra_fn(empty_long_usage_extra_func)
 {
-  NDB_INIT(argv_ref[0]);   // ndb_init() can safely be called more than once
-  ndb_load_defaults(NULL, mycnf_default_groups, main_argc_ptr, main_argv_ptr, &opts_mem_root);
+  my_load_defaults(MYSQL_CONFIG_NAME,  mycnf_default_groups,
+                   main_argc_ptr, main_argv_ptr,  &opts_mem_root, NULL);
   Ndb_opts::registerUsage(this);
-};
+}
 
 Ndb_opts::~Ndb_opts()
 {
   Ndb_opts::release();
-  ndb_end(0);  // ndb_end() can safely be called more than once
 }
 
 int Ndb_opts::handle_options(bool (*get_opt_fn)
                              (int, const struct my_option *, char *)) const
 {
   return ::handle_options(main_argc_ptr, main_argv_ptr, options, get_opt_fn);
-};
+}
 
 void Ndb_opts::set_usage_funcs(void (*short_fn)(void),
                                void (*long_fn)(void))
 {
   short_usage_fn = short_fn;
-  long_usage_extra_fn = long_fn ? long_fn : empty_long_usage_extra_func;
-};
+  if(long_fn) long_usage_extra_fn = long_fn;
+}
 
 void Ndb_opts::usage() const
 {
   long_usage_extra_fn();
   ndb_usage(short_usage_fn, mycnf_default_groups, options);
-};
+}
 

@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2010, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2010, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -43,12 +43,12 @@ class trp_client : TransporterSendBufferHandle
   friend class ReceiveThreadClient;
 public:
   trp_client();
-  virtual ~trp_client();
+  ~trp_client() override;
 
   virtual void trp_deliver_signal(const NdbApiSignal *,
                                   const LinearSectionPtr ptr[3]) = 0;
   virtual void trp_wakeup()
-    {};
+    {}
 
   Uint32 open(class TransporterFacade*, int blockNo = -1);
   void close();
@@ -79,7 +79,7 @@ public:
   const trp_node & getNodeInfo(Uint32 i) const;
 
   virtual void recordWaitTimeNanos(Uint64 nanos)
-    {};
+    {}
 
   void lock();
   void unlock();
@@ -115,12 +115,19 @@ private:
   /**
    * TransporterSendBufferHandle interface
    */
-  virtual bool isSendEnabled(NodeId node) const;
-  virtual Uint32 *getWritePtr(NodeId node, Uint32 lenBytes, Uint32 prio,
-                              Uint32 max_use);
-  virtual Uint32 updateWritePtr(NodeId node, Uint32 lenBytes, Uint32 prio);
-  virtual void getSendBufferLevel(NodeId node, SB_LevelType &level);
-  virtual bool forceSend(NodeId node);
+  bool isSendEnabled(NodeId node) const override;
+  Uint32 *getWritePtr(NodeId nodeId,
+                      TrpId trp_id,
+                      Uint32 lenBytes,
+                      Uint32 prio,
+                      Uint32 max_use,
+                      SendStatus *error) override;
+  Uint32 updateWritePtr(NodeId nodeId,
+                        TrpId trp_id,
+                        Uint32 lenBytes,
+                        Uint32 prio) override;
+  void getSendBufferLevel(NodeId node, SB_LevelType &level) override;
+  bool forceSend(NodeId nodeId, TrpId trp_id) override;
 
 private:
   Uint32 m_blockNo;
@@ -133,7 +140,12 @@ private:
    *   'm_locked_for_poll' also implies 'm_mutex' is locked
    */
   bool m_locked_for_poll;
+  bool m_is_receiver_thread;
 public:
+  bool is_receiver_thread()
+  {
+    return m_is_receiver_thread;
+  }
   NdbMutex* m_mutex; // thread local mutex...
   void set_locked_for_poll(bool val)
   {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,35 +22,43 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-#ifndef _XPL_CLIENT_H_
-#define _XPL_CLIENT_H_
+#ifndef PLUGIN_X_SRC_XPL_CLIENT_H_
+#define PLUGIN_X_SRC_XPL_CLIENT_H_
+
+#include <memory>
+#include <string>
 
 #include "plugin/x/ngs/include/ngs/client.h"
-#include "plugin/x/ngs/include/ngs/interface/protocol_monitor_interface.h"
-#include "plugin/x/ngs/include/ngs/interface/vio_interface.h"
-#include "plugin/x/src/global_timeouts.h"
-
-struct SHOW_VAR;
+#include "plugin/x/src/interface/protocol_monitor.h"
+#include "plugin/x/src/interface/session.h"
+#include "plugin/x/src/interface/vio.h"
 
 namespace xpl {
 class Session;
 
 class Client;
 
-class Protocol_monitor : public ngs::Protocol_monitor_interface {
+class Protocol_monitor : public iface::Protocol_monitor {
  public:
-  Protocol_monitor() : m_client(0) {}
+  Protocol_monitor() : m_client(nullptr) {}
   void init(Client *client);
 
   void on_notice_warning_send() override;
   void on_notice_other_send() override;
+  void on_notice_global_send() override;
   void on_error_send() override;
   void on_fatal_error_send() override;
   void on_init_error_send() override;
   void on_row_send() override;
-  void on_send(long bytes_transferred) override;
-  void on_receive(long bytes_transferred) override;
+  void on_send(const uint32_t bytes_transferred) override;
+  void on_send_compressed(const uint32_t bytes_transferred) override;
+  void on_send_before_compression(const uint32_t bytes_transferred) override;
+  void on_receive(const uint32_t bytes_transferred) override;
   void on_error_unknown_msg_type() override;
+  void on_receive_compressed(const uint32_t bytes_transferred) override;
+  void on_receive_after_decompression(
+      const uint32_t bytes_transferred) override;
+  void on_messages_sent(const uint32_t messages) override;
 
  private:
   Client *m_client;
@@ -58,40 +66,31 @@ class Protocol_monitor : public ngs::Protocol_monitor_interface {
 
 class Client : public ngs::Client {
  public:
-  Client(std::shared_ptr<ngs::Vio_interface> connection,
-         ngs::Server_interface &server, Client_id client_id,
-         Protocol_monitor *pmon, const Global_timeouts &timeouts);
-  virtual ~Client();
-
- public:  // impl ngs::Client_interface
-  void on_session_close(ngs::Session_interface &s) override;
-  void on_session_reset(ngs::Session_interface &s) override;
-
-  void on_server_shutdown() override;
-  void on_auth_timeout() override;
+  Client(std::shared_ptr<iface::Vio> connection, iface::Server &server,
+         Client_id client_id, Protocol_monitor *pmon);
+  ~Client() override;
 
  public:  // impl ngs::Client
-  void on_network_error(int error) override;
   std::string resolve_hostname() override;
-  ngs::Capabilities_configurator *capabilities_configurator() override;
+  Capabilities_configurator *capabilities_configurator() override;
 
   void set_is_interactive(const bool flag) override;
 
  public:
-  bool is_handler_thd(THD *thd);
+  bool is_handler_thd(const THD *thd) const override;
 
-  void get_status_ssl_cipher_list(SHOW_VAR *var);
+  std::string get_status_ssl_cipher_list() const;
+  std::string get_status_compression_algorithm() const;
+  std::string get_status_compression_level() const;
 
-  void kill();
+  void kill() override;
 
  private:
   bool is_localhost(const char *hostname);
-
-  Protocol_monitor *m_protocol_monitor;
 };
 
-typedef ngs::shared_ptr<Client> Client_ptr;
+typedef std::shared_ptr<Client> Client_ptr;
 
 }  // namespace xpl
 
-#endif  // _XPL_CLIENT_H_
+#endif  // PLUGIN_X_SRC_XPL_CLIENT_H_

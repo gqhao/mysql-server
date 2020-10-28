@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -37,21 +37,24 @@ namespace gcs_member_info_unittest {
 
 class ClusterMemberInfoTest : public ::testing::Test {
  protected:
-  ClusterMemberInfoTest(){};
+  ClusterMemberInfoTest() {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     string hostname("pc_hostname");
     string uuid("781f947c-db4a-11e3-98d1-f01faf1a1c44");
     uint port = 4444;
     uint plugin_version = 0x000400;
     uint write_set_algorithm = 1;
     string executed_gtid("aaaa:1-10");
+    string purged_gtid("pppp:1-9");
     uint lower_case_table_names = 0;
+    bool default_table_encryption = false;
     string retrieved_gtid("bbbb:1-10");
     ulonglong gtid_assignment_block_size = 9223372036854775807ULL;
     bool in_primary_mode = false;
     bool has_enforces_update_everywhere_checks = false;
     uint member_weight = 70;
+    std::string member_recovery_endpoints = "DEFAULT";
 
     gcs_member_id = new Gcs_member_identifier("stuff");
 
@@ -60,16 +63,16 @@ class ClusterMemberInfoTest : public ::testing::Test {
 
     Member_version local_member_plugin_version(plugin_version);
     local_node = new Group_member_info(
-        (char *)hostname.c_str(), port, (char *)uuid.c_str(),
-        write_set_algorithm, gcs_member_id->get_member_id(), status,
-        local_member_plugin_version, gtid_assignment_block_size,
-        Group_member_info::MEMBER_ROLE_PRIMARY, in_primary_mode,
-        has_enforces_update_everywhere_checks, member_weight,
-        lower_case_table_names);
-    local_node->update_gtid_sets(executed_gtid, retrieved_gtid);
+        hostname.c_str(), port, uuid.c_str(), write_set_algorithm,
+        gcs_member_id->get_member_id(), status, local_member_plugin_version,
+        gtid_assignment_block_size, Group_member_info::MEMBER_ROLE_PRIMARY,
+        in_primary_mode, has_enforces_update_everywhere_checks, member_weight,
+        lower_case_table_names, default_table_encryption,
+        member_recovery_endpoints.c_str(), PSI_NOT_INSTRUMENTED);
+    local_node->update_gtid_sets(executed_gtid, purged_gtid, retrieved_gtid);
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     delete gcs_member_id;
     delete local_node;
   }
@@ -82,7 +85,8 @@ TEST_F(ClusterMemberInfoTest, EncodeDecodeIdempotencyTest) {
   vector<uchar> *encoded = new vector<uchar>();
   local_node->encode(encoded);
 
-  Group_member_info decoded_local_node(&encoded->front(), encoded->size());
+  Group_member_info decoded_local_node(&encoded->front(), encoded->size(),
+                                       PSI_NOT_INSTRUMENTED);
 
   ASSERT_EQ(local_node->get_port(), decoded_local_node.get_port());
   ASSERT_EQ(local_node->get_hostname(), decoded_local_node.get_hostname());
@@ -97,6 +101,8 @@ TEST_F(ClusterMemberInfoTest, EncodeDecodeIdempotencyTest) {
             decoded_local_node.get_member_version().get_version());
   ASSERT_EQ(local_node->get_gtid_executed(),
             decoded_local_node.get_gtid_executed());
+  ASSERT_EQ(local_node->get_gtid_purged(),
+            decoded_local_node.get_gtid_purged());
   ASSERT_EQ(local_node->get_gtid_retrieved(),
             decoded_local_node.get_gtid_retrieved());
   ASSERT_EQ(local_node->get_gtid_assignment_block_size(),
@@ -110,37 +116,40 @@ TEST_F(ClusterMemberInfoTest, EncodeDecodeIdempotencyTest) {
 
 class ClusterMemberInfoManagerTest : public ::testing::Test {
  protected:
-  ClusterMemberInfoManagerTest(){};
+  ClusterMemberInfoManagerTest() {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     string hostname("pc_hostname");
     string uuid("8d7r947c-dr4a-17i3-59d1-f01faf1kkc44");
     uint port = 4444;
     uint write_set_algorithm = 1;
     uint lower_case_table_names = 0;
+    bool default_table_encryption = false;
     uint plugin_version = 0x000400;
     gcs_member_id = new Gcs_member_identifier("stuff");
     ulonglong gtid_assignment_block_size = 9223372036854775807ULL;
     bool in_primary_mode = false;
     bool has_enforces_update_everywhere_checks = false;
     uint member_weight = 80;
+    std::string member_recovery_endpoints = "DEFAULT";
 
     Group_member_info::Group_member_status status =
         Group_member_info::MEMBER_OFFLINE;
 
     Member_version local_member_plugin_version(plugin_version);
     local_node = new Group_member_info(
-        (char *)hostname.c_str(), port, (char *)uuid.c_str(),
-        write_set_algorithm, gcs_member_id->get_member_id(), status,
-        local_member_plugin_version, gtid_assignment_block_size,
-        Group_member_info::MEMBER_ROLE_SECONDARY, in_primary_mode,
-        has_enforces_update_everywhere_checks, member_weight,
-        lower_case_table_names);
+        hostname.c_str(), port, uuid.c_str(), write_set_algorithm,
+        gcs_member_id->get_member_id(), status, local_member_plugin_version,
+        gtid_assignment_block_size, Group_member_info::MEMBER_ROLE_SECONDARY,
+        in_primary_mode, has_enforces_update_everywhere_checks, member_weight,
+        lower_case_table_names, default_table_encryption,
+        member_recovery_endpoints.c_str(), PSI_NOT_INSTRUMENTED);
 
-    cluster_member_mgr = new Group_member_info_manager(local_node);
+    cluster_member_mgr =
+        new Group_member_info_manager(local_node, PSI_NOT_INSTRUMENTED);
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     delete cluster_member_mgr;
     delete gcs_member_id;
     delete local_node;
@@ -158,26 +167,30 @@ TEST_F(ClusterMemberInfoManagerTest, GetLocalInfoByUUIDTest) {
   uint port = 4444;
   uint write_set_algorithm = 1;
   uint lower_case_table_names = 0;
+  bool default_table_encryption = false;
   uint plugin_version = 0x000400;
   Gcs_member_identifier gcs_member_id("another_stuff");
   string executed_gtid("aaaa:1-11");
+  string purged_gtid("pppp:1-8");
   string retrieved_gtid("bbbb:1-11");
   ulonglong gtid_assignment_block_size = 9223372036854775807ULL;
   bool in_primary_mode = false;
   bool has_enforces_update_everywhere_checks = false;
   uint member_weight = 90;
+  std::string member_recovery_endpoints = "DEFAULT";
 
   Group_member_info::Group_member_status status =
       Group_member_info::MEMBER_OFFLINE;
 
   Member_version local_member_plugin_version(plugin_version);
   Group_member_info *new_member = new Group_member_info(
-      (char *)hostname.c_str(), port, (char *)uuid.c_str(), write_set_algorithm,
+      hostname.c_str(), port, uuid.c_str(), write_set_algorithm,
       gcs_member_id.get_member_id(), status, local_member_plugin_version,
       gtid_assignment_block_size, Group_member_info::MEMBER_ROLE_PRIMARY,
       in_primary_mode, has_enforces_update_everywhere_checks, member_weight,
-      lower_case_table_names);
-  new_member->update_gtid_sets(executed_gtid, retrieved_gtid);
+      lower_case_table_names, default_table_encryption,
+      member_recovery_endpoints.c_str(), PSI_NOT_INSTRUMENTED);
+  new_member->update_gtid_sets(executed_gtid, purged_gtid, retrieved_gtid);
 
   cluster_member_mgr->add(new_member);
 
@@ -186,7 +199,7 @@ TEST_F(ClusterMemberInfoManagerTest, GetLocalInfoByUUIDTest) {
   Group_member_info *retrieved_local_info =
       cluster_member_mgr->get_group_member_info(uuid_to_get);
 
-  ASSERT_TRUE(retrieved_local_info != NULL);
+  ASSERT_TRUE(retrieved_local_info != nullptr);
   ASSERT_EQ(retrieved_local_info->get_uuid(), uuid_to_get);
 
   delete retrieved_local_info;
@@ -203,12 +216,14 @@ TEST_F(ClusterMemberInfoManagerTest, UpdateStatusOfLocalObjectTest) {
 
 TEST_F(ClusterMemberInfoManagerTest, UpdateGtidSetsOfLocalObjectTest) {
   string executed_gtid("aaaa:1-10");
+  string purged_gtid("pppp:1-7");
   string retrieved_gtid("bbbb:1-10");
 
   cluster_member_mgr->update_gtid_sets(local_node->get_uuid(), executed_gtid,
-                                       retrieved_gtid);
+                                       purged_gtid, retrieved_gtid);
 
   ASSERT_EQ(executed_gtid, local_node->get_gtid_executed());
+  ASSERT_EQ(purged_gtid, local_node->get_gtid_purged());
   ASSERT_EQ(retrieved_gtid, local_node->get_gtid_retrieved());
 }
 
@@ -229,7 +244,7 @@ TEST_F(ClusterMemberInfoManagerTest, GetLocalInfoByUUIDAfterEncodingTest) {
   Group_member_info *retrieved_local_info =
       cluster_member_mgr->get_group_member_info(uuid_to_get);
 
-  ASSERT_TRUE(retrieved_local_info != NULL);
+  ASSERT_TRUE(retrieved_local_info != nullptr);
 
   ASSERT_EQ(local_node->get_port(), retrieved_local_info->get_port());
   ASSERT_EQ(local_node->get_hostname(), retrieved_local_info->get_hostname());
@@ -242,6 +257,8 @@ TEST_F(ClusterMemberInfoManagerTest, GetLocalInfoByUUIDAfterEncodingTest) {
             retrieved_local_info->get_write_set_extraction_algorithm());
   ASSERT_EQ(local_node->get_gtid_executed(),
             retrieved_local_info->get_gtid_executed());
+  ASSERT_EQ(local_node->get_gtid_purged(),
+            retrieved_local_info->get_gtid_purged());
   ASSERT_EQ(local_node->get_gtid_retrieved(),
             retrieved_local_info->get_gtid_retrieved());
   ASSERT_EQ(local_node->get_gtid_assignment_block_size(),
@@ -274,10 +291,11 @@ TEST_F(ClusterMemberInfoManagerTest,
             local_node->get_recovery_status());
 
   string executed_gtid("cccc:1-11");
+  string purged_gtid("pppp:1-11");
   string retrieved_gtid("dddd:1-11");
 
   cluster_member_mgr->update_gtid_sets(local_node->get_uuid(), executed_gtid,
-                                       retrieved_gtid);
+                                       purged_gtid, retrieved_gtid);
 
   ASSERT_EQ(executed_gtid, local_node->get_gtid_executed());
   ASSERT_EQ(retrieved_gtid, local_node->get_gtid_retrieved());
@@ -301,27 +319,31 @@ TEST_F(ClusterMemberInfoManagerTest, EncodeDecodeLargeSets) {
   uint port = 4444;
   uint write_set_algorithm = 1;
   uint lower_case_table_names = 0;
+  bool default_table_encryption = false;
   uint plugin_version = 0x000400;
   Gcs_member_identifier gcs_member_id("another_stuff");
   string executed_gtid("aaaa:1-11:12-14:16-20:22-30");
+  string purged_gtid("pppp:1-11:12-14:17-20:26-39:50-78");
   // Add an huge gtid string (bigger then 16 bits )
   string retrieved_gtid(70000, 'a');
   ulonglong gtid_assignment_block_size = 9223372036854775807ULL;
   bool in_primary_mode = false;
   bool has_enforces_update_everywhere_checks = false;
   uint member_weight = 40;
+  std::string member_recovery_endpoints = "DEFAULT";
 
   Group_member_info::Group_member_status status =
       Group_member_info::MEMBER_OFFLINE;
 
   Member_version local_member_plugin_version(plugin_version);
   Group_member_info *new_member = new Group_member_info(
-      (char *)hostname.c_str(), port, (char *)uuid.c_str(), write_set_algorithm,
+      hostname.c_str(), port, uuid.c_str(), write_set_algorithm,
       gcs_member_id.get_member_id(), status, local_member_plugin_version,
       gtid_assignment_block_size, Group_member_info::MEMBER_ROLE_PRIMARY,
       in_primary_mode, has_enforces_update_everywhere_checks, member_weight,
-      lower_case_table_names);
-  new_member->update_gtid_sets(executed_gtid, retrieved_gtid);
+      lower_case_table_names, default_table_encryption,
+      member_recovery_endpoints.c_str(), PSI_NOT_INSTRUMENTED);
+  new_member->update_gtid_sets(executed_gtid, purged_gtid, retrieved_gtid);
 
   cluster_member_mgr->add(new_member);
 
@@ -330,7 +352,7 @@ TEST_F(ClusterMemberInfoManagerTest, EncodeDecodeLargeSets) {
   Group_member_info *retrieved_local_info =
       cluster_member_mgr->get_group_member_info(uuid_to_get);
 
-  ASSERT_TRUE(retrieved_local_info != NULL);
+  ASSERT_TRUE(retrieved_local_info != nullptr);
   ASSERT_EQ(retrieved_local_info->get_uuid(), uuid_to_get);
 
   vector<uchar> *encoded = new vector<uchar>();
@@ -349,7 +371,7 @@ TEST_F(ClusterMemberInfoManagerTest, EncodeDecodeLargeSets) {
   delete retrieved_local_info;
   retrieved_local_info = cluster_member_mgr->get_group_member_info(uuid);
 
-  ASSERT_TRUE(retrieved_local_info != NULL);
+  ASSERT_TRUE(retrieved_local_info != nullptr);
 
   ASSERT_EQ(port, retrieved_local_info->get_port());
   ASSERT_EQ(hostname, retrieved_local_info->get_hostname());
@@ -361,7 +383,7 @@ TEST_F(ClusterMemberInfoManagerTest, EncodeDecodeLargeSets) {
   delete retrieved_local_info;
   retrieved_local_info = cluster_member_mgr->get_group_member_info(uuid_to_get);
 
-  ASSERT_TRUE(retrieved_local_info != NULL);
+  ASSERT_TRUE(retrieved_local_info != nullptr);
 
   ASSERT_EQ(local_node->get_port(), retrieved_local_info->get_port());
   ASSERT_EQ(local_node->get_hostname(), retrieved_local_info->get_hostname());
@@ -374,6 +396,8 @@ TEST_F(ClusterMemberInfoManagerTest, EncodeDecodeLargeSets) {
             retrieved_local_info->get_write_set_extraction_algorithm());
   ASSERT_EQ(local_node->get_gtid_executed(),
             retrieved_local_info->get_gtid_executed());
+  ASSERT_EQ(local_node->get_gtid_purged(),
+            retrieved_local_info->get_gtid_purged());
   ASSERT_EQ(local_node->get_gtid_retrieved(),
             retrieved_local_info->get_gtid_retrieved());
   ASSERT_EQ(local_node->get_gtid_assignment_block_size(),
@@ -383,6 +407,8 @@ TEST_F(ClusterMemberInfoManagerTest, EncodeDecodeLargeSets) {
             retrieved_local_info->get_member_weight());
   ASSERT_EQ(local_node->get_lower_case_table_names(),
             retrieved_local_info->get_lower_case_table_names());
+  ASSERT_EQ(local_node->get_default_table_encryption(),
+            retrieved_local_info->get_default_table_encryption());
 
   delete retrieved_local_info;
 }

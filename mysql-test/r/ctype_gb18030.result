@@ -72,7 +72,7 @@ select 1 from t1 order by cast(a as char(1));
 drop table t1;
 set names utf8;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 create table t1 (
 name varchar(10),
 level smallint unsigned);
@@ -80,7 +80,7 @@ show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
   `name` varchar(10) DEFAULT NULL,
-  `level` smallint(5) unsigned DEFAULT NULL
+  `level` smallint unsigned DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=gb18030
 insert into t1 values ('string',1);
 select concat(name,space(level)), concat(name, repeat(' ',level)) from t1;
@@ -95,7 +95,7 @@ SET character_set_client= @safe_character_set_client;
 SET character_set_results= @safe_character_set_results;
 SET NAMES utf8;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 SET collation_connection='gb18030_chinese_ci';
 create table t1 select repeat('a',4000) a;
 delete from t1;
@@ -319,7 +319,7 @@ SELECT HEX(CONVERT(_gb18030 0xA14041 USING utf8));
 HEX(CONVERT(_gb18030 0xA14041 USING utf8))
 EE938641
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 SELECT HEX(CONVERT(_gb18030 0xFEFEFEFD814040 USING utf32));
 HEX(CONVERT(_gb18030 0xFEFEFEFD814040 USING utf32))
 0000E4C50000E4C400004E0200000040
@@ -1079,22 +1079,16 @@ inet6_aton(inet_ntoa('1'))
 SELECT inet6_ntoa(inet_ntoa('1'));
 inet6_ntoa(inet_ntoa('1'))
 NULL
-Warnings:
-Warning	1411	Incorrect string value: 'inet_ntoa('1')' for function inet6_ntoa
 #
 # Bug#14040277 UNINITIALIZED VALUE REFERENCED IN STR_TO_IPV6
 #
 SELECT inet6_aton(soundex('a'));
 inet6_aton(soundex('a'))
 NULL
-Warnings:
-Warning	1411	Incorrect string value: 'soundex('a')' for function inet6_aton
 #
 # Bug#19047425 UNINITIALISED VALUE IN STR_TO_IPV6
 #
 do is_ipv4_mapped(inet6_aton(convert(_ascii "a:" using utf8mb4)));
-Warnings:
-Warning	1411	Incorrect string value: 'convert(_ascii'a:' using utf8mb4)' for function inet6_aton
 #
 # Test for gb18030_unicode_520_ci collation.
 #

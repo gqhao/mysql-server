@@ -112,6 +112,18 @@ let $script=
 ||
 --let $pre_script= my DOLLARmysqltest_vardir = DOLLARENV{'MYSQLTEST_VARDIR'};
 
+if (!$keep_transaction_payload_events)
+{
+  --let $script= $script DOLLAR_ = '' if (m{\t(?:Transaction_payload)\t});
+}
+if ($keep_transaction_payload_events)
+{
+  let $pre_script= $pre_script
+    my DOLLARdec_size_regex = '(decompressed_size=[0-9]+ bytes)';
+  ||
+  --let $script= $script s{DOLLARdec_size_regex}{decompressed_size=## bytes};
+}
+
 if (!$keep_view_change_events)
 {
   --let $script= $script DOLLAR_ = '' if (m{\t(?:View_change)\t});
@@ -146,7 +158,14 @@ if ($mask_user_password_events)
 {
  --let $script= $script s{'caching_sha2_password' AS '(.*)'}{'caching_sha2_password' AS '<non-deterministic-password-hash>'}g;
  --let $script= $script s{SET PASSWORD FOR .*}{SET PASSWORD FOR '<some_user>'='<non-deterministic-password-hash>'};
- }
+}
+# Skip 'AS <..> WITH <..>' clause in the GRANT statement in case the
+# partial revokes is ON 
+if ($mask_grant_as_events)
+{
+ --let $script= $script s{ AS .* WITH ROLE .*}{};
+}
+
 if (!$keep_ddl_xid)
 {
   --let $script= $script s{ /\* XID # \*/}{};

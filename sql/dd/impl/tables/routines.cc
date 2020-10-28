@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -40,6 +40,14 @@ const Routines &Routines::instance() {
   return *s_instance;
 }
 
+///////////////////////////////////////////////////////////////////////////
+
+const CHARSET_INFO *Routines::name_collation() {
+  return &my_charset_utf8_general_ci;
+}
+
+///////////////////////////////////////////////////////////////////////////
+
 Routines::Routines() {
   m_target_def.set_table_name("routines");
 
@@ -48,7 +56,8 @@ Routines::Routines() {
   m_target_def.add_field(FIELD_SCHEMA_ID, "FIELD_SCHEMA_ID",
                          "schema_id BIGINT UNSIGNED NOT NULL");
   m_target_def.add_field(FIELD_NAME, "FIELD_NAME",
-                         "name VARCHAR(64) NOT NULL COLLATE utf8_general_ci");
+                         "name VARCHAR(64) NOT NULL COLLATE " +
+                             String_type(name_collation()->name));
   m_target_def.add_field(FIELD_TYPE, "FIELD_TYPE",
                          "type ENUM('FUNCTION', 'PROCEDURE') NOT NULL");
   m_target_def.add_field(FIELD_RESULT_DATA_TYPE, "FIELD_RESULT_DATA_TYPE",
@@ -107,42 +116,8 @@ Routines::Routines() {
       FIELD_SECURITY_TYPE, "FIELD_SECURITY_TYPE",
       "security_type ENUM('DEFAULT', 'INVOKER', 'DEFINER') NOT NULL");
   m_target_def.add_field(FIELD_DEFINER, "FIELD_DEFINER",
-                         "definer VARCHAR(93) NOT NULL");
-  m_target_def.add_field(FIELD_SQL_MODE, "FIELD_SQL_MODE",
-                         "sql_mode SET( \n"
-                         "'REAL_AS_FLOAT',\n"
-                         "'PIPES_AS_CONCAT',\n"
-                         "'ANSI_QUOTES',\n"
-                         "'IGNORE_SPACE',\n"
-                         "'NOT_USED',\n"
-                         "'ONLY_FULL_GROUP_BY',\n"
-                         "'NO_UNSIGNED_SUBTRACTION',\n"
-                         "'NO_DIR_IN_CREATE',\n"
-                         "'NOT_USED_9',\n"
-                         "'NOT_USED_10',\n"
-                         "'NOT_USED_11',\n"
-                         "'NOT_USED_12',\n"
-                         "'NOT_USED_13',\n"
-                         "'NOT_USED_14',\n"
-                         "'NOT_USED_15',\n"
-                         "'NOT_USED_16',\n"
-                         "'NOT_USED_17',\n"
-                         "'NOT_USED_18',\n"
-                         "'ANSI',\n"
-                         "'NO_AUTO_VALUE_ON_ZERO',\n"
-                         "'NO_BACKSLASH_ESCAPES',\n"
-                         "'STRICT_TRANS_TABLES',\n"
-                         "'STRICT_ALL_TABLES',\n"
-                         "'NO_ZERO_IN_DATE',\n"
-                         "'NO_ZERO_DATE',\n"
-                         "'INVALID_DATES',\n"
-                         "'ERROR_FOR_DIVISION_BY_ZERO',\n"
-                         "'TRADITIONAL',\n"
-                         "'NOT_USED_29',\n"
-                         "'HIGH_NOT_PRECEDENCE',\n"
-                         "'NO_ENGINE_SUBSTITUTION',\n"
-                         "'PAD_CHAR_TO_FULL_LENGTH',\n"
-                         "'TIME_TRUNCATE_FRACTIONAL') NOT NULL");
+                         "definer VARCHAR(288) NOT NULL");
+  m_target_def.add_sql_mode_field(FIELD_SQL_MODE, "FIELD_SQL_MODE");
   m_target_def.add_field(FIELD_CLIENT_COLLATION_ID, "FIELD_CLIENT_COLLATION_ID",
                          "client_collation_id BIGINT UNSIGNED NOT NULL");
   m_target_def.add_field(FIELD_CONNECTION_COLLATION_ID,
@@ -151,10 +126,9 @@ Routines::Routines() {
   m_target_def.add_field(FIELD_SCHEMA_COLLATION_ID, "FIELD_SCHEMA_COLLATION_ID",
                          "schema_collation_id BIGINT UNSIGNED NOT NULL");
   m_target_def.add_field(FIELD_CREATED, "FIELD_CREATED",
-                         "created TIMESTAMP NOT NULL DEFAULT "
-                         "CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+                         "created TIMESTAMP NOT NULL");
   m_target_def.add_field(FIELD_LAST_ALTERED, "FIELD_LAST_ALTERED",
-                         "last_altered TIMESTAMP NOT NULL DEFAULT NOW()");
+                         "last_altered TIMESTAMP NOT NULL");
   m_target_def.add_field(FIELD_COMMENT, "FIELD_COMMENT",
                          "comment TEXT NOT NULL");
   m_target_def.add_field(FIELD_OPTIONS, "FIELD_OPTIONS", "options MEDIUMTEXT");
@@ -178,6 +152,7 @@ Routines::Routines() {
   m_target_def.add_index(INDEX_K_SCHEMA_COLLATION_ID,
                          "INDEX_K_SCHEMA_COLLATION_ID",
                          "KEY(schema_collation_id)");
+  m_target_def.add_index(INDEX_K_DEFINER, "INDEX_K_DEFINER", "KEY(definer)");
 
   m_target_def.add_foreign_key(FK_SCHEMA_ID, "FK_SCHEMA_ID",
                                "FOREIGN KEY (schema_id) "
@@ -215,7 +190,8 @@ bool Routines::update_object_key(Routine_name_key *key, Object_id schema_id,
                                  Routine::enum_routine_type type,
                                  const String_type &routine_name) {
   key->update(INDEX_UK_SCHEMA_ID_TYPE_NAME, FIELD_SCHEMA_ID, schema_id,
-              FIELD_TYPE, type, FIELD_NAME, routine_name.c_str());
+              FIELD_TYPE, type, FIELD_NAME, routine_name.c_str(),
+              name_collation());
   return false;
 }
 
@@ -224,6 +200,13 @@ bool Routines::update_object_key(Routine_name_key *key, Object_id schema_id,
 Object_key *Routines::create_key_by_schema_id(Object_id schema_id) {
   return new (std::nothrow) Parent_id_range_key(INDEX_UK_SCHEMA_ID_TYPE_NAME,
                                                 FIELD_SCHEMA_ID, schema_id);
+}
+
+///////////////////////////////////////////////////////////////////////////
+
+Object_key *Routines::create_key_by_definer(const String_type &definer) {
+  return new (std::nothrow)
+      Definer_reference_range_key(INDEX_K_DEFINER, FIELD_DEFINER, definer);
 }
 
 ///////////////////////////////////////////////////////////////////////////

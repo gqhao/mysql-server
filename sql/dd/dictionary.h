@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -25,10 +25,12 @@
 
 #include "my_compiler.h"
 #include "sql/dd/string_type.h"  // dd::String_type
+#include "sql/dd/types/tablespace.h"
 
 class THD;
 class MDL_ticket;
 class Plugin_table;
+// class Tablespace;
 
 namespace dd {
 
@@ -37,6 +39,7 @@ namespace dd {
 class Collation;
 class Object_table;
 class Schema;
+class Tablespace;
 
 namespace cache {
 class Dictionary_client;
@@ -230,6 +233,8 @@ bool has_exclusive_table_mdl(THD *thd, const char *schema_name,
                               else use acquire_lock() with
                               thd->variables.lock_wait_timeout timeout value.
   @param       ticket         ticket for request (optional out parameter)
+  @param       for_trx        true if MDL duration is MDL_TRANSACTION
+                              false if MDL duration is MDL_EXPLICIT
 
   @retval      true           Failure, e.g. a lock wait timeout.
   @retval      false          Successful lock acquisition.
@@ -237,7 +242,8 @@ bool has_exclusive_table_mdl(THD *thd, const char *schema_name,
 
 bool acquire_exclusive_tablespace_mdl(THD *thd, const char *tablespace_name,
                                       bool no_wait,
-                                      MDL_ticket **ticket = nullptr)
+                                      MDL_ticket **ticket = nullptr,
+                                      bool for_trx = true)
     MY_ATTRIBUTE((warn_unused_result));
 
 /**
@@ -249,12 +255,16 @@ bool acquire_exclusive_tablespace_mdl(THD *thd, const char *tablespace_name,
   @param       no_wait        Use try_acquire_lock() if no_wait is true,
                               else use acquire_lock() with
                               thd->variables.lock_wait_timeout timeout value.
+  @param       ticket         ticket for request (optional out parameter)
+  @param       for_trx        true if MDL duration is MDL_TRANSACTION
+                              false if MDL duration is MDL_EXPLICIT
 
   @retval      true           Failure, e.g. a lock wait timeout.
   @retval      false          Successful lock acquisition.
 */
 bool acquire_shared_tablespace_mdl(THD *thd, const char *tablespace_name,
-                                   bool no_wait)
+                                   bool no_wait, MDL_ticket **ticket = nullptr,
+                                   bool for_trx = true)
     MY_ATTRIBUTE((warn_unused_result));
 
 /**
@@ -389,6 +399,23 @@ bool drop_native_table(THD *thd, const char *schema_name,
 bool reset_tables_and_tablespaces();
 
 /**
+  Update a tablespace change, commit and release transactional MDL.
+
+  @param[in,out]  thd    Current thread context.
+  @param[in,out]  space  Tablespace to update and commit.
+  @param[in]      error  true for failure: Do rollback.
+                         false for success: Do commit.
+  @param[in]      release_mdl_on_commit_only release MDLs only on commit
+
+  @retval true    If error is true, or if failure in update or in commit.
+  @retval false   Otherwise.
+*/
+
+bool commit_or_rollback_tablespace_change(
+    THD *thd, dd::Tablespace *space, bool error,
+    bool release_mdl_on_commit_only = false);
+
+/**
   Get the Object_table instance storing the given entity object type.
 
   We can return this as a reference since all relevant types for which
@@ -412,6 +439,7 @@ const Object_table &get_dd_table();
   @param dst ticket for new name
 */
 void rename_tablespace_mdl_hook(THD *thd, MDL_ticket *src, MDL_ticket *dst);
+
 }  // namespace dd
 
 #endif  // DD__DICTIONARY_INCLUDED

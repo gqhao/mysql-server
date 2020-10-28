@@ -123,6 +123,8 @@ aa	b
 select char_length(left(@a:='тест',5)), length(@a), @a;
 char_length(left(@a:='тест',5))	length(@a)	@a
 4	8	тест
+Warnings:
+Warning	1287	Setting user variables within expressions is deprecated and will be removed in a future release. Consider alternatives: 'SET variable=expression, ...', or 'SELECT expression(s) INTO variables(s)'.
 create table t1 ENGINE InnoDB select date_format("2004-01-19 10:10:10", "%Y-%m-%d");
 show create table t1;
 Table	Create Table
@@ -368,9 +370,9 @@ create table t1 (c varchar(30) character set utf8mb4, unique(c(10))) engine Inno
 insert into t1 values ('1'),('2'),('3'),('x'),('y'),('z');
 insert into t1 values ('aaaaaaaaaa');
 insert into t1 values ('aaaaaaaaaaa');
-ERROR 23000: Duplicate entry 'aaaaaaaaaa' for key 'c'
+ERROR 23000: Duplicate entry 'aaaaaaaaaa' for key 't1.c'
 insert into t1 values ('aaaaaaaaaaaa');
-ERROR 23000: Duplicate entry 'aaaaaaaaaa' for key 'c'
+ERROR 23000: Duplicate entry 'aaaaaaaaaa' for key 't1.c'
 insert into t1 values (repeat('b',20));
 select c c1 from t1 where c='1';
 c1
@@ -401,9 +403,9 @@ create table t1 (c varchar(30) character set utf8mb4, unique(c(10))) engine=Inno
 insert into t1 values ('1'),('2'),('3'),('x'),('y'),('z');
 insert into t1 values ('aaaaaaaaaa');
 insert into t1 values ('aaaaaaaaaaa');
-ERROR 23000: Duplicate entry 'aaaaaaaaaa' for key 'c'
+ERROR 23000: Duplicate entry 'aaaaaaaaaa' for key 't1.c'
 insert into t1 values ('aaaaaaaaaaaa');
-ERROR 23000: Duplicate entry 'aaaaaaaaaa' for key 'c'
+ERROR 23000: Duplicate entry 'aaaaaaaaaa' for key 't1.c'
 insert into t1 values (repeat('b',20));
 select c c1 from t1 where c='1';
 c1
@@ -435,46 +437,46 @@ insert into t1 values ('1'),('2'),('3'),('4'),('x'),('y'),('z');
 insert into t1 values ('a');
 insert into t1 values ('aa');
 insert into t1 values ('aaa');
-ERROR 23000: Duplicate entry 'aa' for key 'c'
+ERROR 23000: Duplicate entry 'aa' for key 't1.c'
 insert into t1 values ('b');
 insert into t1 values ('bb');
 insert into t1 values ('bbb');
-ERROR 23000: Duplicate entry 'bb' for key 'c'
+ERROR 23000: Duplicate entry 'bb' for key 't1.c'
 insert into t1 values ('а');
 insert into t1 values ('аа');
 insert into t1 values ('ааа');
-ERROR 23000: Duplicate entry 'аа' for key 'c'
+ERROR 23000: Duplicate entry 'аа' for key 't1.c'
 insert into t1 values ('б');
 insert into t1 values ('бб');
 insert into t1 values ('ббб');
-ERROR 23000: Duplicate entry 'бб' for key 'c'
+ERROR 23000: Duplicate entry 'бб' for key 't1.c'
 insert into t1 values ('ꪪ');
 insert into t1 values ('ꪪꪪ');
 insert into t1 values ('ꪪꪪꪪ');
-ERROR 23000: Duplicate entry 'ꪪꪪ' for key 'c'
+ERROR 23000: Duplicate entry 'ꪪꪪ' for key 't1.c'
 drop table t1;
 create table t1 (c char(3) character set utf8mb4, unique (c(2))) engine=InnoDB;
 insert into t1 values ('1'),('2'),('3'),('4'),('x'),('y'),('z');
 insert into t1 values ('a');
 insert into t1 values ('aa');
 insert into t1 values ('aaa');
-ERROR 23000: Duplicate entry 'aa' for key 'c'
+ERROR 23000: Duplicate entry 'aa' for key 't1.c'
 insert into t1 values ('b');
 insert into t1 values ('bb');
 insert into t1 values ('bbb');
-ERROR 23000: Duplicate entry 'bb' for key 'c'
+ERROR 23000: Duplicate entry 'bb' for key 't1.c'
 insert into t1 values ('а');
 insert into t1 values ('аа');
 insert into t1 values ('ааа');
-ERROR 23000: Duplicate entry 'аа' for key 'c'
+ERROR 23000: Duplicate entry 'аа' for key 't1.c'
 insert into t1 values ('б');
 insert into t1 values ('бб');
 insert into t1 values ('ббб');
-ERROR 23000: Duplicate entry 'бб' for key 'c'
+ERROR 23000: Duplicate entry 'бб' for key 't1.c'
 insert into t1 values ('ꪪ');
 insert into t1 values ('ꪪꪪ');
 insert into t1 values ('ꪪꪪꪪ');
-ERROR 23000: Duplicate entry 'ꪪꪪ' for key 'c'
+ERROR 23000: Duplicate entry 'ꪪꪪ' for key 't1.c'
 drop table t1;
 create table t1 (
 c char(10) character set utf8mb4,
@@ -490,14 +492,14 @@ t1	CREATE TABLE `t1` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 insert into t1 values ('a'),('b'),('c'),('d'),('e'),('f');
 insert into t1 values ('aa');
-ERROR 23000: Duplicate entry 'a' for key 'a'
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
 insert into t1 values ('aaa');
-ERROR 23000: Duplicate entry 'a' for key 'a'
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
 insert into t1 values ('б');
 insert into t1 values ('бб');
-ERROR 23000: Duplicate entry 'б' for key 'a'
+ERROR 23000: Duplicate entry 'б' for key 't1.a'
 insert into t1 values ('ббб');
-ERROR 23000: Duplicate entry 'б' for key 'a'
+ERROR 23000: Duplicate entry 'б' for key 't1.a'
 select c as c_all from t1 order by c;
 c_all
 a
@@ -526,14 +528,14 @@ t1	CREATE TABLE `t1` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 insert into t1 values ('a'),('b'),('c'),('d'),('e'),('f');
 insert into t1 values ('aa');
-ERROR 23000: Duplicate entry 'a' for key 'a'
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
 insert into t1 values ('aaa');
-ERROR 23000: Duplicate entry 'a' for key 'a'
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
 insert into t1 values ('б');
 insert into t1 values ('бб');
-ERROR 23000: Duplicate entry 'б' for key 'a'
+ERROR 23000: Duplicate entry 'б' for key 't1.a'
 insert into t1 values ('ббб');
-ERROR 23000: Duplicate entry 'б' for key 'a'
+ERROR 23000: Duplicate entry 'б' for key 't1.a'
 select c as c_all from t1 order by c;
 c_all
 a
@@ -556,14 +558,14 @@ unique key a (c(1))
 ) engine=InnoDB;
 insert into t1 values ('a'),('b'),('c'),('d'),('e'),('f');
 insert into t1 values ('aa');
-ERROR 23000: Duplicate entry 'a' for key 'a'
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
 insert into t1 values ('aaa');
-ERROR 23000: Duplicate entry 'a' for key 'a'
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
 insert into t1 values ('б');
 insert into t1 values ('бб');
-ERROR 23000: Duplicate entry 'б' for key 'a'
+ERROR 23000: Duplicate entry 'б' for key 't1.a'
 insert into t1 values ('ббб');
-ERROR 23000: Duplicate entry 'б' for key 'a'
+ERROR 23000: Duplicate entry 'б' for key 't1.a'
 select c as c_all from t1 order by c;
 c_all
 a
@@ -584,9 +586,9 @@ create table t1 (c varchar(30) character set utf8mb4 collate utf8mb4_bin, unique
 insert into t1 values ('1'),('2'),('3'),('x'),('y'),('z');
 insert into t1 values ('aaaaaaaaaa');
 insert into t1 values ('aaaaaaaaaaa');
-ERROR 23000: Duplicate entry 'aaaaaaaaaa' for key 'c'
+ERROR 23000: Duplicate entry 'aaaaaaaaaa' for key 't1.c'
 insert into t1 values ('aaaaaaaaaaaa');
-ERROR 23000: Duplicate entry 'aaaaaaaaaa' for key 'c'
+ERROR 23000: Duplicate entry 'aaaaaaaaaa' for key 't1.c'
 insert into t1 values (repeat('b',20));
 select c c1 from t1 where c='1';
 c1
@@ -618,23 +620,23 @@ insert into t1 values ('1'),('2'),('3'),('4'),('x'),('y'),('z');
 insert into t1 values ('a');
 insert into t1 values ('aa');
 insert into t1 values ('aaa');
-ERROR 23000: Duplicate entry 'aa' for key 'c'
+ERROR 23000: Duplicate entry 'aa' for key 't1.c'
 insert into t1 values ('b');
 insert into t1 values ('bb');
 insert into t1 values ('bbb');
-ERROR 23000: Duplicate entry 'bb' for key 'c'
+ERROR 23000: Duplicate entry 'bb' for key 't1.c'
 insert into t1 values ('а');
 insert into t1 values ('аа');
 insert into t1 values ('ааа');
-ERROR 23000: Duplicate entry 'аа' for key 'c'
+ERROR 23000: Duplicate entry 'аа' for key 't1.c'
 insert into t1 values ('б');
 insert into t1 values ('бб');
 insert into t1 values ('ббб');
-ERROR 23000: Duplicate entry 'бб' for key 'c'
+ERROR 23000: Duplicate entry 'бб' for key 't1.c'
 insert into t1 values ('ꪪ');
 insert into t1 values ('ꪪꪪ');
 insert into t1 values ('ꪪꪪꪪ');
-ERROR 23000: Duplicate entry 'ꪪꪪ' for key 'c'
+ERROR 23000: Duplicate entry 'ꪪꪪ' for key 't1.c'
 drop table t1;
 create table t1 (
 c char(10) character set utf8mb4 collate utf8mb4_bin,
@@ -650,14 +652,14 @@ t1	CREATE TABLE `t1` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 insert into t1 values ('a'),('b'),('c'),('d'),('e'),('f');
 insert into t1 values ('aa');
-ERROR 23000: Duplicate entry 'a' for key 'a'
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
 insert into t1 values ('aaa');
-ERROR 23000: Duplicate entry 'a' for key 'a'
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
 insert into t1 values ('б');
 insert into t1 values ('бб');
-ERROR 23000: Duplicate entry 'б' for key 'a'
+ERROR 23000: Duplicate entry 'б' for key 't1.a'
 insert into t1 values ('ббб');
-ERROR 23000: Duplicate entry 'б' for key 'a'
+ERROR 23000: Duplicate entry 'б' for key 't1.a'
 select c as c_all from t1 order by c;
 c_all
 a
@@ -686,14 +688,14 @@ t1	CREATE TABLE `t1` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 insert into t1 values ('a'),('b'),('c'),('d'),('e'),('f');
 insert into t1 values ('aa');
-ERROR 23000: Duplicate entry 'a' for key 'a'
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
 insert into t1 values ('aaa');
-ERROR 23000: Duplicate entry 'a' for key 'a'
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
 insert into t1 values ('б');
 insert into t1 values ('бб');
-ERROR 23000: Duplicate entry 'б' for key 'a'
+ERROR 23000: Duplicate entry 'б' for key 't1.a'
 insert into t1 values ('ббб');
-ERROR 23000: Duplicate entry 'б' for key 'a'
+ERROR 23000: Duplicate entry 'б' for key 't1.a'
 select c as c_all from t1 order by c;
 c_all
 a
@@ -716,14 +718,14 @@ unique key a (c(1))
 ) engine=InnoDB;
 insert into t1 values ('a'),('b'),('c'),('d'),('e'),('f');
 insert into t1 values ('aa');
-ERROR 23000: Duplicate entry 'a' for key 'a'
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
 insert into t1 values ('aaa');
-ERROR 23000: Duplicate entry 'a' for key 'a'
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
 insert into t1 values ('б');
 insert into t1 values ('бб');
-ERROR 23000: Duplicate entry 'б' for key 'a'
+ERROR 23000: Duplicate entry 'б' for key 't1.a'
 insert into t1 values ('ббб');
-ERROR 23000: Duplicate entry 'б' for key 'a'
+ERROR 23000: Duplicate entry 'б' for key 't1.a'
 select c as c_all from t1 order by c;
 c_all
 a
@@ -793,6 +795,8 @@ str
 str
 drop table t1;
 CREATE TABLE t1 (a varchar(32) BINARY) CHARACTER SET utf8mb4 ENGINE InnoDB;
+Warnings:
+Warning	1287	'BINARY as attribute of a type' is deprecated and will be removed in a future release. Please use a CHARACTER SET clause with _bin collation instead
 INSERT INTO t1 VALUES ('test');
 SELECT a FROM t1 WHERE a LIKE '%te';
 a
@@ -1159,7 +1163,7 @@ ERROR 42000: Invalid default value for 'x'
 SET sql_mode = 'NO_ENGINE_SUBSTITUTION';
 SET NAMES UTF8;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 CREATE TABLE t1 (
 `id` int(20) NOT NULL auto_increment,
 `country` varchar(100) NOT NULL default '',
@@ -1178,6 +1182,9 @@ KEY `IX_mobile_originated_message_keyword` (`keyword`),
 KEY `IX_mobile_originated_message_created` (`created`),
 KEY `IX_mobile_originated_message_support` (`msisdn`,`momid`,`keyword`,`gateway_id`,`created`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 INSERT INTO t1 VALUES 
 (1,'blah','464','aaa','fkc1c9ilc20x0hgae7lx6j09','ERR','ERR Имри.Афимим.Аеимимримдмримрмрирор имримримримр имридм ирбднримрфмририримрфмфмим.Ад.Д имдимримрад.Адимримримрмдиримримримр м.Дадимфшьмримд им.Адимимрн имадми','ИМРИ.АФИМИМ.АЕИМИМРИМДМРИМРМРИРОР',3,'2005-06-01 17:30:43','1234567890'),
 (2,'blah','464','aaa','haxpl2ilc20x00bj4tt2m5ti','11','11 g','G',3,'2005-06-02 22:43:10','1234567890');
@@ -1550,6 +1557,9 @@ tid int(11) NOT NULL default '0',
 val text NOT NULL,
 INDEX idx(tid, val(10))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 INSERT INTO t1 VALUES
 (40988,72,'VOLN� ADSL'),(41009,72,'VOLN� ADSL'),
 (41032,72,'VOLN� ADSL'),(41038,72,'VOLN� ADSL'),
@@ -1625,7 +1635,7 @@ explain
 select substr(z.a,-1), z.a from t1 as y join t1 as z on y.a=z.a order by 1;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	y	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	Using temporary; Using filesort
-1	SIMPLE	z	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where; Using join buffer (Block Nested Loop)
+1	SIMPLE	z	NULL	ALL	NULL	NULL	NULL	NULL	2	50.00	Using where; Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select substr(`test`.`z`.`a`,-(1)) AS `substr(z.a,-1)`,`test`.`z`.`a` AS `a` from `test`.`t1` `y` join `test`.`t1` `z` where (`test`.`z`.`a` = `test`.`y`.`a`) order by substr(`test`.`z`.`a`,-(1))
 select substr(z.a,-1), z.a from t1 as y join t1 as z on y.a=z.a order by 1;
@@ -2191,8 +2201,8 @@ ALTER TABLE t1 ADD mos TINYINT DEFAULT 0 AFTER clipid;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `clipid` int(11) NOT NULL,
-  `mos` tinyint(4) DEFAULT '0',
+  `clipid` int NOT NULL,
+  `mos` tinyint DEFAULT '0',
   `Tape` tinytext,
   PRIMARY KEY (`clipid`),
   KEY `tape` (`Tape`(63))
@@ -2252,6 +2262,8 @@ CREATE TABLE t2 (
 u_decimal int NOT NULL,
 utf8mb3_encoding VARCHAR(10) NOT NULL
 ) CHARACTER SET utf8mb3 ENGINE InnoDB;
+Warnings:
+Warning	1287	'utf8mb3' is deprecated and will be removed in a future release. Please use utf8mb4 instead
 INSERT INTO t2 VALUES (42856, x'ea9da8');
 INSERT INTO t2 VALUES (65131, x'efb9ab');
 INSERT IGNORE INTO t2 VALUES (1114111, x'f48fbfbf');
@@ -2279,7 +2291,7 @@ F09D9C9FEA9DA8
 F09D9E9FEA9DA8
 F3A087AFEA9DA8
 F48FBFBFEA9DA8
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 Warnings:
 SELECT HEX(CONCAT(utf8mb4_encoding, utf8mb3_encoding)) FROM t1,t2;
 HEX(CONCAT(utf8mb4_encoding, utf8mb3_encoding))
@@ -2328,7 +2340,7 @@ ALTER TABLE t1 CONVERT TO CHARACTER SET utf8;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `u_decimal` int(11) NOT NULL,
+  `u_decimal` int NOT NULL,
   `utf8mb4_encoding` varchar(10) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8
 SELECT u_decimal,hex(utf8mb4_encoding),utf8mb4_encoding FROM t1;
@@ -2350,7 +2362,7 @@ ALTER TABLE t2 CONVERT TO CHARACTER SET utf8mb4;
 SHOW CREATE TABLE t2;
 Table	Create Table
 t2	CREATE TABLE `t2` (
-  `u_decimal` int(11) NOT NULL,
+  `u_decimal` int NOT NULL,
   `utf8mb3_encoding` varchar(10) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 SELECT u_decimal,hex(utf8mb3_encoding) FROM t2;
@@ -2359,10 +2371,12 @@ u_decimal	hex(utf8mb3_encoding)
 42856	EA9DA8
 65131	EFB9AB
 ALTER TABLE t2 CONVERT TO CHARACTER SET utf8mb3;
+Warnings:
+Warning	1287	'utf8mb3' is deprecated and will be removed in a future release. Please use utf8mb4 instead
 SHOW CREATE TABLE t2;
 Table	Create Table
 t2	CREATE TABLE `t2` (
-  `u_decimal` int(11) NOT NULL,
+  `u_decimal` int NOT NULL,
   `utf8mb3_encoding` varchar(10) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8
 SELECT u_decimal,hex(utf8mb3_encoding) FROM t2;
@@ -2374,7 +2388,7 @@ ALTER TABLE t1 MODIFY utf8mb4_encoding VARCHAR(10) CHARACTER SET utf8mb3;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `u_decimal` int(11) NOT NULL,
+  `u_decimal` int NOT NULL,
   `utf8mb4_encoding` varchar(10) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8
 SELECT u_decimal,hex(utf8mb4_encoding) FROM t1;
@@ -2395,7 +2409,7 @@ ALTER TABLE t1 MODIFY utf8mb4_encoding VARCHAR(10) CHARACTER SET utf8mb4;
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `u_decimal` int(11) NOT NULL,
+  `u_decimal` int NOT NULL,
   `utf8mb4_encoding` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8
 SELECT u_decimal,hex(utf8mb4_encoding) FROM t1;
@@ -2416,7 +2430,7 @@ ALTER TABLE t2 MODIFY utf8mb3_encoding VARCHAR(10) CHARACTER SET utf8mb4;
 SHOW CREATE TABLE t2;
 Table	Create Table
 t2	CREATE TABLE `t2` (
-  `u_decimal` int(11) NOT NULL,
+  `u_decimal` int NOT NULL,
   `utf8mb3_encoding` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8
 SELECT u_decimal,hex(utf8mb3_encoding) FROM t2;
@@ -2430,7 +2444,7 @@ u_decimal int NOT NULL,
 utf8mb3_encoding VARCHAR(10) NOT NULL
 ) CHARACTER SET utf8 ENGINE InnoDB;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 INSERT INTO t3 SELECT * FROM t1;
 DROP TABLE IF EXISTS t4;
 CREATE TABLE t4 (
@@ -2449,14 +2463,16 @@ SELECT CHARSET(CONCAT(_utf8mb4'a',_utf8'b'));
 CHARSET(CONCAT(_utf8mb4'a',_utf8'b'))
 utf8mb4
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 CREATE TABLE t1 (utf8mb4 VARCHAR(10) CHARACTER SET utf8mb4 NOT NULL) ENGINE InnoDB;
 INSERT INTO t1 VALUES (x'ea9da8'),(x'f48fbfbf');
 SELECT CONCAT(utf8mb4, _utf8 x'ea9da8') FROM t1 LIMIT 0;
 CONCAT(utf8mb4, _utf8 x'ea9da8')
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 CREATE TABLE t2 (utf8mb3 VARCHAR(10) CHARACTER SET utf8mb3 NOT NULL) ENGINE InnoDB;
+Warnings:
+Warning	1287	'utf8mb3' is deprecated and will be removed in a future release. Please use utf8mb4 instead
 INSERT INTO t2 VALUES (x'ea9da8');
 SELECT HEX(CONCAT(utf8mb4, utf8mb3)) FROM t1,t2 ORDER BY 1;
 HEX(CONCAT(utf8mb4, utf8mb3))
@@ -2500,3 +2516,224 @@ DROP TABLE t1;
 #
 # End of tests
 #
+create table t1 (c varchar(30) character set utf8mb4, unique(c(10))) engine=innodb;
+insert into t1 values ('1'),('2'),('3'),('x'),('y'),('z');
+insert into t1 values ('aaaaaaaaaa');
+insert into t1 values ('aaaaaaaaaaa');
+ERROR 23000: Duplicate entry 'aaaaaaaaaa' for key 't1.c'
+insert into t1 values ('aaaaaaaaaaaa');
+ERROR 23000: Duplicate entry 'aaaaaaaaaa' for key 't1.c'
+insert into t1 values (repeat('b',20));
+select c c1 from t1 where c='1';
+c1
+1
+select c c2 from t1 where c='2';
+c2
+2
+select c c3 from t1 where c='3';
+c3
+3
+select c cx from t1 where c='x';
+cx
+x
+select c cy from t1 where c='y';
+cy
+y
+select c cz from t1 where c='z';
+cz
+z
+select c ca10 from t1 where c='aaaaaaaaaa';
+ca10
+aaaaaaaaaa
+select c cb20 from t1 where c=repeat('b',20);
+cb20
+bbbbbbbbbbbbbbbbbbbb
+drop table t1;
+create table t1 (c char(3) character set utf8mb4, unique (c(2))) engine=innodb;
+insert into t1 values ('1'),('2'),('3'),('4'),('x'),('y'),('z');
+insert into t1 values ('a');
+insert into t1 values ('aa');
+insert into t1 values ('aaa');
+ERROR 23000: Duplicate entry 'aa' for key 't1.c'
+insert into t1 values ('b');
+insert into t1 values ('bb');
+insert into t1 values ('bbb');
+ERROR 23000: Duplicate entry 'bb' for key 't1.c'
+insert into t1 values ('а');
+insert into t1 values ('аа');
+insert into t1 values ('ааа');
+ERROR 23000: Duplicate entry 'аа' for key 't1.c'
+insert into t1 values ('б');
+insert into t1 values ('бб');
+insert into t1 values ('ббб');
+ERROR 23000: Duplicate entry 'бб' for key 't1.c'
+insert into t1 values ('ꪪ');
+insert into t1 values ('ꪪꪪ');
+insert into t1 values ('ꪪꪪꪪ');
+ERROR 23000: Duplicate entry 'ꪪꪪ' for key 't1.c'
+drop table t1;
+create table t1 (
+c char(10) character set utf8mb4,
+unique key a (c(1))
+) engine=innodb;
+insert into t1 values ('a'),('b'),('c'),('d'),('e'),('f');
+insert into t1 values ('aa');
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
+insert into t1 values ('aaa');
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
+insert into t1 values ('б');
+insert into t1 values ('бб');
+ERROR 23000: Duplicate entry 'б' for key 't1.a'
+insert into t1 values ('ббб');
+ERROR 23000: Duplicate entry 'б' for key 't1.a'
+select c as c_all from t1 order by c;
+c_all
+a
+b
+c
+d
+e
+f
+б
+select c as c_a from t1 where c='a';
+c_a
+a
+select c as c_a from t1 where c='б';
+c_a
+б
+drop table t1;
+create table t1 (
+c char(10) character set utf8mb4 collate utf8mb4_bin,
+unique key a (c(1))
+) engine=innodb;
+insert into t1 values ('a'),('b'),('c'),('d'),('e'),('f');
+insert into t1 values ('aa');
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
+insert into t1 values ('aaa');
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
+insert into t1 values ('Ã±');
+insert into t1 values ('Ã±Ã±');
+ERROR 23000: Duplicate entry 'Ã' for key 't1.a'
+insert into t1 values ('Ã±Ã±Ã±');
+ERROR 23000: Duplicate entry 'Ã' for key 't1.a'
+select c as c_all from t1 order by c;
+c_all
+a
+b
+c
+d
+e
+f
+Ã±
+select c as c_a from t1 where c='a';
+c_a
+a
+select c as c_a from t1 where c='Ã±';
+c_a
+Ã±
+drop table t1;
+create table t1 (
+str varchar(255) character set utf8mb4 not null,
+key str  (str(2))
+) engine=innodb;
+INSERT INTO t1 VALUES ('str');
+INSERT INTO t1 VALUES ('str2');
+select * from t1 where str='str';
+str
+str
+drop table t1;
+create table t1 (
+str varchar(255) character set utf8mb4 not null,
+key str (str(2))
+) engine=innodb;
+INSERT INTO t1 VALUES ('str');
+INSERT INTO t1 VALUES ('str2');
+select * from t1 where str='str';
+str
+str
+drop table t1;
+SET NAMES utf8mb4;
+CREATE TABLE t1 (
+subject varchar(255) character set utf8mb4 collate utf8mb4_unicode_ci,
+p varchar(15) character set utf8mb4
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+INSERT INTO t1 VALUES ('谷川俊二と申しますが、インターネット予約の会員登録をしましたところ、メールアドレスを間違えてしまい会員ＩＤが受け取ることが出来ませんでした。間違えアドレスはtani-shun@n.vodafone.ne.jpを書き込みました。どうすればよいですか？ その他、住所等は間違えありません。連絡ください。よろしくお願いします。m(__)m','040312-000057');
+INSERT INTO t1 VALUES ('aaa','bbb');
+SELECT length(subject) FROM t1;
+length(subject)
+432
+3
+SELECT length(subject) FROM t1 ORDER BY 1;
+length(subject)
+3
+432
+DROP TABLE t1;
+set names utf8mb4;
+create table t1 (a varchar(30) not null primary key)
+engine=innodb  default character set utf8mb4 collate utf8mb4_general_ci;
+insert into t1 values ('あいうえおかきくけこさしすせそ');
+insert into t1 values ('さしすせそかきくけこあいうえお');
+select a as gci1 from t1 where a like 'さしすせそかきくけこあいうえお%';
+gci1
+さしすせそかきくけこあいうえお
+select a as gci2 from t1 where a like 'あいうえおかきくけこさしすせそ';
+gci2
+あいうえおかきくけこさしすせそ
+drop table t1;
+set names utf8mb4;
+create table t1 (a varchar(30) not null primary key)
+engine=innodb default character set utf8mb4 collate utf8mb4_unicode_ci;
+insert into t1 values ('あいうえおかきくけこさしすせそ');
+insert into t1 values ('さしすせそかきくけこあいうえお');
+select a as uci1 from t1 where a like 'さしすせそかきくけこあいうえお%';
+uci1
+さしすせそかきくけこあいうえお
+select a as uci2 from t1 where a like 'あいうえおかきくけこさしすせそ';
+uci2
+あいうえおかきくけこさしすせそ
+drop table t1;
+set names utf8mb4;
+create table t1 (a varchar(30) not null primary key)
+engine=innodb default character set utf8mb4 collate utf8mb4_bin;
+insert into t1 values ('あいうえおかきくけこさしすせそ');
+insert into t1 values ('さしすせそかきくけこあいうえお');
+select a as bin1 from t1 where a like 'さしすせそかきくけこあいうえお%';
+bin1
+さしすせそかきくけこあいうえお
+select a as bin2 from t1 where a like 'あいうえおかきくけこさしすせそ';
+bin2
+あいうえおかきくけこさしすせそ
+drop table t1;
+set names utf8mb4;
+create table t1 (
+a int primary key,
+b varchar(6),
+index b3(b(3))
+) engine=innodb character set=utf8mb4;
+insert into t1 values(1,'foo'),(2,'foobar');
+select * from t1 where b like 'foob%';
+a	b
+2	foobar
+alter table t1 engine=innodb;
+select * from t1 where b like 'foob%';
+a	b
+2	foobar
+drop table t1;
+CREATE TABLE t1 (
+colA int(11) NOT NULL,
+colB varchar(255) character set utf8mb4 NOT NULL,
+PRIMARY KEY  (colA)
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+INSERT INTO t1 (colA, colB) VALUES (1, 'foo'), (2, 'foo bar');
+CREATE TABLE t2 (
+colA int(11) NOT NULL,
+colB varchar(255) character set utf8mb4 NOT NULL,
+KEY bad  (colA,colB(3))
+) ENGINE=InnoDB DEFAULT CHARSET=latin1;
+INSERT INTO t2 (colA, colB) VALUES (1, 'foo'),(2, 'foo bar');
+SELECT * FROM t1 JOIN t2 ON t1.colA=t2.colA AND t1.colB=t2.colB
+WHERE t1.colA < 3;
+colA	colB	colA	colB
+1	foo	1	foo
+2	foo bar	2	foo bar
+DROP TABLE t1, t2;

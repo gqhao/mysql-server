@@ -60,6 +60,10 @@ ERROR 42000: You have an error in your SQL syntax; check the manual that corresp
 select * from t1;
 a
 20
+xa recover;
+formatID	gtrid_length	bqual_length	data
+11	5	5	testb 0@P`
+xa rollback 'testb',0x2030405060,11;
 drop table t1;
 drop table if exists t1;
 create table t1(a int, b int, c varchar(20), primary key(a)) engine = innodb;
@@ -208,23 +212,27 @@ DROP TABLE t1;
 #
 # Bug#12352846 - TRANS_XA_START(THD*):
 #                ASSERTION THD->TRANSACTION.XID_STATE.XID.IS_NULL()
-#                FAILED 
+#                FAILED
 #
-DROP TABLE IF EXISTS t1, t2;
+DROP TABLE IF EXISTS t1;
 CREATE TABLE t1 (a INT) ENGINE=InnoDB;
-CREATE TABLE t2 (a INT) ENGINE=InnoDB;
-START TRANSACTION;
 INSERT INTO t1 VALUES (1);
+START TRANSACTION;
+SELECT a FROM t1 WHERE a=1 FOR SHARE;
+a
+1
 # Connection con2
 XA START 'xid1';
 # Sending:
-INSERT INTO t2 SELECT a FROM t1;
+SELECT a FROM t1 WHERE a=1 FOR UPDATE;
 # Connection default
-# Waiting for until a transaction with 'INSERT SELECT'
+# Waiting for until a transaction with 'SELECT...FOR UPDATE'
 # will be locked inside innodb subsystem.
-DELETE FROM t1;
+SELECT a FROM t1 WHERE a=1 FOR UPDATE;
+a
+1
 # Connection con2
-# Reaping: INSERT INTO t2 SELECT a FROM t1
+# Reaping: SELECT a FROM t1 WHERE a=1 FOR UPDATE
 ERROR 40001: Deadlock found when trying to get lock; try restarting transaction
 XA COMMIT 'xid1';
 ERROR XA102: XA_RBDEADLOCK: Transaction branch was rolled back: deadlock was detected
@@ -236,9 +244,9 @@ XA END 'xid1';
 XA PREPARE 'xid1';
 XA ROLLBACK 'xid1';
 # Connection default
-DROP TABLE t1, t2;
+DROP TABLE t1;
 #
-# Bug#14670465 PLEASE PRINT HUMAN READABLE, ESCAPED 
+# Bug#14670465 PLEASE PRINT HUMAN READABLE, ESCAPED
 #              XID DATA IN XA RECOVER OUTPUT
 #
 #
@@ -253,7 +261,6 @@ xa end 0xABCDEF1234567890, 0x01, 0x02 ;
 xa prepare 0xABCDEF1234567890, 0x01, 0x02 ;
 xa recover convert xid;
 formatID	gtrid_length	bqual_length	data
-11	5	5	0x74657374622030405060
 2	8	1	0xABCDEF123456789001
 xa rollback 0xABCDEF1234567890, 0x01, 0x02 ;
 # Check that XID which has only printable characters are displayed
@@ -263,12 +270,11 @@ xa end 0x4142434445, 0x46, 0x02 ;
 xa prepare 0x4142434445, 0x46, 0x02 ;
 xa recover;
 formatID	gtrid_length	bqual_length	data
-11	5	5	testb 0@P`
 2	5	1	ABCDEF
 xa rollback 0x4142434445, 0x46, 0x02 ;
 #
-# WL#7155: Test 1: check that if a thread of control terminates then 
-# the Resource Manager dissociate and rollback any associated 
+# WL#7155: Test 1: check that if a thread of control terminates then
+# the Resource Manager dissociate and rollback any associated
 # transaction branch (see ref. 3.6 on page 18 of XA spec)
 #
 CREATE TABLE t1 (a INT) ENGINE=INNODB;
@@ -281,7 +287,7 @@ DROP TABLE t1;
 #
 # WL#7155: Test 2: Check that if the Resource Manager is doing work outside
 # any global transaction on behalf of the application,
-# xa_start() returns XAER_OUTSIDE (see xa_start description on page 52 of XA spec)  
+# xa_start() returns XAER_OUTSIDE (see xa_start description on page 52 of XA spec)
 #
 SET SESSION autocommit=0;
 START TRANSACTION;
@@ -290,14 +296,14 @@ ERROR XAE09: XAER_OUTSIDE: Some work is done outside global transaction
 COMMIT;
 #
 # WL#7155: Test 3: Check that the Resource Manager returns error
-# if the Transaction Manager tries to resume non-existent transaction. 
+# if the Transaction Manager tries to resume non-existent transaction.
 #
 XA START 'xid1' RESUME;
 ERROR XAE05: XAER_INVAL: Invalid arguments (or unsupported command)
 #
 # WL#7155: Test 4: Check that the Resource Manager returns ok
 # if the Transaction Manager tries to resume transaction
-# that has been ended before. 
+# that has been ended before.
 #
 XA START 'xid1';
 XA END 'xid1';
@@ -313,15 +319,15 @@ XA END 'xid1';
 XA START 'xid2' RESUME;
 ERROR XAE04: XAER_NOTA: Unknown XID
 #
-# WL#7155: Test 6: Check that the SUSPEND clause isn't supported for XA END. 
+# WL#7155: Test 6: Check that the SUSPEND clause isn't supported for XA END.
 #
 XA START 'xid1';
 XA END 'xid1' SUSPEND;
 ERROR XAE05: XAER_INVAL: Invalid arguments (or unsupported command)
 XA END 'xid1';
 #
-# WL#7155: Test 7: Check that attempt to end non-existent XA transaction 
-# while another XA transaction is active leads to an error 
+# WL#7155: Test 7: Check that attempt to end non-existent XA transaction
+# while another XA transaction is active leads to an error
 #
 XA START 'xid1';
 XA END 'xid2';
@@ -342,8 +348,8 @@ XA END 'xid1';
 XA PREPARE 'xid2';
 ERROR XAE04: XAER_NOTA: Unknown XID
 #
-# WL#7155: Test 10: Check that rollback of XA transaction with unknown xid 
-# leads to an error when there is other prepared XA transaction. 
+# WL#7155: Test 10: Check that rollback of XA transaction with unknown xid
+# leads to an error when there is other prepared XA transaction.
 #
 XA START 'xid1';
 XA END 'xid1';
@@ -392,7 +398,6 @@ Error	1401	XAER_RMERR: Fatal error occurred in the transaction branch - check yo
 xa recover;
 formatID	gtrid_length	bqual_length	data
 1	5	0	test1
-11	5	5	testb 0@P`
 # LOCK error during COMMIT will not alter transaction state.
 xa commit 'test1';
 ERROR HY000: Lock wait timeout exceeded; try restarting transaction
@@ -403,19 +408,16 @@ Error	3197	The resource manager is not able to commit the transaction branch at 
 xa recover;
 formatID	gtrid_length	bqual_length	data
 1	5	0	test1
-11	5	5	testb 0@P`
 unlock tables;
 xa rollback 'test1';
 xa recover;
 formatID	gtrid_length	bqual_length	data
-11	5	5	testb 0@P`
 drop table asd;
 There should be practically no error, but in theory
 XAER_NOTA: Unknown XID can be returned if con1 disconnection
 took for too long.
 todo: consider to make this test dependent on P_S if
 todo: such case will be ever registered.
-xa rollback 'testb',0x2030405060,11;
 XA RECOVER;
 formatID	gtrid_length	bqual_length	data
 #
@@ -511,3 +513,20 @@ XA RECOVER;
 formatID	gtrid_length	bqual_length	data
 1	4	0	xid1
 XA ROLLBACK 'xid1';
+#
+# BUG 31030205 - XA PREPARED TXN WILL STAY AS "RECOVERED TRX" IF ROLLBACK
+#                XID HAS WRONG FORMATID
+#
+#
+CREATE TABLE t1 (a INT) ENGINE=INNODB;
+XA START X'1A2B3C4D5E6F',X'F6E5D4C3B2A1',12345;
+INSERT INTO t1 VALUES (1);
+XA END X'1A2B3C4D5E6F',X'F6E5D4C3B2A1',12345;
+XA PREPARE X'1A2B3C4D5E6F',X'F6E5D4C3B2A1',12345;
+XA ROLLBACK X'1A2B3C4D5E6F',X'F6E5D4C3B2A1',2;
+ERROR XAE04: XAER_NOTA: Unknown XID
+XA RECOVER CONVERT XID;
+formatID	gtrid_length	bqual_length	data
+12345	6	6	0x1A2B3C4D5E6FF6E5D4C3B2A1
+XA ROLLBACK X'1A2B3C4D5E6F',X'F6E5D4C3B2A1',12345;
+DROP TABLE t1;

@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -46,13 +46,13 @@
 using namespace std;
 
 static MEM_ROOT argv_alloc{PSI_NOT_INSTRUMENTED, 512};
-static char *opt_host = 0;
-static char *opt_user = 0;
+static char *opt_host = nullptr;
+static char *opt_user = nullptr;
 static uint opt_port = 0;
 static uint opt_protocol = 0;
-static char *opt_socket = 0;
+static char *opt_socket = nullptr;
 static MYSQL mysql;
-static char *password = 0;
+static char *password = nullptr;
 static bool password_provided = false;
 static bool g_expire_password_on_exit = false;
 static bool opt_use_default = false;
@@ -64,17 +64,19 @@ static const char *shared_memory_base_name = default_shared_memory_base_name;
 #include "sslopt-vars.h"
 
 static const char *load_default_groups[] = {"mysql_secure_installation",
-                                            "mysql", "client", 0};
+                                            "mysql", "client", nullptr};
 
 static struct my_option my_connection_options[] = {
-    {"help", '?', "Display this help and exit.", 0, 0, 0, GET_NO_ARG, NO_ARG, 0,
-     0, 0, 0, 0, 0},
-    {"host", 'h', "Connect to host.", &opt_host, &opt_host, 0, GET_STR_ALLOC,
-     REQUIRED_ARG, (longlong) "localhost", 0, 0, 0, 0, 0},
+    {"help", '?', "Display this help and exit.", nullptr, nullptr, nullptr,
+     GET_NO_ARG, NO_ARG, 0, 0, 0, nullptr, 0, nullptr},
+    {"host", 'h', "Connect to host.", &opt_host, &opt_host, nullptr,
+     GET_STR_ALLOC, REQUIRED_ARG, (longlong) "localhost", 0, 0, nullptr, 0,
+     nullptr},
     {"password", 'p',
      "Password to connect to the server. If password is not "
      "given it's asked from the tty.",
-     0, 0, 0, GET_PASSWORD, OPT_ARG, 0, 0, 0, 0, 0, 0},
+     nullptr, nullptr, nullptr, GET_PASSWORD, OPT_ARG, 0, 0, 0, nullptr, 0,
+     nullptr},
 #ifdef _WIN32
     {"pipe", 'W', "Use named pipes to connect to server.", 0, 0, 0, GET_NO_ARG,
      NO_ARG, 0, 0, 0, 0, 0, 0},
@@ -86,10 +88,11 @@ static struct my_option my_connection_options[] = {
      "/etc/services, "
 #endif
      "built-in default (" STRINGIFY_ARG(MYSQL_PORT) ").",
-     &opt_port, &opt_port, 0, GET_UINT, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+     &opt_port, &opt_port, nullptr, GET_UINT, REQUIRED_ARG, 0, 0, 0, nullptr, 0,
+     nullptr},
     {"protocol", OPT_MYSQL_PROTOCOL,
-     "The protocol to use for connection (tcp, socket, pipe, memory).", 0, 0, 0,
-     GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+     "The protocol to use for connection (tcp, socket, pipe, memory).", nullptr,
+     nullptr, nullptr, GET_STR, REQUIRED_ARG, 0, 0, 0, nullptr, 0, nullptr},
 #if defined(_WIN32)
     {"shared-memory-base-name", OPT_SHARED_MEMORY_BASE_NAME,
      "Base name of shared memory.", &shared_memory_base_name,
@@ -97,17 +100,17 @@ static struct my_option my_connection_options[] = {
      0},
 #endif
     {"socket", 'S', "Socket file to be used for connection.", &opt_socket,
-     &opt_socket, 0, GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+     &opt_socket, nullptr, GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0, nullptr, 0,
+     nullptr},
 #include "sslopt-longopts.h"
 
-    {"user", 'u', "User for login if not root.", &opt_user, &opt_user, 0,
-     GET_STR_ALLOC, REQUIRED_ARG, (longlong) "root", 0, 0, 0, 0, 0},
+    {"user", 'u', "User for login if not root.", &opt_user, &opt_user, nullptr,
+     GET_STR_ALLOC, REQUIRED_ARG, (longlong) "root", 0, 0, nullptr, 0, nullptr},
     {"use-default", 'D', "Execute with no user interactivity", &opt_use_default,
-     &opt_use_default, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+     &opt_use_default, nullptr, GET_BOOL, NO_ARG, 0, 0, 0, nullptr, 0, nullptr},
     /* End token */
-    {0, 0, 0, 0, 0, 0, GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0}};
-
-bool find_temporary_password(char **p);
+    {nullptr, 0, nullptr, nullptr, nullptr, nullptr, GET_NO_ARG, NO_ARG, 0, 0,
+     0, nullptr, 0, nullptr}};
 
 static void usage() {
   print_version();
@@ -162,7 +165,7 @@ static bool my_arguments_get_one_option(
 #endif
       break;
   }
-  return 0;
+  return false;
 }
 }
 
@@ -273,17 +276,19 @@ static bool execute_query(const char **query, size_t length) {
 }
 
 /**
-  Checks if the validate_password plugin is installed and returns true if it is.
+  Checks if the validate_password component is installed and returns true
+  if it is.
 */
 static bool validate_password_exists() {
   MYSQL_ROW row;
   bool res = true;
   const char *query =
-      "SELECT NAME FROM mysql.plugin WHERE NAME "
-      "= \'validate_password\'";
+      "SELECT component_urn FROM mysql.component WHERE component_urn "
+      "= \'file://component_validate_password\'";
   if (!execute_query(&query, strlen(query)))
     DBUG_PRINT("info", ("query success!"));
   MYSQL_RES *result = mysql_store_result(&mysql);
+  if (!result) return false;
   row = mysql_fetch_row(result);
   if (!row) res = false;
 
@@ -292,40 +297,29 @@ static bool validate_password_exists() {
 }
 
 /**
-  Installs validate_password plugin and sets the password validation policy.
+  Installs validate_password component and sets the password validation policy.
 
-  @return   Returns 1 on successfully setting the plugin and 0 in case of
+  @return   Returns 1 on successfully setting the component and 0 in case of
             of any error.
 */
-static int install_password_validation_plugin() {
+static int install_password_validation_component() {
   int reply;
-  int plugin_set = 0;
-  char *strength = NULL;
+  int component_set = 0;
+  const char *strength = nullptr;
   bool option_read = false;
-  reply= get_response((const char *) "\nVALIDATE PASSWORD PLUGIN can be used "
-                                     "to test passwords\nand improve security. "
-				     "It checks the strength of password\nand "
-				     "allows the users to set only those "
-				     "passwords which are\nsecure enough. "
-				     "Would you like to setup VALIDATE "
-				     "PASSWORD plugin?\n\nPress y|Y for Yes, "
-				     "any other key for No: ", 'y');
+  reply= get_response((const char *) "\nVALIDATE PASSWORD COMPONENT can be "
+                                     "used to test passwords\nand improve "
+                                     "security. It checks the strength of "
+                                     "password\nand allows the users to set "
+                                     "only those passwords which are\nsecure "
+                                     "enough. Would you like to setup VALIDATE "
+				     "PASSWORD component?\n\nPress y|Y for Yes,"
+				     " any other key for No: ", 'y');
   if (reply == (int)'y' || reply == (int)'Y') {
-#ifdef _WIN32
     const char *query_tmp;
-    query_tmp =
-        "INSTALL PLUGIN validate_password SONAME "
-        "'validate_password.dll'";
-    if (!execute_query(&query_tmp, strlen(query_tmp)))
-#else
-    const char *query_tmp;
-    query_tmp =
-        "INSTALL PLUGIN validate_password SONAME "
-        "'validate_password.so'";
-    if (!execute_query(&query_tmp, strlen(query_tmp)))
-#endif
-    {
-      plugin_set = 1;
+    query_tmp = "INSTALL COMPONENT 'file://component_validate_password'";
+    if (!execute_query(&query_tmp, strlen(query_tmp))) {
+      component_set = 1;
       while (!option_read) {
         reply= get_response((const char *) "\nThere are three levels of "
    "password validation policy:\n\n"
@@ -336,15 +330,15 @@ static int install_password_validation_plugin() {
    "Please enter 0 = LOW, 1 = MEDIUM and 2 = STRONG: ",'2');
         switch (reply) {
           case (int)'0':
-            strength = (char *)"LOW";
+            strength = "LOW";
             option_read = true;
             break;
           case (int)'1':
-            strength = (char *)"MEDIUM";
+            strength = "MEDIUM";
             option_read = true;
             break;
           case (int)'2':
-            strength = (char *)"STRONG";
+            strength = "STRONG";
             option_read = true;
             break;
           default:
@@ -352,7 +346,7 @@ static int install_password_validation_plugin() {
         }
       }
       char *query, *end;
-      int tmp = sizeof("SET GLOBAL validate_password_policy = ") + 3;
+      int tmp = sizeof("SET GLOBAL validate_password.policy = ") + 3;
       size_t strength_length = strlen(strength);
       /*
         query string needs memory which is atleast the length of initial part
@@ -361,20 +355,21 @@ static int install_password_validation_plugin() {
       query = (char *)my_malloc(PSI_NOT_INSTRUMENTED,
                                 (strength_length * 2 + tmp) * sizeof(char),
                                 MYF(MY_WME));
-      end = my_stpcpy(query, "SET GLOBAL validate_password_policy = ");
+      end = my_stpcpy(query, "SET GLOBAL validate_password.policy = ");
       *end++ = '\'';
       end += mysql_real_escape_string_quote(&mysql, end, strength,
                                             (ulong)strength_length, '\'');
       *end++ = '\'';
-      if (!execute_query((const char **)&query, (unsigned int)(end - query)))
+      const char *query_const = query;
+      if (!execute_query(&query_const, (unsigned int)(end - query)))
         DBUG_PRINT("info", ("query success!"));
       my_free(query);
     } else
       fprintf(stdout,
-              "The password validation plugin is not available. "
-              "Proceeding with the further steps without the plugin.\n");
+              "The password validation component is not available. "
+              "Proceeding with the further steps without the component.\n");
   }
-  return (plugin_set);
+  return (component_set);
 }
 
 /**
@@ -400,7 +395,8 @@ static void estimate_password_strength(char *password_string) {
                                         (ulong)password_length, '\'');
   *end++ = '\'';
   *end++ = ')';
-  if (!execute_query((const char **)&query, (unsigned int)(end - query))) {
+  const char *query_const = query;
+  if (!execute_query(&query_const, (unsigned int)(end - query))) {
     MYSQL_RES *result = mysql_store_result(&mysql);
     MYSQL_ROW row = mysql_fetch_row(result);
     printf("\nEstimated strength of the password: %s \n", row[0]);
@@ -474,22 +470,22 @@ static bool mysql_expire_password(MYSQL *mysql) {
   if he wants to continue with the password, or provide a new one,
   depending on the strength displayed.
 
-  @param    plugin_set   1 if validate_password plugin is set and
+  @param component_set   1 if validate_password component is set and
                          0 if it is not.
 */
 
-static void set_opt_user_password(int plugin_set) {
-  char *password1 = 0, *password2 = 0;
+static void set_opt_user_password(int component_set) {
+  char *password1 = nullptr, *password2 = nullptr;
   int reply = 0;
 
   for (;;) {
     if (password1) {
       my_free(password1);
-      password1 = NULL;
+      password1 = nullptr;
     }
     if (password2) {
       my_free(password2);
-      password2 = NULL;
+      password2 = nullptr;
     }
 
     password1 = get_tty_password("\nNew password: ");
@@ -506,7 +502,7 @@ static void set_opt_user_password(int plugin_set) {
       continue;
     }
 
-    if (plugin_set == 1) {
+    if (component_set == 1) {
       estimate_password_strength(password1);
       reply = get_response((
           const char *)"Do you wish to continue with the "
@@ -516,8 +512,8 @@ static void set_opt_user_password(int plugin_set) {
 
     size_t pass_length = strlen(password1);
 
-    if ((!plugin_set) || (reply == (int)'y' || reply == (int)'Y')) {
-      char *query = NULL, *end;
+    if ((!component_set) || (reply == (int)'y' || reply == (int)'Y')) {
+      char *query = nullptr, *end;
       int tmp = sizeof("SET PASSWORD=") + 3;
       /*
         query string needs memory which is atleast the length of initial part
@@ -533,9 +529,10 @@ static void set_opt_user_password(int plugin_set) {
       *end++ = '\'';
       my_free(password1);
       my_free(password2);
-      password1 = NULL;
-      password2 = NULL;
-      if (!execute_query((const char **)&query, (unsigned int)(end - query))) {
+      password1 = nullptr;
+      password2 = nullptr;
+      const char *query_const = query;
+      if (!execute_query(&query_const, (unsigned int)(end - query))) {
         my_free(query);
         break;
       } else
@@ -562,29 +559,18 @@ static int get_opt_user_password() {
     */
     MYSQL *con = mysql_real_connect(&mysql, opt_host, opt_user, "", "",
                                     opt_port, opt_socket, 0);
-    if (con != NULL || mysql_errno(&mysql) == ER_MUST_CHANGE_PASSWORD_LOGIN) {
+    if (con != nullptr ||
+        mysql_errno(&mysql) == ER_MUST_CHANGE_PASSWORD_LOGIN) {
       fprintf(stdout, "Connecting to MySQL using a blank password.\n");
       my_free(password);
-      password = 0;
+      password = nullptr;
       mysql_close(con);
     } else {
-      /*
-        No password is provided and we cannot connect with a blank password.
-        Assume there is an ongoing deployment running and attempt to locate
-        the temporary password file.
-      */
-      char *temp_pass;
-      if (find_temporary_password(&temp_pass) == true) {
-        my_free(password);
-        password = temp_pass;
-        using_temporary_password = true;
-      } else {
-        char prompt[128];
-        snprintf(prompt, sizeof(prompt) - 1,
-                 "Enter password for user %s: ", opt_user);
-        // Request password from user
-        password = get_tty_password(prompt);
-      }
+      char prompt[128];
+      snprintf(prompt, sizeof(prompt) - 1,
+               "Enter password for user %s: ", opt_user);
+      // Request password from user
+      password = get_tty_password(prompt);
     }
     init_connection_options(&mysql);
   }  // if !password_provided
@@ -672,7 +658,8 @@ static void drop_users(MYSQL_RES *result) {
     end += mysql_real_escape_string_quote(&mysql, end, host_tmp,
                                           (ulong)host_length, '\'');
     *end++ = '\'';
-    if (!execute_query((const char **)&query, (unsigned int)(end - query)))
+    const char *query_const = query;
+    if (!execute_query(&query_const, (unsigned int)(end - query)))
       DBUG_PRINT("info", ("query success!"));
     my_free(query);
   }
@@ -769,77 +756,20 @@ static void reload_privilege_tables() {
 				     "privilege tables now? (Press y|Y for "
 				     "Yes, any other key for No) : ", 'y');
   if (reply == (int)'y' || reply == (int)'Y') {
-    execute_query_with_message((const char *)"FLUSH PRIVILEGES", NULL);
+    execute_query_with_message((const char *)"FLUSH PRIVILEGES", nullptr);
   } else
     fprintf(stdout, "\n ... skipping.\n");
-}
-
-/**
-  Attempt to retrieve a password from the temporary password file
-  '.mysql_secret'.
- @param [out] p A pointer to a password in a newly allocated buffer or null
- @returns true if the password was successfully retrieved.
-*/
-
-bool find_temporary_password(char **p) {
-  const char *root_path = "/root";
-  const char *password_file_name = "/.mysql_secret";
-  *p = NULL;
-  const char *home = getenv("HOME");
-  if (home == NULL) home = root_path;
-
-  size_t home_len = strlen(home);
-  size_t path_len = home_len + strlen(password_file_name) + 1;
-  char *path = (char *)malloc(path_len);
-  memset(path, 0, path_len);
-
-  strcat(path, home);
-  strcat(path, password_file_name);
-  FILE *fp = fopen(path, "r");
-  if (fp == NULL) {
-    free(path);
-    return false;
-  }
-
-  /*
-    The format of the password file is
-    ['#'][bytes]['\n']['password bytes']['\n']|[EOF])
-  */
-  char header[256];
-  char password[64];
-  size_t password_len = 0;
-  /* Read header and skip it */
-  if (fgets(&header[0], sizeof(header), fp) == NULL || header[0] != '#')
-    goto error;
-
-  /* Read password */
-  if (fgets(&password[0], sizeof(password), fp) == NULL) goto error;
-
-  /* Remove terminating newline character if it exists */
-  password_len = strlen(&password[0]);
-  if (password[password_len - 1] == '\n') password[password_len - 1] = '\0';
-
-  *p = my_strdup(PSI_NOT_INSTRUMENTED, &password[0], MYF(MY_FAE));
-  fprintf(stdout, "Connecting to MySQL server using password in '%s'\n", path);
-
-  free(path);
-  return true;
-
-error:
-  fprintf(stdout, "The password file '%s' is corrupt! Skipping.\n", path);
-  if (path) free(path);
-  return false;
 }
 
 int main(int argc, char *argv[]) {
   int reply;
   int rc;
-  int hadpass, plugin_set = 0;
+  int hadpass, component_set = 0;
 
   MY_INIT(argv[0]);
-  DBUG_ENTER("main");
+  DBUG_TRACE;
   DBUG_PROCESS(argv[0]);
-  if (mysql_init(&mysql) == NULL) {
+  if (mysql_init(&mysql) == nullptr) {
     printf("... Failed to initialize the MySQL client framework.\n");
     exit(1);
   }
@@ -859,7 +789,7 @@ int main(int argc, char *argv[]) {
   my_getopt_use_args_separator = false;
 
   if ((rc = my_handle_options(&argc, &argv, my_connection_options,
-                              my_arguments_get_one_option, NULL, true))) {
+                              my_arguments_get_one_option, nullptr, true))) {
     DBUG_ASSERT(0);
   }
 
@@ -870,23 +800,23 @@ int main(int argc, char *argv[]) {
   hadpass = get_opt_user_password();
 
   if (!validate_password_exists())
-    plugin_set = install_password_validation_plugin();
+    component_set = install_password_validation_component();
   else {
     fprintf(stdout,
-            "The 'validate_password' plugin is installed on the server.\n"
+            "The 'validate_password' component is installed on the server.\n"
             "The subsequent steps will run with the existing "
-            "configuration\nof the plugin.\n");
-    plugin_set = 1;
+            "configuration\nof the component.\n");
+    component_set = 1;
   }
 
   if (!hadpass) {
     fprintf(stdout, "Please set the password for %s here.\n", opt_user);
-    set_opt_user_password(plugin_set);
+    set_opt_user_password(component_set);
   } else if (opt_use_default == false) {
     char prompt[256];
     fprintf(stdout, "Using existing password for %s.\n", opt_user);
 
-    if (plugin_set == 1) estimate_password_strength(password);
+    if (component_set == 1) estimate_password_strength(password);
 
     snprintf(prompt, sizeof(prompt) - 1,
              "Change the password for %s ? ((Press y|Y "
@@ -895,7 +825,7 @@ int main(int argc, char *argv[]) {
     reply = get_response(prompt, 'n');
 
     if (reply == (int)'y' || reply == (int)'Y')
-      set_opt_user_password(plugin_set);
+      set_opt_user_password(component_set);
     else
       fprintf(stdout, "\n ... skipping.\n");
   }

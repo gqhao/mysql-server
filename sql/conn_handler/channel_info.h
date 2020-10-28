@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2013, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -28,7 +28,7 @@
 #include <sys/types.h>
 
 #include "my_inttypes.h"
-#include "my_sys.h"  // my_micro_time
+#include "my_systime.h"  // my_micro_time
 #include "violite.h"
 
 class THD;
@@ -50,7 +50,7 @@ class Channel_info {
   /**
     Create and initialize a Vio object.
 
-    @retval   return a pointer to the initialized a vio object.
+    @returns a pointer to the initialized a vio object.
   */
   virtual Vio *create_and_init_vio() const = 0;
 
@@ -62,13 +62,10 @@ class Channel_info {
   /**
     Instantiate and initialize THD object and vio.
 
-    @return
-      @retval
-        THD* pointer to initialized THD object.
-      @retval
-        NULL THD object allocation fails.
+    @returns pointer to initialized THD object.
+    @retval NULL THD object allocation fails.
   */
-  virtual THD *create_thd() = 0;
+  virtual THD *create_thd();
 
   /**
     Send error back to the client and close the channel.
@@ -79,7 +76,7 @@ class Channel_info {
                        client else false.
   */
   virtual void send_error_and_close_channel(uint errorcode, int error,
-                                            bool senderror) = 0;
+                                            bool senderror);
 
   ulonglong get_prior_thr_create_utime() const {
     return prior_thr_create_utime;
@@ -88,6 +85,8 @@ class Channel_info {
   void set_prior_thr_create_utime() {
     prior_thr_create_utime = my_micro_time();
   }
+
+  virtual bool is_admin_connection() const { return false; }
 };
 
 #endif  // SQL_CHANNEL_INFO_INCLUDED.

@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2006, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2006, 2020, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -98,12 +98,12 @@ ibool thd_is_replication_slave_thread(THD *thd); /*!< in: thread handle */
  @return true if non-transactional tables have been edited */
 ibool thd_has_edited_nontrans_tables(THD *thd); /*!< in: thread handle */
 
-/** Prints info of a THD object (== user session thread) to the given file. */
-void innobase_mysql_print_thd(
-    FILE *f,             /*!< in: output stream */
-    THD *thd,            /*!< in: pointer to a MySQL THD object */
-    uint max_query_len); /*!< in: max query length to print, or 0 to
-                            use the default max length */
+/** Prints info of a THD object (== user session thread) to the given file.
+@param[in] f Output stream
+@param[in] thd Pointer to a mysql thd object
+@param[in] max_query_len Max query length to print, or 0 to use the default max
+length */
+void innobase_mysql_print_thd(FILE *f, THD *thd, uint max_query_len);
 
 /** Converts a MySQL type to an InnoDB type. Note that this function returns
 the 'mtype' of InnoDB. InnoDB differentiates between MySQL's old <= 4.1
@@ -114,11 +114,11 @@ at least ENUM and SET, and unsigned integer types are 'unsigned types'
 @return DATA_BINARY, DATA_VARCHAR, ... */
 ulint get_innobase_type_from_mysql_type(ulint *unsigned_flag, const void *f);
 
-/** Get the variable length bounds of the given character set. */
-void innobase_get_cset_width(
-    ulint cset,       /*!< in: MySQL charset-collation code */
-    ulint *mbminlen,  /*!< out: minimum length of a char (in bytes) */
-    ulint *mbmaxlen); /*!< out: maximum length of a char (in bytes) */
+/** Get the variable length bounds of the given character set.
+@param[in] cset Mysql charset-collation code
+@param[out] mbminlen Minimum length of a char (in bytes)
+@param[out] mbmaxlen Maximum length of a char (in bytes) */
+void innobase_get_cset_width(ulint cset, ulint *mbminlen, ulint *mbmaxlen);
 
 /** Compares NUL-terminated UTF-8 strings case insensitively.
  @return 0 if a=b, < 0 if a < b, > 1 if a > b */
@@ -134,22 +134,11 @@ const char *innobase_basename(const char *path_name);
  @return true if thd is executing SELECT */
 ibool thd_is_select(const THD *thd); /*!< in: thread handle */
 
-/** Converts an identifier to a table name. */
-void innobase_convert_from_table_id(
-    const CHARSET_INFO *cs, /*!< in: the 'from' character set */
-    char *to,               /*!< out: converted identifier */
-    const char *from,       /*!< in: identifier to convert */
-    ulint len);             /*!< in: length of 'to', in bytes; should
-                            be at least 5 * strlen(to) + 1 */
-/** Converts an identifier to UTF-8. */
-void innobase_convert_from_id(
-    const CHARSET_INFO *cs, /*!< in: the 'from' character set */
-    char *to,               /*!< out: converted identifier */
-    const char *from,       /*!< in: identifier to convert */
-    ulint len);             /*!< in: length of 'to', in bytes;
-                            should be at least 3 * strlen(to) + 1 */
 /** Makes all characters in a NUL-terminated UTF-8 string lower case. */
 void innobase_casedn_str(char *a); /*!< in/out: string to put in lower case */
+
+/** Makes all characters in a NUL-terminated UTF-8 path string lower case. */
+void innobase_casedn_path(char *a); /*!< in/out: string to put in lower case */
 
 /** Determines the connection character set.
  @return connection character set */
@@ -185,6 +174,17 @@ ulint innobase_get_at_most_n_mbchars(
     ulint data_len,   /*!< in: length of the string in bytes */
     const char *str); /*!< in: character string */
 
+/** Checks sys_vars and determines if allocator should mark
+large memory segments with MADV_DONTDUMP
+@return true iff @@global.core_file AND
+NOT @@global.innodb_buffer_pool_in_core_file */
+bool innobase_should_madvise_buf_pool();
+
+/** Make sure that core file will not be generated, as generating a core file
+might violate our promise to not dump buffer pool data, and/or might dump not
+the expected memory pages due to failure in using madvise */
+void innobase_disable_core_dump();
+
 /** Returns the lock wait timeout for the current connection.
  @return the lock wait timeout, in seconds */
 ulong thd_lock_wait_timeout(THD *thd); /*!< in: thread handle, or NULL to query
@@ -193,7 +193,7 @@ ulong thd_lock_wait_timeout(THD *thd); /*!< in: thread handle, or NULL to query
 void thd_set_lock_wait_time(THD *thd,     /*!< in/out: thread handle */
                             ulint value); /*!< in: time waited for the lock */
 
-/** Get status of innodb_tmpdir.
+/** Get the value of innodb_tmpdir.
 @param[in]	thd	thread handle, or NULL to query
                         the global innodb_tmpdir.
 @retval NULL if innodb_tmpdir="" */
@@ -212,11 +212,13 @@ ulint innobase_get_table_cache_size(void);
  @return value of lower_case_table_names */
 ulint innobase_get_lower_case_table_names(void);
 
-/** compare two character string case insensitively according to their charset.
- */
-int innobase_fts_text_case_cmp(const void *cs,  /*!< in: Character set */
-                               const void *p1,  /*!< in: key */
-                               const void *p2); /*!< in: node */
+/** Compare two character strings case insensitively according to their
+charset.
+@param[in]  cs  character set
+@param[in]  s1  string 1
+@param[in]  s2  string 2
+@return 0 if the two strings are equal */
+int innobase_nocase_compare(const void *cs, const char *s1, const char *s2);
 
 /** Returns true if transaction should be flagged as read-only.
  @return true if the thd is marked as read-only */
@@ -246,11 +248,11 @@ ibool thd_trx_is_auto_commit(THD *thd); /*!< in: thread handle, or NULL */
 ulint thd_start_time_in_secs(THD *thd); /*!< in: thread handle, or NULL */
 
 /** A wrapper function of innobase_convert_name(), convert a table name
- to the MySQL system_charset_info (UTF-8) and quote it if needed. */
-void innobase_format_name(
-    char *buf,         /*!< out: buffer for converted identifier */
-    ulint buflen,      /*!< in: length of buf, in bytes */
-    const char *name); /*!< in: table name to format */
+to the MySQL system_charset_info (UTF-8) and quote it if needed.
+@param[out] buf Buffer for converted identifier
+@param[in] buflen Length of buf, in bytes
+@param[in] name Table name to format */
+void innobase_format_name(char *buf, ulint buflen, const char *name);
 
 /** Corresponds to Sql_condition:enum_warning_level. */
 enum ib_log_level_t {
@@ -261,8 +263,8 @@ enum ib_log_level_t {
 };
 
 /** Use this when the args are first converted to a formatted string and then
- passed to the format string from errmsg-utf8.txt. The error message format
- must be: "Some string ... %s".
+ passed to the format string from messages_to_clients.txt. The error message
+ format must be: "Some string ... %s".
 
  Push a warning message to the client, it is a wrapper around:
 
@@ -278,7 +280,7 @@ void ib_errf(THD *thd,             /*!< in/out: session */
     MY_ATTRIBUTE((format(printf, 4, 5)));
 
 /** Use this when the args are passed to the format string from
- errmsg-utf8.txt directly as is.
+ messages_to_clients.txt directly as is.
 
  Push a warning message to the client, it is a wrapper around:
 
@@ -331,7 +333,7 @@ ulonglong innobase_next_autoinc(
     ulonglong step,      /*!< in: AUTOINC increment step */
     ulonglong offset,    /*!< in: AUTOINC offset */
     ulonglong max_value) /*!< in: max value for type */
-    MY_ATTRIBUTE((pure, warn_unused_result));
+    MY_ATTRIBUTE((warn_unused_result));
 
 /**********************************************************************
 Check if the length of the identifier exceeds the maximum allowed.

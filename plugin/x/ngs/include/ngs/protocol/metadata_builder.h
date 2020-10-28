@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2020, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,27 +22,43 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-#ifndef _NGS_METADATA_BUILDER_H_
-#define _NGS_METADATA_BUILDER_H_
+#ifndef PLUGIN_X_NGS_INCLUDE_NGS_PROTOCOL_METADATA_BUILDER_H_
+#define PLUGIN_X_NGS_INCLUDE_NGS_PROTOCOL_METADATA_BUILDER_H_
 
-#include <set>
-#include <string>
+#include <cstdint>
+#include <vector>
 
-#include "m_ctype.h"
-#include "my_inttypes.h"
-#include "plugin/x/ngs/include/ngs/interface/protocol_encoder_interface.h"
-#include "plugin/x/ngs/include/ngs/protocol/message_builder.h"
+#include "m_ctype.h"  // NOLINT(build/include_subdir)
+
+#include "plugin/x/ngs/include/ngs/protocol/column_info_builder.h"
+
+namespace xpl {
+namespace iface {
+
+struct Encode_column_info;
+}  // namespace iface
+}  // namespace xpl
 
 namespace ngs {
 
-class Output_buffer;
+using Metadata_vector = std::vector<Column_info_builder>;
 
-class Metadata_builder : public Message_builder {
+class Metadata_builder {
  public:
-  void encode_metadata(Output_buffer *out_buffer,
-                       const Encode_column_info *column_info);
+  void begin_metdata(const int num_of_columns) {
+    m_columns.resize(num_of_columns);
+
+    for (auto &c : m_columns) {
+      c.reset();
+    }
+  }
+
+  Metadata_vector &get_columns() { return m_columns; }
+
+ private:
+  Metadata_vector m_columns;
 };
 
 }  // namespace ngs
 
-#endif  //  _NGS_METADATA_BUILDER_H_
+#endif  // PLUGIN_X_NGS_INCLUDE_NGS_PROTOCOL_METADATA_BUILDER_H_

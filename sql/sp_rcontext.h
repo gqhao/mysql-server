@@ -1,4 +1,4 @@
-/* Copyright (c) 2002, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2002, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -252,13 +252,12 @@ class sp_rcontext {
 
   /// Create a new sp_cursor instance and push it to the cursor stack.
   ///
-  /// @param thd        Thread handle
   /// @param i          Cursor-push instruction.
   ///
   /// @return error flag.
   /// @retval false on success.
   /// @retval true on error.
-  bool push_cursor(THD *thd, sp_instr_cpush *i);
+  bool push_cursor(sp_instr_cpush *i);
 
   /// Pop and delete given number of sp_cursor instance from the cursor stack.
   ///
@@ -407,18 +406,19 @@ class sp_cursor {
     uint field_count;
 
    public:
-    Query_fetch_into_spvars(THD *thd) : Query_result_interceptor(thd) {}
+    Query_fetch_into_spvars() : Query_result_interceptor() {}
     uint get_field_count() { return field_count; }
     void set_spvar_list(List<sp_variable> *vars) { spvar_list = vars; }
 
-    virtual bool send_eof() { return false; }
-    virtual bool send_data(List<Item> &items);
-    virtual bool prepare(List<Item> &list, SELECT_LEX_UNIT *u);
+    bool send_eof(THD *) override { return false; }
+    bool send_data(THD *thd, const mem_root_deque<Item *> &items) override;
+    bool prepare(THD *thd, const mem_root_deque<Item *> &list,
+                 SELECT_LEX_UNIT *u) override;
   };
 
  public:
-  sp_cursor(THD *thd, sp_instr_cpush *i)
-      : m_result(thd), m_server_side_cursor(NULL), m_push_instr(i) {}
+  explicit sp_cursor(sp_instr_cpush *i)
+      : m_result(), m_server_side_cursor(nullptr), m_push_instr(i) {}
 
   virtual ~sp_cursor() { destroy(); }
 

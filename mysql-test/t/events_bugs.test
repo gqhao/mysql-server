@@ -216,11 +216,11 @@ create event e_55 on schedule at 20000101000000 do drop table t;
 show events;
 
 --error ER_PARSE_ERROR
-create event e_55 on schedule at 20200101000000 starts 10000101000000 do drop table t;
+create event e_55 on schedule at 20380101000000 starts 10000101000000 do drop table t;
 --error ER_PARSE_ERROR
-create event e_55 on schedule at 20200101000000 ends 10000101000000 do drop table t;
+create event e_55 on schedule at 20380101000000 ends 10000101000000 do drop table t;
 --error ER_PARSE_ERROR
-create event e_55 on schedule at 20200101000000 starts 10000101000000 ends 10000101000000 do drop table t;
+create event e_55 on schedule at 20380101000000 starts 10000101000000 ends 10000101000000 do drop table t;
 --error ER_WRONG_VALUE
 create event e_55 on schedule every 10 hour starts 10000101000000 do drop table t;
 
@@ -722,7 +722,7 @@ SHOW EVENTS;
 
 # This will update event time zone.
 SET TIME_ZONE= '-03:00';
-ALTER EVENT e1 ON SCHEDULE EVERY 1 DAY ENDS '2030-01-03 00:00:00'
+ALTER EVENT e1 ON SCHEDULE EVERY 1 DAY ENDS '2038-01-03 00:00:00'
   ON COMPLETION PRESERVE DISABLE;
 SHOW EVENTS;
 
@@ -941,7 +941,7 @@ DELIMITER ;|
 #    reasonable time like 4 seconds. Till ~ 2 seconds could pass on a heavy
 #    loaded testing box before something gets executed).
 #    Detection of execution is via the records inserted by the event.
---echo Sleep till the first INSERT into events_test.event_log occured
+--echo Sleep till the first INSERT into events_test.event_log occurred
 let $wait_timeout= 4;
 let $wait_condition=
 SELECT COUNT(*) > 0 FROM events_test.event_log;
@@ -950,7 +950,6 @@ SELECT COUNT(*) > 0 AS "Expect 1" FROM events_test.event_log;
 #
 --echo connection default;
 connection default;
-DROP USER evtest1@localhost;
 # 2. If we meet BUG#28924 again than a server crash happens within the next
 #    few seconds
 # 3. Check that the event is never executed again
@@ -970,6 +969,7 @@ SELECT COUNT(*) > @row_cnt AS "Expect 0" FROM events_test.event_log;
 # Cleanup
 disconnect e1;
 DROP EVENT events_test.ev_sched_1823;
+DROP USER evtest1@localhost;
 DROP TABLE events_test.event_log;
 SET GLOBAL event_scheduler = OFF;
 SET @@session.autocommit = @save_session_autocommit;
@@ -1033,16 +1033,16 @@ SET GLOBAL READ_ONLY = 1;
 --echo
 
 --error ER_OPTION_PREVENTS_STATEMENT
-CREATE EVENT e1 ON SCHEDULE AT '2020-01-01 00:00:00' DO SET @a = 1;
+CREATE EVENT e1 ON SCHEDULE AT '2038-01-01 00:00:00' DO SET @a = 1;
 
 --echo
 
---error ER_EVENT_DOES_NOT_EXIST
+--error ER_OPTION_PREVENTS_STATEMENT
 ALTER EVENT e1 COMMENT 'comment';
 
 --echo
 
---error ER_EVENT_DOES_NOT_EXIST
+--error ER_OPTION_PREVENTS_STATEMENT
 DROP EVENT e1;
 
 --echo
@@ -1057,7 +1057,7 @@ DROP EVENT e1;
 
 --echo
 
-CREATE EVENT e1 ON SCHEDULE AT '2020-01-01 00:00:00' DO SET @a = 1;
+CREATE EVENT e1 ON SCHEDULE AT '2038-01-01 00:00:00' DO SET @a = 1;
 
 --echo
 
@@ -1204,9 +1204,6 @@ set @@sql_mode= cast(pow(2,33)-1 as unsigned integer) & ~0x1003ff00;
 create event e1 on schedule every 1 day do select 1;
 select @@sql_mode into @full_mode;
 set @@sql_mode= @old_mode;
-# Rename SQL modes that differ in name between the server and the table definition.
-select replace(@full_mode, ',,,', ',NOT_USED,') into @full_mode;
-select replace(@full_mode, 'ALLOW_INVALID_DATES', 'INVALID_DATES') into @full_mode;
 select event_name from information_schema.events where event_name = 'e1' and sql_mode = @full_mode;
 drop event e1;
 
@@ -1308,7 +1305,7 @@ USE test;
 --echo # Bug#17435114 ASSERTION FAILED: THD->LEX->LOCK_TABLES_STATE == QUERY_TABLES_LIST::LTS_NOT_LOCK
 --echo #
 
---error ER_EVENT_INTERVAL_NOT_POSITIVE_OR_TOO_BIG
+--error ER_EVENT_DOES_NOT_EXIST
 ALTER EVENT e1 ON SCHEDULE EVERY
 EXISTS (SELECT 1 AS x ORDER BY x LIMIT 0) NOT IN (1) MINUTE_SECOND;
 --error ER_EVENT_DOES_NOT_EXIST
@@ -1336,6 +1333,91 @@ SELECT SLEEP(3);
 SET @@global.autocommit=@save_autocommit_value;
 SET @@session.TIMESTAMP=default;
 DROP TABLE t1;
+
+--echo #
+--echo # Bug#28122841 - CREATE EVENT/PROCEDURE/FUNCTION CRASHES WITH ACCENT INSENSITIVE NAMES.
+--echo #
+SET NAMES utf8;
+
+--echo #
+--echo # Test case to verify events with case and accent insensitive names.
+--echo #
+CREATE EVENT cafe ON SCHEDULE EVERY 2 YEAR DO SELECT 1;
+--echo # Event names are case and accent insensitive. So from the data-dictionary
+--echo # "cafe" is obtained for the following statement. Since MDL key comparison
+--echo # is case and accent sensitive, assert condition to verify expected lock
+--echo # with name "test.cafe" fails (lock is obtained on the test.café)
+--error ER_EVENT_ALREADY_EXISTS
+CREATE EVENT café ON SCHEDULE EVERY 2 YEAR DO SELECT 1;
+--echo # Following statement is to verify operation with the upper case name.
+--error ER_EVENT_ALREADY_EXISTS
+CREATE EVENT CAFE ON SCHEDULE EVERY 2 YEAR DO SELECT 1;
+--replace_column 2 # 3 # 4 # 5 # 6 # 7 #
+SHOW CREATE EVENT CaFé;
+DROP EVENT CaFé;
+
+--echo # Event with NAME_LEN size name.
+CREATE EVENT очень_очень_очень_очень_очень_очень_очень_очень_длинная_строка_e ON SCHEDULE EVERY 2 YEAR DO SELECT 1;
+--error ER_EVENT_ALREADY_EXISTS
+CREATE EVENT очень_очень_очень_очень_очень_очень_очень_очень_длинная_строка_é ON SCHEDULE EVERY 2 YEAR DO SELECT 1;
+--error ER_EVENT_ALREADY_EXISTS
+CREATE EVENT очень_очень_очень_очень_очень_очень_очень_очень_длинная_строка_E ON SCHEDULE EVERY 2 YEAR DO SELECT 1;
+--replace_column 2 # 3 # 4 # 5 # 6 # 7 #
+SHOW CREATE EVENT очень_очень_очень_очень_очень_очень_очень_очень_длинная_строка_é;
+DROP EVENT очень_очень_очень_очень_очень_очень_очень_очень_длинная_строка_é;
+
+SET NAMES default;
+
+--echo #
+--echo # Bug#29871530 - MYSQL 8.0 INFORMATION_SCHEMA.EVENTS NOT
+--echo # OBSERVING CUSTOM TIMEZONE FOR LAST_EXECU
+--echo #
+
+SET TIMESTAMP= UNIX_TIMESTAMP('2019-08-01 01:20:30');
+SET GLOBAL event_scheduler = ON;
+SET sql_mode='STRICT_TRANS_TABLES';
+SET TIME_ZONE= '+03:00';
+CREATE EVENT my_event
+    ON SCHEDULE EVERY 2 SECOND
+      STARTS '2019-08-01 01:20:30'
+      ENDS   '2034-08-30 01:20:30'
+    DO DO 1+1;
+
+let $created=`SELECT created FROM INFORMATION_SCHEMA.EVENTS
+              WHERE EVENT_NAME='my_event'`;
+let $wait_condition =
+  SELECT last_executed IS NOT NULL
+  FROM INFORMATION_SCHEMA.EVENTS WHERE event_name = 'my_event';
+--source include/wait_condition.inc
+
+--echo # Verify value of 'LAST EXECUTED'.
+--echo # We do not check last executed against timezone change, as it
+--echo # will always be in the timezone at create event, as per:
+--echo # WL#3698: Events: execution in local time zone.
+echo $created;
+eval SELECT TIMESTAMP('$created') < LAST_EXECUTED
+     FROM INFORMATION_SCHEMA.EVENTS WHERE EVENT_NAME='my_event';
+
+--echo # Verify value of 'LAST ALTERED'.
+SET TIMESTAMP= UNIX_TIMESTAMP('2019-08-01 01:20:50');
+ALTER EVENT my_event COMMENT 'event comment';
+let $last_altered=`SELECT LAST_ALTERED FROM INFORMATION_SCHEMA.EVENTS
+                   WHERE EVENT_NAME='my_event'`;
+eval SELECT TIMESTAMP('$last_altered') = TIMESTAMP('2019-08-01 01:20:50');
+
+--echo # Check that both last altered and created is in the same time zone.
+eval SELECT (CREATED - TIMESTAMP('$created')),
+            (LAST_ALTERED - TIMESTAMP('$last_altered'))
+     FROM INFORMATION_SCHEMA.EVENTS WHERE EVENT_NAME='my_event';
+SET TIME_ZONE= '-02:00';
+eval SELECT (CREATED - CONVERT_TZ('$created', '+03:00', '-02:00')),
+            (LAST_ALTERED - CONVERT_TZ('$last_altered', '+03:00', '-02:00'))
+     FROM INFORMATION_SCHEMA.EVENTS WHERE EVENT_NAME='my_event';
+
+# Cleanup
+DROP EVENT my_event;
+SET TIME_ZONE=default;
+SET TIMESTAMP=default;
 
 ###########################################################################
 #

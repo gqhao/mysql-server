@@ -1,6 +1,6 @@
 #ifndef MDL_H
 #define MDL_H
-/* Copyright (c) 2009, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2009, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -35,6 +35,7 @@
 #include "my_inttypes.h"
 #include "my_psi_config.h"
 #include "my_sys.h"
+#include "my_systime.h"  // Timout_type
 #include "mysql/components/services/mysql_cond_bits.h"
 #include "mysql/components/services/mysql_mutex_bits.h"
 #include "mysql/components/services/mysql_rwlock_bits.h"
@@ -43,6 +44,7 @@
 #include "mysql/psi/mysql_rwlock.h"
 #include "mysql_com.h"
 #include "sql/sql_plist.h"
+#include "template_utils.h"
 
 class MDL_context;
 class MDL_lock;
@@ -51,7 +53,9 @@ class THD;
 struct LF_PINS;
 struct MDL_key;
 struct MEM_ROOT;
-
+namespace mdl_unittest {
+bool test_drive_fix_pins(MDL_context *);
+}
 /**
   @def ENTER_COND(C, M, S, O)
   Start a wait on a condition.
@@ -128,6 +132,10 @@ class MDL_context_owner {
      However it is OK to use this method in callbacks provided
      by SQL-layer to MDL subsystem (since SQL-layer has full
      access to THD anyway).
+
+     @warning For some derived classes implementation of this method
+              can return nullptr. Calling side must be ready to handle
+              this case.
    */
   virtual THD *get_thd() = 0;
 
@@ -160,7 +168,7 @@ class MDL_context_owner {
     Get random seed specific to this THD to be used for initialization
     of PRNG for the MDL_context.
   */
-  virtual uint get_rand_seed() = 0;
+  virtual uint get_rand_seed() const = 0;
 };
 
 /**
@@ -352,6 +360,9 @@ struct MDL_key {
 
     Different types of objects exist in different namespaces
      - GLOBAL is used for the global read lock.
+     - BACKUP_LOCK is to block any operations that could cause
+       inconsistent backup. Such operations are most DDL statements,
+       and some administrative statements.
      - TABLESPACE is for tablespaces.
      - SCHEMA is for schemas (aka databases).
      - TABLE is for tables and views.
@@ -365,16 +376,15 @@ struct MDL_key {
      - SRID is for spatial reference systems
      - ACL_CACHE is for ACL caches
      - COLUMN_STATISTICS is for column statistics, such as histograms
-     - BACKUP_LOCK is to block any operations that could cause
-       inconsistent backup. Such operations are most DDL statements,
-       and some administrative statements.
      - RESOURCE_GROUPS is for resource groups.
      - FOREIGN_KEY is for foreign key names.
+     - CHECK_CONSTRAINT is for check constraint names.
     Note that requests waiting for user-level locks get special
     treatment - waiting is aborted if connection to client is lost.
   */
   enum enum_mdl_namespace {
     GLOBAL = 0,
+    BACKUP_LOCK,
     TABLESPACE,
     SCHEMA,
     TABLE,
@@ -388,33 +398,40 @@ struct MDL_key {
     SRID,
     ACL_CACHE,
     COLUMN_STATISTICS,
-    BACKUP_LOCK,
     RESOURCE_GROUPS,
     FOREIGN_KEY,
+    CHECK_CONSTRAINT,
     /* This should be the last ! */
     NAMESPACE_END
   };
 
-  const uchar *ptr() const { return (uchar *)m_ptr; }
+  const uchar *ptr() const { return pointer_cast<const uchar *>(m_ptr); }
   uint length() const { return m_length; }
 
   const char *db_name() const { return m_ptr + 1; }
   uint db_name_length() const { return m_db_name_length; }
 
-  const char *name() const { return m_ptr + m_db_name_length + 2; }
+  const char *name() const {
+    return (use_normalized_object_name() ? m_ptr + m_length
+                                         : m_ptr + m_db_name_length + 2);
+  }
   uint name_length() const { return m_object_name_length; }
 
   const char *col_name() const {
+    DBUG_ASSERT(!use_normalized_object_name());
+
     if (m_db_name_length + m_object_name_length + 3 < m_length) {
       /* A column name was stored in the key buffer. */
       return m_ptr + m_db_name_length + m_object_name_length + 3;
     }
 
     /* No column name stored. */
-    return NULL;
+    return nullptr;
   }
 
   uint col_name_length() const {
+    DBUG_ASSERT(!use_normalized_object_name());
+
     if (m_db_name_length + m_object_name_length + 3 < m_length) {
       /* A column name was stored in the key buffer. */
       return m_length - m_db_name_length - m_object_name_length - 4;
@@ -442,6 +459,9 @@ struct MDL_key {
   void mdl_key_init(enum_mdl_namespace mdl_namespace, const char *db,
                     const char *name) {
     m_ptr[0] = (char)mdl_namespace;
+
+    DBUG_ASSERT(!use_normalized_object_name());
+
     /*
       It is responsibility of caller to ensure that db and object names
       are not longer than NAME_LEN. Still we play safe and try to avoid
@@ -488,6 +508,8 @@ struct MDL_key {
     m_ptr[0] = (char)mdl_namespace;
     char *start;
     char *end;
+
+    DBUG_ASSERT(!use_normalized_object_name());
 
     DBUG_ASSERT(strlen(db) <= NAME_LEN);
     start = m_ptr + 1;
@@ -567,6 +589,76 @@ struct MDL_key {
   }
 
   /**
+    Construct a metadata lock key from a quadruplet (mdl_namespace, database,
+    normalized object name buffer and the object name).
+
+    @remark The key for a routine/event/resource group/trigger is
+      @<mdl_namespace@>+@<database name@>+@<normalized object name@>
+      additionaly @<object name@> is stored in the same buffer for information
+      purpose if buffer has sufficent space.
+
+    Routine, Event and Resource group names are case sensitive and accent
+    sensitive. So normalized object name is used to form a MDL_key.
+
+    With the UTF8MB3 charset space reserved for the db name/object name is
+    64 * 3  bytes. utf8_general_ci collation is used for the Routine, Event and
+    Resource group names. With this collation, the normalized object name uses
+    just 2 bytes for each character (max length = 64 * 2 bytes). MDL_key has
+    still some space to store the object names. If there is a sufficient space
+    for the object name in the MDL_key then it is stored in the MDL_key (similar
+    to the column names in the MDL_key). Actual object name is used by the PFS.
+    Not listing actual object name from the PFS should be OK when there is no
+    space to store it (instead of increasing the MDL_key size). Object name is
+    not used in the key comparisons. So only (mdl_namespace + strlen(db) + 1 +
+    normalized_name_len + 1) value is stored in the m_length member.
+
+    @param  mdl_namespace       Id of namespace of object to be locked.
+    @param  db                  Name of database to which the object belongs.
+    @param  normalized_name     Normalized name of the object.
+    @param  normalized_name_len Length of the normalized object name.
+    @param  name                Name of the object.
+  */
+  void mdl_key_init(enum_mdl_namespace mdl_namespace, const char *db,
+                    const char *normalized_name, size_t normalized_name_len,
+                    const char *name) {
+    m_ptr[0] = (char)mdl_namespace;
+
+    /*
+      FUNCTION, PROCEDURE, EVENT and RESOURCE_GROUPS names are case and accent
+      insensitive. For other objects key should not be formed from this method.
+    */
+    DBUG_ASSERT(use_normalized_object_name());
+
+    DBUG_ASSERT(strlen(db) <= NAME_LEN && strlen(name) <= NAME_LEN &&
+                normalized_name_len <= NAME_CHAR_LEN * 2);
+
+    // Database name.
+    m_db_name_length =
+        static_cast<uint16>(strmake(m_ptr + 1, db, NAME_LEN) - m_ptr - 1);
+
+    // Normalized object name.
+    m_length = static_cast<uint16>(m_db_name_length + normalized_name_len + 3);
+    memcpy(m_ptr + m_db_name_length + 2, normalized_name, normalized_name_len);
+    *(m_ptr + m_length - 1) = 0;
+
+    /*
+      Copy name of the object if there is a sufficient space to store the name
+      in the MDL key. This code is not trying to store truncated object names,
+      to avoid cutting object_name in the middle of a multi-byte character.
+    */
+    if (strlen(name) < static_cast<size_t>(MAX_MDLKEY_LENGTH - m_length)) {
+      m_object_name_length = static_cast<uint16>(
+          (strmake(m_ptr + m_length, name, MAX_MDLKEY_LENGTH - m_length - 1) -
+           m_ptr - m_length));
+    } else {
+      m_object_name_length = 0;
+      *(m_ptr + m_length) = 0;
+    }
+
+    DBUG_ASSERT(m_length + m_object_name_length < MAX_MDLKEY_LENGTH);
+  }
+
+  /**
     Construct a metadata lock key from namespace and partial key, which
     contains info about object database and name.
 
@@ -590,13 +682,22 @@ struct MDL_key {
     DBUG_ASSERT(part_key_length <= NAME_LEN + 1 + NAME_LEN + 1);
 
     m_ptr[0] = (char)mdl_namespace;
+    /*
+      Partial key of objects with normalized object name can not be used to
+      initialize MDL key.
+    */
+    DBUG_ASSERT(!use_normalized_object_name());
+
     memcpy(m_ptr + 1, part_key, part_key_length);
     m_length = static_cast<uint16>(part_key_length + 1);
     m_db_name_length = static_cast<uint16>(db_length);
     m_object_name_length = m_length - m_db_name_length - 3;
   }
   void mdl_key_init(const MDL_key *rhs) {
-    memcpy(m_ptr, rhs->m_ptr, rhs->m_length);
+    uint16 copy_length = rhs->use_normalized_object_name()
+                             ? rhs->m_length + rhs->m_object_name_length + 1
+                             : rhs->m_length;
+    memcpy(m_ptr, rhs->m_ptr, copy_length);
     m_length = rhs->m_length;
     m_db_name_length = rhs->m_db_name_length;
     m_object_name_length = rhs->m_object_name_length;
@@ -616,11 +717,16 @@ struct MDL_key {
   */
   int cmp(const MDL_key *rhs) const {
     /*
-      The key buffer is always '\0'-terminated. Since key
-      character set is utf-8, we can safely assume that no
-      character starts with a zero byte.
+      For the keys with the normalized names, there is a possibility of getting
+      '\0' in its middle. So only key content comparison would yield incorrect
+      result. Hence comparing key length too when keys are equal.
+      For other keys, key buffer is always '\0'-terminated. Since key character
+      set is utf-8, we can safely assume that no character starts with a zero
+      byte.
     */
-    return memcmp(m_ptr, rhs->m_ptr, std::min(m_length, rhs->m_length));
+    int res = memcmp(m_ptr, rhs->m_ptr, std::min(m_length, rhs->m_length));
+    if (res == 0) res = m_length - rhs->m_length;
+    return res;
   }
 
   MDL_key(const MDL_key &rhs) { mdl_key_init(&rhs); }
@@ -642,6 +748,19 @@ struct MDL_key {
   */
   const PSI_stage_info *get_wait_state_name() const {
     return &m_namespace_to_wait_state_name[(int)mdl_namespace()];
+  }
+
+ private:
+  /**
+    Check if normalized object name should be used.
+
+    @return true if normlized object name should be used, false
+    otherwise.
+  */
+  bool use_normalized_object_name() const {
+    return (mdl_namespace() == FUNCTION || mdl_namespace() == PROCEDURE ||
+            mdl_namespace() == EVENT || mdl_namespace() == RESOURCE_GROUPS ||
+            mdl_namespace() == TRIGGER);
   }
 
  private:
@@ -687,14 +806,14 @@ class MDL_request {
   uint m_src_line{0};
 
  public:
-  static void *operator new(
-      size_t size, MEM_ROOT *mem_root,
-      const std::nothrow_t &arg MY_ATTRIBUTE((unused)) = std::nothrow) throw() {
-    return alloc_root(mem_root, size);
+  static void *operator new(size_t size, MEM_ROOT *mem_root,
+                            const std::nothrow_t &arg MY_ATTRIBUTE((unused)) =
+                                std::nothrow) noexcept {
+    return mem_root->Alloc(size);
   }
 
   static void operator delete(void *, MEM_ROOT *,
-                              const std::nothrow_t &)throw() {}
+                              const std::nothrow_t &) noexcept {}
 
   void init_with_source(MDL_key::enum_mdl_namespace namespace_arg,
                         const char *db_arg, const char *name_arg,
@@ -714,7 +833,7 @@ class MDL_request {
                                     const char *src_file, uint src_line);
   /** Set type of lock request. Can be only applied to pending locks. */
   inline void set_type(enum_mdl_type type_arg) {
-    DBUG_ASSERT(ticket == NULL);
+    DBUG_ASSERT(ticket == nullptr);
     type = type_arg;
   }
 
@@ -739,8 +858,8 @@ class MDL_request {
 
     - TABLE_LIST objects are sometimes default-constructed. We plan to remove
       this as there is no practical reason, the call to the default
-      constructor is always followed by either a call to
-      TABLE_LIST::init_one_table() or memberwise assignments.
+      constructor is always followed by either a call to TABLE_LIST::operator=
+      or memberwise assignments.
 
     - In some legacy cases TABLE_LIST objects are copy-assigned without
       intention to copy the TABLE_LIST::mdl_request member. In this cases they
@@ -758,7 +877,11 @@ class MDL_request {
   MDL_request() {}
 
   MDL_request(const MDL_request &rhs)
-      : type(rhs.type), duration(rhs.duration), ticket(NULL), key(rhs.key) {}
+      : type(rhs.type), duration(rhs.duration), ticket(nullptr), key(rhs.key) {}
+
+  MDL_request(MDL_request &&) = default;
+
+  MDL_request &operator=(MDL_request &&) = default;
 };
 
 #define MDL_REQUEST_INIT(R, P1, P2, P3, P4, P5) \
@@ -874,8 +997,8 @@ class MDL_ticket : public MDL_wait_for_subgraph {
   bool is_incompatible_when_waiting(enum_mdl_type type) const;
 
   /** Implement MDL_wait_for_subgraph interface. */
-  virtual bool accept_visitor(MDL_wait_for_graph_visitor *dvisitor);
-  virtual uint get_deadlock_weight() const;
+  bool accept_visitor(MDL_wait_for_graph_visitor *dvisitor) override;
+  uint get_deadlock_weight() const override;
 
 #ifndef DBUG_OFF
   enum_mdl_duration get_duration() const { return m_duration; }
@@ -907,13 +1030,13 @@ class MDL_ticket : public MDL_wait_for_subgraph {
         m_duration(duration_arg),
 #endif
         m_ctx(ctx_arg),
-        m_lock(NULL),
+        m_lock(nullptr),
         m_is_fast_path(false),
         m_hton_notified(false),
-        m_psi(NULL) {
+        m_psi(nullptr) {
   }
 
-  virtual ~MDL_ticket() { DBUG_ASSERT(m_psi == NULL); }
+  ~MDL_ticket() override { DBUG_ASSERT(m_psi == nullptr); }
 
   static MDL_ticket *create(MDL_context *ctx_arg, enum_mdl_type type_arg
 #ifndef DBUG_OFF
@@ -1117,9 +1240,6 @@ class MDL_ticket_store {
     underlying list is an intrusive linked list there is no guarantee
     that the ticket is actually in the duration list. It will be
     removed from which ever list it is in.
-
-    @param dur
-    @param ticket
    */
   void remove(enum_mdl_duration dur, MDL_ticket *ticket);
 
@@ -1176,7 +1296,7 @@ class MDL_ticket_store {
 
 class MDL_savepoint {
  public:
-  MDL_savepoint(){};
+  MDL_savepoint() {}
 
  private:
   MDL_savepoint(MDL_ticket *stmt_ticket, MDL_ticket *trans_ticket)
@@ -1206,7 +1326,9 @@ class MDL_wait {
   MDL_wait();
   ~MDL_wait();
 
-  enum enum_wait_status { EMPTY = 0, GRANTED, VICTIM, TIMEOUT, KILLED };
+  // WS_EMPTY since EMPTY conflicts with #define in system headers on some
+  // platforms.
+  enum enum_wait_status { WS_EMPTY = 0, GRANTED, VICTIM, TIMEOUT, KILLED };
 
   bool set_status(enum_wait_status result_arg);
   enum_wait_status get_status();
@@ -1280,12 +1402,29 @@ class MDL_context {
   void destroy();
 
   bool try_acquire_lock(MDL_request *mdl_request);
-  bool acquire_lock(MDL_request *mdl_request, ulong lock_wait_timeout);
-  bool acquire_locks(MDL_request_list *requests, ulong lock_wait_timeout);
+  bool acquire_lock(MDL_request *mdl_request, Timeout_type lock_wait_timeout);
+  bool acquire_locks(MDL_request_list *requests,
+                     Timeout_type lock_wait_timeout);
   bool upgrade_shared_lock(MDL_ticket *mdl_ticket, enum_mdl_type new_type,
-                           ulong lock_wait_timeout);
+                           Timeout_type lock_wait_timeout);
 
   bool clone_ticket(MDL_request *mdl_request);
+
+  /**
+    Create copy of all granted tickets of particular duration from given
+    context to current context.
+    Used by XA for preserving locks during client disconnect.
+
+    @param ticket_owner  Owner of tickets to be cloned
+    @param duration      MDL lock duration for that tickets are to be cloned
+
+    @retval true   Out of memory or deadlock happened or
+                   lock request was refused by storage engine.
+    @retval false  Success.
+  */
+
+  bool clone_tickets(const MDL_context *ticket_owner,
+                     enum_mdl_duration duration);
 
   void release_all_locks_for_name(MDL_ticket *ticket);
   void release_locks(MDL_release_locks_visitor *visitor);
@@ -1307,6 +1446,12 @@ class MDL_context {
   bool has_locks(MDL_key::enum_mdl_namespace mdl_namespace) const;
 
   bool has_locks_waited_for() const;
+
+#ifndef DBUG_OFF
+  bool has_locks(enum_mdl_duration duration) {
+    return !m_ticket_store.is_empty(duration);
+  }
+#endif
 
   MDL_savepoint mdl_savepoint() {
     return MDL_savepoint(m_ticket_store.front(MDL_STATEMENT),
@@ -1503,7 +1648,9 @@ class MDL_context {
   void release_lock(enum_mdl_duration duration, MDL_ticket *ticket);
   bool try_acquire_lock_impl(MDL_request *mdl_request, MDL_ticket **out_ticket);
   void materialize_fast_path_locks();
-  inline bool fix_pins();
+
+  friend bool mdl_unittest::test_drive_fix_pins(MDL_context *);
+  bool fix_pins();
 
  public:
   void find_deadlock();
@@ -1532,7 +1679,7 @@ class MDL_context {
   /** Remove the wait-for edge from the graph after we're done waiting. */
   void done_waiting_for() {
     mysql_prlock_wrlock(&m_LOCK_waiting_for);
-    m_waiting_for = NULL;
+    m_waiting_for = nullptr;
     mysql_prlock_unlock(&m_LOCK_waiting_for);
   }
   void lock_deadlock_victim() { mysql_prlock_rdlock(&m_LOCK_waiting_for); }

@@ -1,4 +1,4 @@
-/* Copyright (c) 2010, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2010, 2020, Oracle and/or its affiliates. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -102,6 +102,15 @@ struct CHARSET_INFO;
 #endif
 
 #ifdef HAVE_PSI_STATEMENT_INTERFACE
+#define MYSQL_SET_STATEMENT_QUERY_ID(LOCKER, P1) \
+  inline_mysql_set_statement_query_id(LOCKER, P1)
+#else
+#define MYSQL_SET_STATEMENT_QUERY_ID(LOCKER, P1) \
+  do {                                           \
+  } while (0)
+#endif
+
+#ifdef HAVE_PSI_STATEMENT_INTERFACE
 #define MYSQL_SET_STATEMENT_LOCK_TIME(LOCKER, P1) \
   inline_mysql_set_statement_lock_time(LOCKER, P1)
 #else
@@ -152,9 +161,9 @@ static inline void inline_mysql_statement_register(
 #ifdef HAVE_PSI_STATEMENT_DIGEST_INTERFACE
 static inline struct PSI_digest_locker *inline_mysql_digest_start(
     PSI_statement_locker *locker) {
-  PSI_digest_locker *digest_locker = NULL;
+  PSI_digest_locker *digest_locker = nullptr;
 
-  if (likely(locker != NULL)) {
+  if (likely(locker != nullptr)) {
     digest_locker = PSI_DIGEST_CALL(digest_start)(locker);
   }
   return digest_locker;
@@ -164,7 +173,7 @@ static inline struct PSI_digest_locker *inline_mysql_digest_start(
 #ifdef HAVE_PSI_STATEMENT_DIGEST_INTERFACE
 static inline void inline_mysql_digest_end(PSI_digest_locker *locker,
                                            const sql_digest_storage *digest) {
-  if (likely(locker != NULL)) {
+  if (likely(locker != nullptr)) {
     PSI_DIGEST_CALL(digest_end)(locker, digest);
   }
 }
@@ -178,7 +187,7 @@ static inline struct PSI_statement_locker *inline_mysql_start_statement(
   PSI_statement_locker *locker;
   locker = PSI_STATEMENT_CALL(get_thread_statement_locker)(state, key, charset,
                                                            sp_share);
-  if (likely(locker != NULL)) {
+  if (likely(locker != nullptr)) {
     PSI_STATEMENT_CALL(start_statement)(locker, db, db_len, src_file, src_line);
   }
   return locker;
@@ -186,7 +195,7 @@ static inline struct PSI_statement_locker *inline_mysql_start_statement(
 
 static inline struct PSI_statement_locker *inline_mysql_refine_statement(
     PSI_statement_locker *locker, PSI_statement_key key) {
-  if (likely(locker != NULL)) {
+  if (likely(locker != nullptr)) {
     locker = PSI_STATEMENT_CALL(refine_statement)(locker, key);
   }
   return locker;
@@ -195,28 +204,35 @@ static inline struct PSI_statement_locker *inline_mysql_refine_statement(
 static inline void inline_mysql_set_statement_text(PSI_statement_locker *locker,
                                                    const char *text,
                                                    uint text_len) {
-  if (likely(locker != NULL)) {
+  if (likely(locker != nullptr)) {
     PSI_STATEMENT_CALL(set_statement_text)(locker, text, text_len);
+  }
+}
+
+static inline void inline_mysql_set_statement_query_id(
+    PSI_statement_locker *locker, ulonglong id) {
+  if (likely(locker != nullptr)) {
+    PSI_STATEMENT_CALL(set_statement_query_id)(locker, id);
   }
 }
 
 static inline void inline_mysql_set_statement_lock_time(
     PSI_statement_locker *locker, ulonglong count) {
-  if (likely(locker != NULL)) {
+  if (likely(locker != nullptr)) {
     PSI_STATEMENT_CALL(set_statement_lock_time)(locker, count);
   }
 }
 
 static inline void inline_mysql_set_statement_rows_sent(
     PSI_statement_locker *locker, ulonglong count) {
-  if (likely(locker != NULL)) {
+  if (likely(locker != nullptr)) {
     PSI_STATEMENT_CALL(set_statement_rows_sent)(locker, count);
   }
 }
 
 static inline void inline_mysql_set_statement_rows_examined(
     PSI_statement_locker *locker, ulonglong count) {
-  if (likely(locker != NULL)) {
+  if (likely(locker != nullptr)) {
     PSI_STATEMENT_CALL(set_statement_rows_examined)(locker, count);
   }
 }
@@ -226,12 +242,12 @@ static inline void inline_mysql_end_statement(
 #ifdef HAVE_PSI_STAGE_INTERFACE
   PSI_STAGE_CALL(end_stage)();
 #endif /* HAVE_PSI_STAGE_INTERFACE */
-  if (likely(locker != NULL)) {
+  if (likely(locker != nullptr)) {
     PSI_STATEMENT_CALL(end_statement)(locker, stmt_da);
   }
 }
 #endif
 
-  /** @} (end of group psi_api_statement) */
+/** @} (end of group psi_api_statement) */
 
 #endif

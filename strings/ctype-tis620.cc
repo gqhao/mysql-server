@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -60,6 +60,8 @@
 
 #include <string.h>
 #include <sys/types.h>
+
+#include <algorithm>
 
 #include "m_ctype.h"
 #include "m_string.h"
@@ -599,11 +601,11 @@ static int my_strnncoll_tis620(const CHARSET_INFO *cs MY_ATTRIBUTE((unused)),
 
   tc1 = buf;
   if ((len1 + len2 + 2) > (int)sizeof(buf))
-    tc1 = (uchar *)my_str_malloc(len1 + len2 + 2);
+    tc1 = static_cast<uchar *>(my_str_malloc(len1 + len2 + 2));
   tc2 = tc1 + len1 + 1;
-  memcpy((char *)tc1, (char *)s1, len1);
+  memcpy(tc1, s1, len1);
   tc1[len1] = 0; /* if length(s1)> len1, need to put 'end of string' */
-  memcpy((char *)tc2, (char *)s2, len2);
+  memcpy(tc2, s2, len2);
   tc2[len2] = 0; /* put end of string */
   thai2sortable(tc1, len1);
   thai2sortable(tc2, len2);
@@ -615,7 +617,7 @@ static int my_strnncoll_tis620(const CHARSET_INFO *cs MY_ATTRIBUTE((unused)),
 static int my_strnncollsp_tis620(const CHARSET_INFO *cs MY_ATTRIBUTE((unused)),
                                  const uchar *a0, size_t a_length,
                                  const uchar *b0, size_t b_length) {
-  uchar buf[80], *end, *a, *b, *alloced = NULL;
+  uchar buf[80], *end, *a, *b, *alloced = nullptr;
   size_t length;
   int res = 0;
 
@@ -624,14 +626,14 @@ static int my_strnncollsp_tis620(const CHARSET_INFO *cs MY_ATTRIBUTE((unused)),
     alloced = a = (uchar *)my_str_malloc(a_length + b_length + 2);
 
   b = a + a_length + 1;
-  memcpy((char *)a, (char *)a0, a_length);
+  memcpy(a, a0, a_length);
   a[a_length] = 0; /* if length(a0)> len1, need to put 'end of string' */
-  memcpy((char *)b, (char *)b0, b_length);
+  memcpy(b, b0, b_length);
   b[b_length] = 0; /* put end of string */
   a_length = thai2sortable(a, a_length);
   b_length = thai2sortable(b, b_length);
 
-  end = a + (length = MY_MIN(a_length, b_length));
+  end = a + (length = std::min(a_length, b_length));
   while (a < end) {
     if (*a++ != *b++) {
       res = ((int)a[-1] - (int)b[-1]);
@@ -676,7 +678,7 @@ static size_t my_strnxfrm_tis620(const CHARSET_INFO *cs, uchar *dst,
                                  size_t dstlen, uint nweights, const uchar *src,
                                  size_t srclen, uint flags) {
   size_t dstlen0 = dstlen;
-  size_t min_len = MY_MIN(dstlen, srclen);
+  size_t min_len = std::min(dstlen, srclen);
   size_t len = 0;
 
   /*
@@ -690,8 +692,8 @@ static size_t my_strnxfrm_tis620(const CHARSET_INFO *cs, uchar *dst,
   }
 
   len = thai2sortable(dst, len);
-  set_if_smaller(dstlen, nweights);
-  set_if_smaller(len, dstlen);
+  dstlen = std::min(dstlen, size_t(nweights));
+  len = std::min(len, size_t(dstlen));
   len = my_strxfrm_pad(cs, dst, dst + len, dst + dstlen, (uint)(dstlen - len),
                        flags);
   if ((flags & MY_STRXFRM_PAD_TO_MAXLEN) && len < dstlen0) {
@@ -824,28 +826,38 @@ static const uchar plFF[256] = {
     0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
     0x0000, 0x00FF, 0x0000, 0x0000};
 static const uchar *uni_to_cs[256] = {
-    pl00, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, pl0E, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-    NULL, NULL, NULL, plFF};
+    pl00,    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, pl0E,    nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, plFF};
 
 extern "C" {
 static int my_mb_wc_tis620(const CHARSET_INFO *cs MY_ATTRIBUTE((unused)),
@@ -883,8 +895,8 @@ static MY_COLLATION_HANDLER my_collation_ci_handler = {
     my_propagate_simple};
 
 static MY_CHARSET_HANDLER my_charset_handler = {
-    NULL,              /* init */
-    NULL,              /* ismbchar  */
+    nullptr,           /* init */
+    nullptr,           /* ismbchar  */
     my_mbcharlen_8bit, /* mbcharlen */
     my_numchars_8bit,
     my_charpos_8bit,
@@ -918,19 +930,19 @@ CHARSET_INFO my_charset_tis620_thai_ci = {
     MY_CS_COMPILED | MY_CS_PRIMARY | MY_CS_STRNXFRM, /* state     */
     "tis620",                                        /* cs name    */
     "tis620_thai_ci",                                /* name      */
-    "",                                              /* comment   */
-    NULL,                                            /* tailoring */
-    NULL,                                            /* coll_param */
+    "TIS620 Thai",                                   /* comment   */
+    nullptr,                                         /* tailoring */
+    nullptr,                                         /* coll_param */
     ctype_tis620,
     to_lower_tis620,
     to_upper_tis620,
     sort_order_tis620,
-    NULL,                /* uca          */
-    NULL,                /* tab_to_uni   */
-    NULL,                /* tab_from_uni */
+    nullptr,             /* uca          */
+    nullptr,             /* tab_to_uni   */
+    nullptr,             /* tab_from_uni */
     &my_unicase_default, /* caseinfo     */
-    NULL,                /* state_map    */
-    NULL,                /* ident_map    */
+    nullptr,             /* state_map    */
+    nullptr,             /* ident_map    */
     4,                   /* strxfrm_multiply */
     1,                   /* caseup_multiply  */
     1,                   /* casedn_multiply  */
@@ -940,7 +952,7 @@ CHARSET_INFO my_charset_tis620_thai_ci = {
     0,                   /* min_sort_char */
     255,                 /* max_sort_char */
     ' ',                 /* pad char      */
-    0,                   /* escape_with_backslash_is_dangerous */
+    false,               /* escape_with_backslash_is_dangerous */
     1,                   /* levels_for_compare */
     &my_charset_handler,
     &my_collation_ci_handler,
@@ -953,19 +965,19 @@ CHARSET_INFO my_charset_tis620_bin = {
     MY_CS_COMPILED | MY_CS_BINSORT, /* state     */
     "tis620",                       /* cs name    */
     "tis620_bin",                   /* name      */
-    "",                             /* comment   */
-    NULL,                           /* tailoring */
-    NULL,                           /* coll_param */
+    "TIS620 Thai",                  /* comment   */
+    nullptr,                        /* tailoring */
+    nullptr,                        /* coll_param */
     ctype_tis620,
     to_lower_tis620,
     to_upper_tis620,
-    NULL,                /* sort_order   */
-    NULL,                /* uca          */
-    NULL,                /* tab_to_uni   */
-    NULL,                /* tab_from_uni */
+    nullptr,             /* sort_order   */
+    nullptr,             /* uca          */
+    nullptr,             /* tab_to_uni   */
+    nullptr,             /* tab_from_uni */
     &my_unicase_default, /* caseinfo     */
-    NULL,                /* state_map    */
-    NULL,                /* ident_map    */
+    nullptr,             /* state_map    */
+    nullptr,             /* ident_map    */
     1,                   /* strxfrm_multiply */
     1,                   /* caseup_multiply  */
     1,                   /* casedn_multiply  */
@@ -975,7 +987,7 @@ CHARSET_INFO my_charset_tis620_bin = {
     0,                   /* min_sort_char */
     255,                 /* max_sort_char */
     ' ',                 /* pad char      */
-    0,                   /* escape_with_backslash_is_dangerous */
+    false,               /* escape_with_backslash_is_dangerous */
     1,                   /* levels_for_compare */
     &my_charset_handler,
     &my_collation_8bit_bin_handler,

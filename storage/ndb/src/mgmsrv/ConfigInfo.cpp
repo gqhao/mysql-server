@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -24,7 +24,6 @@
 
 #include <ndb_global.h>
 
-#include <NdbTCP.h>
 #include "ConfigInfo.hpp"
 #include <mgmapi_config_parameters.h>
 #include <ndb_limits.h>
@@ -33,7 +32,7 @@
 #include <Bitmask.hpp>
 #include <ndb_opts.h>
 #include <ndb_version.h>
-
+#include "../src/kernel/vm/mt-asm.h"
 
 #include <portlib/ndb_localtime.h>
 
@@ -65,17 +64,17 @@ ConfigInfo::m_sectionNameAliases[]={
   {0, 0}
 };
 
+// Also defines the order used in print_impl()/print()/print_xml().
 const char* 
 ConfigInfo::m_sectionNames[]={
   "SYSTEM",
   "COMPUTER",
 
-  DB_TOKEN,
-  MGM_TOKEN,
   API_TOKEN,
+  MGM_TOKEN,
+  DB_TOKEN,
 
   "TCP",
-  "SCI",
   "SHM"
 };
 const int ConfigInfo::m_noOfSectionNames = 
@@ -96,7 +95,6 @@ static bool fixPortNumber(InitConfigFileParser::Context & ctx, const char *);
 static bool fixShmKey(InitConfigFileParser::Context & ctx, const char *);
 static bool checkDbConstraints(InitConfigFileParser::Context & ctx, const char *);
 static bool checkConnectionConstraints(InitConfigFileParser::Context &, const char *);
-static bool checkTCPConstraints(InitConfigFileParser::Context &, const char *);
 static bool fixNodeHostname(InitConfigFileParser::Context & ctx, const char * data);
 static bool fixHostname(InitConfigFileParser::Context & ctx, const char * data);
 static bool fixNodeId(InitConfigFileParser::Context & ctx, const char * data);
@@ -121,11 +119,9 @@ ConfigInfo::m_SectionRules[] = {
 
   { "TCP",  checkConnectionSupport, 0 },
   { "SHM",  checkConnectionSupport, 0 },
-  { "SCI",  checkConnectionSupport, 0 },
 
   { "TCP",  transformConnection, 0 },
   { "SHM",  transformConnection, 0 },
-  { "SCI",  transformConnection, 0 },
   
   { DB_TOKEN,   fixNodeHostname, 0 },
   { API_TOKEN,  fixNodeHostname, 0 },
@@ -135,25 +131,19 @@ ConfigInfo::m_SectionRules[] = {
   { "TCP",  fixNodeId, "NodeId2" },
   { "SHM",  fixNodeId, "NodeId1" },
   { "SHM",  fixNodeId, "NodeId2" },
-  { "SCI",  fixNodeId, "NodeId1" },
-  { "SCI",  fixNodeId, "NodeId2" },
   
   { "TCP",  uniqueConnection, "TCP" },
   { "SHM",  uniqueConnection, "SHM" },
-  { "SCI",  uniqueConnection, "SCI" },
 
   { "TCP",  fixHostname, "HostName1" },
   { "TCP",  fixHostname, "HostName2" },
   { "SHM",  fixHostname, "HostName1" },
   { "SHM",  fixHostname, "HostName2" },
-  { "SCI",  fixHostname, "HostName1" },
-  { "SCI",  fixHostname, "HostName2" },
   { "SHM",  fixHostname, "HostName1" },
   { "SHM",  fixHostname, "HostName2" },
 
   { "TCP",  fixPortNumber, 0 }, // has to come after fixHostName
   { "SHM",  fixPortNumber, 0 }, // has to come after fixHostName
-  { "SCI",  fixPortNumber, 0 }, // has to come after fixHostName
 
   { "*",    applyDefaultValues, "user" },
   { "*",    fixDeprecated, 0 },
@@ -176,15 +166,7 @@ ConfigInfo::m_SectionRules[] = {
 
   { "TCP",  checkConnectionConstraints, 0 },
   { "SHM",  checkConnectionConstraints, 0 },
-  { "SCI",  checkConnectionConstraints, 0 },
 
-  { "TCP",  checkTCPConstraints, "HostName1" },
-  { "TCP",  checkTCPConstraints, "HostName2" },
-  { "SCI",  checkTCPConstraints, "HostName1" },
-  { "SCI",  checkTCPConstraints, "HostName2" },
-  { "SHM",  checkTCPConstraints, "HostName1" },
-  { "SHM",  checkTCPConstraints, "HostName2" },
-  
   { "*",    checkMandatory, 0 }
 };
 const int ConfigInfo::m_NoOfRules = sizeof(m_SectionRules)/sizeof(SectionRule);
@@ -446,6 +428,24 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     0, 0 },
 
   {
+    CFG_NODE_DEDICATED,
+    "Dedicated",
+    DB_TOKEN,
+    "The node id for this node will only be handed out to connections that "
+    "explicitly request it. Data nodes that request 'any' nodeid will not be "
+    "able to use this one. Can be used when HostName is not enough to "
+    "distinguish different processes, and one runs several data nodes on same "
+    "host. There is typically no need to use this option since ven if one run "
+    "several data nodes on same host it is enough to always use --ndb-nodeid "
+    "option when starting data nodes even without this option. ",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_BOOL,
+    "false",
+    "false",
+    "true" },
+
+  {
     CFG_NODE_SYSTEM,
     "System",
     DB_TOKEN,
@@ -491,6 +491,18 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "2",
     "1",
     "4" },
+
+  {
+    CFG_DB_NODE_GROUP_TRANSPORTERS,
+    "NodeGroupTransporters",
+    DB_TOKEN,
+    "Number of transporters to use between nodes in same node group",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_INT,
+    "0",
+    "0",
+    STR_VALUE(MAX_NODE_GROUP_TRANSPORTERS) },
 
   {
     CFG_DB_NO_ATTRIBUTES,
@@ -544,8 +556,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_DB_NO_INDEX_OPS,
     "MaxNoOfConcurrentIndexOperations",
     DB_TOKEN,
-    "Total number of index operations that can execute simultaneously on one " DB_TOKEN_PRINT " node",
-    ConfigInfo::CI_USED,
+    "TransactionMemory",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
     "8K",
@@ -569,8 +581,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_DB_NO_TRIGGER_OPS,
     "MaxNoOfFiredTriggers",
     DB_TOKEN,
-    "Total number of triggers that can fire simultaneously in one " DB_TOKEN_PRINT " node",
-    ConfigInfo::CI_USED,
+    "TransactionMemory",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
     "4000",
@@ -630,6 +642,18 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "RealtimeScheduler",
     DB_TOKEN,
     "If yes, then NDB Cluster threads will be scheduled as real-time threads",
+    ConfigInfo::CI_USED,
+    0,
+    ConfigInfo::CI_BOOL,
+    "false",
+    "false",
+    "true" },
+
+  {
+    CFG_DB_USE_SHM,
+    "UseShm",
+    DB_TOKEN,
+    "Use shared memory transporter on same host",
     ConfigInfo::CI_USED,
     0,
     ConfigInfo::CI_BOOL,
@@ -698,6 +722,41 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "500" },
 
   {
+    /**
+     * Allowed values are:
+     * StaticSpinning
+     *   Use traditional static spinning based on configuration.
+     *
+     * CostBasedSpinning
+     *   Use adaptive spinning, allow overhead of 200% and max
+     *   spintime of 100 us. This gives some benefits on VMs
+     *   even in shared environment although it pays a small
+     *   cost for improved latency.
+     *
+     * LatencyOptimisedSpinning
+     *   Use adaptive spinning, allow overhead of 1000% and
+     *   max spintime of 200 us. This mode means spinning at a
+     *   fairly high cost, but still limited. This mode can
+     *   be used when latency is important, but it one still
+     *   attempts to have reasonable limits on CPU usage.
+     *
+     * DatabaseMachineSpinning
+     *   Use adaptive spinning, allow overhead of 10000% and
+     *   max spintime of 500 us. This mode means spinning
+     *   all the time except when we are idle. Use this when
+     *   latency is vital and no other users exists on the
+     *   machine or at least the CPUs used by the data node.
+     */
+    CFG_DB_SPIN_METHOD,
+    "SpinMethod",
+    DB_TOKEN,
+    "Spin method used by data node",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_STRING,
+    "StaticSpinning", 0, 0 },
+
+  {
     CFG_DB_SCHED_RESPONSIVENESS,
     "SchedulerResponsiveness",
     DB_TOKEN,
@@ -717,9 +776,9 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     ConfigInfo::CI_USED,
     false,
     ConfigInfo::CI_INT,
-    "6",
+    "16",
     "1",
-    "6" },
+    "16" },
 
   {
     CFG_DB_DISK_DATA_FORMAT,
@@ -744,6 +803,18 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "6000",
     "70",
     STR_VALUE(MAX_INT_RNIL) },
+
+  {
+    CFG_DB_WATCHDOG_IMMEDIATE_KILL,
+    "WatchDogImmediateKill",
+    DB_TOKEN,
+    "Kill threads immediately at watchdog issue",
+    ConfigInfo::CI_USED,
+    0,
+    ConfigInfo::CI_BOOL,
+    "false",
+    "false",
+    "true"},
 
   {
     CFG_DB_STOP_ON_ERROR,
@@ -785,7 +856,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_DB_MAX_DML_OPERATIONS_PER_TRANSACTION,
     "MaxDMLOperationsPerTransaction",
     DB_TOKEN,
-    "Max DML-operations in one transaction (0 == no limit)",
+    "Max DML-operations in one transaction",
     ConfigInfo::CI_USED,
     false,
     ConfigInfo::CI_INT,
@@ -798,8 +869,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_DB_NO_LOCAL_OPS,
     "MaxNoOfLocalOperations",
     DB_TOKEN,
-    "Max number of operation records defined in the local storage node",
-    ConfigInfo::CI_USED,
+    "TransactionMemory",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
     0,
@@ -810,8 +881,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_DB_NO_LOCAL_SCANS,
     "MaxNoOfLocalScans",
     DB_TOKEN,
-    "Max number of fragment scans in parallel in the local storage node",
-    ConfigInfo::CI_USED,
+    "TransactionMemory",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
     0,
@@ -888,7 +959,19 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     ConfigInfo::CI_INT64,
     "98M",
     "1M",
-    "1024G" },
+    "16384G" },
+
+  {
+    CFG_DB_TRANSACTION_MEM,
+    "TransactionMemory",
+    DB_TOKEN,
+    "Number bytes on each " DB_TOKEN_PRINT " node allocated for operations",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_INT64,
+    "0",
+    "0",
+    "16384G" },
 
   {
     CFG_DB_UNDO_INDEX_BUFFER,
@@ -948,7 +1031,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     ConfigInfo::CI_INT64,
     "64M",
     "4M",
-    "1024G" },
+    "16384G" },
 
   {
     CFG_DB_SGA,
@@ -958,11 +1041,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     ConfigInfo::CI_USED,
     false,
     ConfigInfo::CI_INT64,
-#if NDB_VERSION_D < NDB_MAKE_VERSION(7,2,0)
-    "20M",
-#else
     "128M",
-#endif
     "0",
     "65536G" }, // 32k pages * 32-bit i value
   
@@ -1459,6 +1538,23 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "1",
     "1" },
   
+  {
+    CFG_DB_ENABLE_MT_BACKUP,
+    "EnableMultithreadedBackup",
+    DB_TOKEN,
+    "Enable multi-threaded backup. If the cluster config permits, i.e. if"
+    " all nodes have at least 2 LDMs, all the LDM threads will participate"
+    " in backup. The backup will be written in the mt-backup file format,"
+    " which consists of one subdirectory per LDM thread, where"
+    " each subdirectory contains Ctl, Data and Log backup files.",
+    ConfigInfo::CI_USED,
+    0,
+    ConfigInfo::CI_INT,
+    "1",
+    "0",
+    "1"
+  },
+
   { 
     CFG_DB_BACKUP_DATADIR,
     "BackupDataDir",
@@ -1550,7 +1646,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_DB_BACKUP_MEM,
     "BackupMemory",
     DB_TOKEN,
-    "Total memory allocated for backups per node (in bytes)",
+    "sum of hardcoded BackupDataBufferSize(=2MB) and BackupLogBufferSize",
     ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
@@ -1562,7 +1658,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_DB_BACKUP_DATA_BUFFER_MEM,
     "BackupDataBufferSize",
     DB_TOKEN,
-    "Default size of databuffer for a backup (in bytes)",
+    "hardcoded value of 2MB",
     ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
@@ -1586,7 +1682,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_DB_BACKUP_WRITE_SIZE,
     "BackupWriteSize",
     DB_TOKEN,
-    "Default size of filesystem writes made by backup (in bytes)",
+    "hardcoded value of 256 KB",
     ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
@@ -1598,7 +1694,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_DB_BACKUP_MAX_WRITE_SIZE,
     "BackupMaxWriteSize",
     DB_TOKEN,
-    "Max size of filesystem writes made by backup (in bytes)",
+    "hardcoded value of 2MB",
     ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
@@ -1614,7 +1710,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     ConfigInfo::CI_USED,
     false,
     ConfigInfo::CI_INT,
-    "25",
+    "5",
     "0",
     STR_VALUE(MAX_INT_RNIL) },
 
@@ -1714,6 +1810,19 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "true"},
 
   {
+    CFG_DB_REQUIRE_ENCRYPTED_BACKUP,
+    "RequireEncryptedBackup",
+    DB_TOKEN,
+    "If set to one only encrypted backups are allowed. If zero both encrypted "
+    "and unencrypted backups are allowed.",
+    ConfigInfo::CI_USED,
+    0,
+    ConfigInfo::CI_INT,
+    "0",
+    "0",
+    "1"},
+
+  {
     CFG_EXTRA_SEND_BUFFER_MEMORY,
     "ExtraSendBufferMemory",
     DB_TOKEN,
@@ -1771,7 +1880,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     DB_TOKEN,
     "For ndbmtd, specify max no of execution threads",
     ConfigInfo::CI_USED,
-    false,
+    CI_RESTART_SYSTEM | CI_RESTART_INITIAL,
     ConfigInfo::CI_INT,
     "0",
     "2",
@@ -1832,7 +1941,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     DB_TOKEN,
     "Thread configuration",
     ConfigInfo::CI_USED,
-    false,
+    CI_RESTART_SYSTEM | CI_RESTART_INITIAL,
     ConfigInfo::CI_STRING,
     0,
     0,
@@ -2009,7 +2118,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     false,
     ConfigInfo::CI_INT,
     "20",                    /* Default */
-    "0",                     /* Min */
+    "1",                     /* Min */
     STR_VALUE(MAX_INT_RNIL)  /* Max */
   },
 
@@ -2023,7 +2132,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     false,
     ConfigInfo::CI_INT,
     "3",                     /* Default */
-    "0",                     /* Min */
+    "1",                     /* Min */
     STR_VALUE(MAX_INT_RNIL)  /* Max */
   },
 
@@ -2251,9 +2360,53 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     ConfigInfo::CI_USED,
     false,
     ConfigInfo::CI_INT,
-    "60",
+    "180",
     "0",
     STR_VALUE(MAX_INT_RNIL)
+  },
+
+  {
+    CFG_DB_MAX_DD_LATENCY,
+    "MaxDiskDataLatency",
+    DB_TOKEN,
+    "Maximum allowed mean latency of disk access in milliseconds."
+    "When this limit is reached we will start aborting transactions"
+    " to decrease pressure on IO susbsystem. 0 means this check is"
+    " not active",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_INT,
+    "0",
+    "0",
+    "8000"
+  },
+
+  {
+    CFG_DB_DD_USING_SAME_DISK,
+    "DiskDataUsingSameDisk",
+    DB_TOKEN,
+    "Set this to false if Disk data tablespaces uses their own disk"
+    " drives. This means that we can push checkpoints to tablespaces"
+    " at a higher rate than if disk drives are shared.",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_BOOL,
+    "true",
+    "false",
+    "true"
+  },
+
+  {
+    CFG_DB_ENABLE_REDO_CONTROL,
+    "EnableRedoControl",
+    DB_TOKEN,
+    "Enable adaptive speed of checkpointing to control REDO log usage",
+    ConfigInfo::CI_USED,
+    0,
+    ConfigInfo::CI_BOOL,
+    "true",
+    "false",
+    "true"
   },
 
   {
@@ -2270,6 +2423,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "false",
     "true"
   },
+
   {
     CFG_DB_RECOVERY_WORK,
     "RecoveryWork",
@@ -2280,9 +2434,26 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     ConfigInfo::CI_USED,
     0,
     ConfigInfo::CI_INT,
-    "50",
+    "60",
     "25",
     "100"
+  },
+
+  {
+    CFG_DB_INSERT_RECOVERY_WORK,
+    "InsertRecoveryWork",
+    DB_TOKEN,
+    "Percentage of RecoveryWork used for inserted rows, setting this high"
+    " increases the writes during LCPs and decreases the total LCP size, "
+    "setting it lower means we are writing less during LCPs but will "
+    "eventually have a larger LCP size and thus also longer recovery"
+    " for a period of time.",
+    ConfigInfo::CI_USED,
+    0,
+    ConfigInfo::CI_INT,
+    "40",
+    "0",
+    "70"
   },
 
   {
@@ -2392,6 +2563,97 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "512"
   },
 
+  {
+    CFG_DB_RESERVED_INDEX_OPS,
+    "ReservedConcurrentIndexOperations",
+    DB_TOKEN,
+    "Number of simultaneous index operations that have dedicated resources on one " DB_TOKEN_PRINT " node",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_INT,
+    "0", // "2K",
+    "0",
+    STR_VALUE(MAX_INT_RNIL)
+  },
+
+  {
+    CFG_DB_RESERVED_TRIGGER_OPS,
+    "ReservedFiredTriggers",
+    DB_TOKEN,
+    "Number of triggers that have dedicated resources on one " DB_TOKEN_PRINT " node",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_INT,
+    "0", // "1000",
+    "0",
+    STR_VALUE(MAX_INT_RNIL)
+  },
+
+  {
+    CFG_DB_RESERVED_OPS,
+    "ReservedConcurrentOperations",
+    DB_TOKEN,
+    "Number of simultaneous operation that have dedicated resources in transaction coordinators on one " DB_TOKEN_PRINT " node",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_INT,
+    "0", // "32k",
+    "0",
+    STR_VALUE(MAX_INT_RNIL)
+  },
+
+  {
+    CFG_DB_RESERVED_LOCAL_SCANS,
+    "ReservedLocalScans",
+    DB_TOKEN,
+    "Number of simultaneous fragment scans that have dedicated resources on one " DB_TOKEN_PRINT " node",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_INT,
+    "0",
+    "0",
+    STR_VALUE(MAX_INT_RNIL)
+  },
+
+  {
+    CFG_DB_RESERVED_TRANSACTIONS,
+    "ReservedConcurrentTransactions",
+    DB_TOKEN,
+    "Number of simultaneous transactions that have dedicated resources on one " DB_TOKEN_PRINT " node",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_INT,
+    "0", // "1024",
+    "0",
+    STR_VALUE(MAX_INT_RNIL)
+  },
+
+  {
+    CFG_DB_RESERVED_SCANS,
+    "ReservedConcurrentScans",
+    DB_TOKEN,
+    "Number of simultaneous scans that have dedicated resources on one " DB_TOKEN_PRINT " node",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_INT,
+    "0", // "64",
+    "0",
+    "500"
+  },
+
+  {
+    CFG_DB_RESERVED_TRANS_BUFFER_MEM,
+    "ReservedTransactionBufferMemory",
+    DB_TOKEN,
+    "Dynamic buffer space (in bytes) for key and attribute data allocated for each " DB_TOKEN_PRINT " node",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_INT,
+    "0", // "256K",
+    "0",
+    STR_VALUE(MAX_INT_RNIL)
+  },
+
   /***************************************************************************
    * API
    ***************************************************************************/
@@ -2430,6 +2692,24 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     ConfigInfo::CI_STRING,
     "",
     0, 0 },
+
+  {
+    CFG_NODE_DEDICATED,
+    "Dedicated",
+    API_TOKEN,
+    "The node id for this node will only be handed out to connections that "
+    "explicitly request it. Api client that request 'any' nodeid will not be "
+    "able to use this one. Can be used when HostName is not enough to "
+    "distinguish different processes, and one runs a server process like "
+    "mysqld on same host as some other ndb client programs and want to avoid "
+    "the client program steal a node id dedicated to mysqld while the mysqld "
+    "is not connected.",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_BOOL,
+    "false",
+    "false",
+    "true" },
 
   {
     CFG_NODE_SYSTEM,
@@ -2731,6 +3011,23 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     ConfigInfo::CI_STRING,
     "",
     0, 0 },
+
+  {
+    CFG_NODE_DEDICATED,
+    "Dedicated",
+    MGM_TOKEN,
+    "The node id for this node will only be handed out to connections that "
+    "explicitly request it. Management servers that request 'any' nodeid will "
+    "not be able to use this one. Can be used when HostName is not enough to "
+    "distinguish different processes, and one runs several management "
+    "servers on same host, which should typically only be the case in test "
+    "clusters.",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_BOOL,
+    "false",
+    "false",
+    "true" },
 
   {
     CFG_NODE_DATADIR,
@@ -3075,6 +3372,19 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     STR_VALUE(MAX_INT_RNIL) },
 
   {
+    CFG_TCP_SPINTIME,
+    "TcpSpintime",
+    "TCP",
+    "Number of microseconds to spin before going to sleep when receiving",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_INT,
+    "0",
+    "0",
+    "2000"
+  },
+
+  {
     CFG_TCP_RECEIVE_BUFFER_SIZE,
     "ReceiveBufferMemory",
     "TCP",
@@ -3183,6 +3493,18 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     STR_VALUE(MAX_INT_RNIL)
   },
 
+  {
+     CFG_CONNECTION_UNRES_HOSTS,
+     "AllowUnresolvedHostnames",
+     "TCP",
+     "Allow startup to continue with unresolved hostnames in configuration",
+     ConfigInfo::CI_USED,
+     false,
+     ConfigInfo::CI_BOOL,
+     "false",
+     "false", "true"
+   },
+
   /****************************************************************************
    * SHM
    ***************************************************************************/
@@ -3191,7 +3513,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "SHM",
     "SHM",
     "Connection section",
-    ConfigInfo::CI_EXPERIMENTAL,
+    ConfigInfo::CI_USED,
     false,
     ConfigInfo::CI_SECTION,
     (const char *)CONNECTION_TYPE_SHM, 
@@ -3235,8 +3557,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_SHM_SIGNUM,
     "Signum",
     "SHM",
-    "Signum to be used for signalling",
-    ConfigInfo::CI_EXPERIMENTAL,
+    "Signum ignored, deprecated",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
     0,
@@ -3248,7 +3570,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "NodeId1",
     "SHM",
     "Id of node (" DB_TOKEN_PRINT ", " API_TOKEN_PRINT " or " MGM_TOKEN_PRINT ") on one side of the connection",
-    ConfigInfo::CI_EXPERIMENTAL,
+    ConfigInfo::CI_USED,
     false,
     ConfigInfo::CI_STRING,
     MANDATORY,
@@ -3259,7 +3581,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "NodeId2",
     "SHM",
     "Id of node (" DB_TOKEN_PRINT ", " API_TOKEN_PRINT " or " MGM_TOKEN_PRINT ") on one side of the connection",
-    ConfigInfo::CI_EXPERIMENTAL,
+    ConfigInfo::CI_USED,
     false,
     ConfigInfo::CI_STRING,
     MANDATORY,
@@ -3270,7 +3592,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "Group",
     "SHM",
     "",
-    ConfigInfo::CI_EXPERIMENTAL,
+    ConfigInfo::CI_USED,
     false,
     ConfigInfo::CI_INT,
     "35",
@@ -3281,7 +3603,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "NodeIdServer",
     "SHM",
     "",
-    ConfigInfo::CI_EXPERIMENTAL,
+    ConfigInfo::CI_USED,
     false,
     ConfigInfo::CI_INT,
     MANDATORY,
@@ -3292,7 +3614,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "SendSignalId",
     "SHM",
     "Sends id in each signal.  Used in trace files.",
-    ConfigInfo::CI_EXPERIMENTAL,
+    ConfigInfo::CI_USED,
     false,
     ConfigInfo::CI_BOOL,
     "false",
@@ -3305,7 +3627,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "Checksum",
     "SHM",
     "If checksum is enabled, all signals between nodes are checked for errors",
-    ConfigInfo::CI_EXPERIMENTAL,
+    ConfigInfo::CI_USED,
     false,
     ConfigInfo::CI_BOOL,
     "true",
@@ -3331,7 +3653,7 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "ShmKey",
     "SHM",
     "A shared memory key",
-    ConfigInfo::CI_EXPERIMENTAL,
+    ConfigInfo::CI_USED,
     false,
     ConfigInfo::CI_INT,
     0,
@@ -3343,10 +3665,10 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     "ShmSize",
     "SHM",
     "Size of shared memory segment",
-    ConfigInfo::CI_EXPERIMENTAL,
+    ConfigInfo::CI_USED,
     false,
     ConfigInfo::CI_INT,
-    "1M",
+    "4M",
     "64K",
     STR_VALUE(MAX_INT_RNIL) },
 
@@ -3386,27 +3708,53 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     STR_VALUE(MAX_INT_RNIL)
   },
 
+  {
+    CFG_SHM_SPINTIME,
+    "ShmSpintime",
+    "SHM",
+    "Number of microseconds to spin before going to sleep when receiving",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_INT,
+    "0",
+    "0",
+    "2000"
+  },
+
+  {
+    CFG_SHM_SEND_BUFFER_SIZE,
+    "SendBufferMemory",
+    "SHM",
+    "Bytes of buffer for signals sent from this node",
+    ConfigInfo::CI_USED,
+    false,
+    ConfigInfo::CI_INT,
+    "2M",
+    "64K",
+    STR_VALUE(MAX_INT_RNIL)
+  },
+
   /****************************************************************************
-   * SCI
+   * SCI (Deprecated now)
    ***************************************************************************/
   {
     CFG_SECTION_CONNECTION,
     "SCI",
     "SCI",
-    "Connection section",
-    ConfigInfo::CI_EXPERIMENTAL,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_SECTION,
-    (const char *)CONNECTION_TYPE_SCI, 
-    0, 0 
+    (const char *)CONNECTION_TYPE_SCI,
+    0, 0
   },
 
   {
     CFG_CONNECTION_NODE_1,
     "NodeId1",
     "SCI",
-    "Id of node (" DB_TOKEN_PRINT ", " API_TOKEN_PRINT " or " MGM_TOKEN_PRINT ") on one side of the connection",
-    ConfigInfo::CI_EXPERIMENTAL,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_STRING,
     MANDATORY,
@@ -3416,8 +3764,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_CONNECTION_NODE_2,
     "NodeId2",
     "SCI",
-    "Id of node (" DB_TOKEN_PRINT ", " API_TOKEN_PRINT " or " MGM_TOKEN_PRINT ") on one side of the connection",
-    ConfigInfo::CI_EXPERIMENTAL,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_STRING,
     MANDATORY,
@@ -3427,8 +3775,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_CONNECTION_GROUP,
     "Group",
     "SCI",
-    "",
-    ConfigInfo::CI_EXPERIMENTAL,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
     "15",
@@ -3438,8 +3786,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_CONNECTION_NODE_ID_SERVER,
     "NodeIdServer",
     "SCI",
-    "",
-    ConfigInfo::CI_EXPERIMENTAL,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
     MANDATORY,
@@ -3449,8 +3797,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_CONNECTION_HOSTNAME_1,
     "HostName1",
     "SCI",
-    "Name/IP of computer on one side of the connection",
-    ConfigInfo::CI_USED,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_STRING,
     0,
@@ -3460,8 +3808,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_CONNECTION_HOSTNAME_2,
     "HostName2",
     "SCI",
-    "Name/IP of computer on one side of the connection",
-    ConfigInfo::CI_USED,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_STRING,
     0,
@@ -3476,15 +3824,15 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     false,
     ConfigInfo::CI_INT,
     "0",
-    "0", 
+    "0",
     STR_VALUE(MAX_PORT_NO) },
 
   {
     CFG_SCI_HOST1_ID_0,
     "Host1SciId0",
     "SCI",
-    "SCI-node id for adapter 0 on Host1 (a computer can have two adapters)",
-    ConfigInfo::CI_EXPERIMENTAL,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
     MANDATORY,
@@ -3495,8 +3843,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_SCI_HOST1_ID_1,
     "Host1SciId1",
     "SCI",
-    "SCI-node id for adapter 1 on Host1 (a computer can have two adapters)",
-    ConfigInfo::CI_EXPERIMENTAL,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
     "0",
@@ -3507,8 +3855,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_SCI_HOST2_ID_0,
     "Host2SciId0",
     "SCI",
-    "SCI-node id for adapter 0 on Host2 (a computer can have two adapters)",
-    ConfigInfo::CI_EXPERIMENTAL,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
     MANDATORY,
@@ -3519,8 +3867,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_SCI_HOST2_ID_1,
     "Host2SciId1",
     "SCI",
-    "SCI-node id for adapter 1 on Host2 (a computer can have two adapters)",
-    ConfigInfo::CI_EXPERIMENTAL,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
     "0",
@@ -3531,8 +3879,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_CONNECTION_SEND_SIGNAL_ID,
     "SendSignalId",
     "SCI",
-    "Sends id in each signal.  Used in trace files.",
-    ConfigInfo::CI_EXPERIMENTAL,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_BOOL,
     "true",
@@ -3543,8 +3891,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_CONNECTION_CHECKSUM,
     "Checksum",
     "SCI",
-    "If checksum is enabled, all signals between nodes are checked for errors",
-    ConfigInfo::CI_EXPERIMENTAL,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_BOOL,
     "false",
@@ -3555,10 +3903,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_CONNECTION_PRESEND_CHECKSUM,
     "PreSendChecksum",
     "SCI",
-    "If PreSendChecksum AND Checksum are enabled,\n"
-    "pre-send checksum checks are done, and\n"
-    "all signals between nodes are checked for errors",
-    ConfigInfo::CI_USED,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_BOOL,
     "false",
@@ -3569,8 +3915,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_SCI_SEND_LIMIT,
     "SendLimit",
     "SCI",
-    "Transporter send buffer contents are sent when this no of bytes is buffered",
-    ConfigInfo::CI_EXPERIMENTAL,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
     "8K",
@@ -3581,8 +3927,8 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_SCI_BUFFER_MEM,
     "SharedBufferSize",
     "SCI",
-    "Size of shared memory segment",
-    ConfigInfo::CI_EXPERIMENTAL,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
     "1M",
@@ -3615,16 +3961,14 @@ const ConfigInfo::ParamInfo ConfigInfo::m_ParamInfo[] = {
     CFG_CONNECTION_OVERLOAD,
     "OverloadLimit",
     "SCI",
-    "Number of unsent bytes that must be in the send buffer before the\n"
-    "connection is considered overloaded",
-    ConfigInfo::CI_EXPERIMENTAL,
+    "SCI not supported",
+    ConfigInfo::CI_DEPRECATED,
     false,
     ConfigInfo::CI_INT,
     "0",
     "0",
     STR_VALUE(MAX_INT_RNIL)
   }
-
 };
 
 const int ConfigInfo::m_NoOfParams = sizeof(m_ParamInfo) / sizeof(ParamInfo);
@@ -4093,9 +4437,6 @@ ConfigInfo::sectionName(Uint32 section_type, Uint32 type) const {
     case CONNECTION_TYPE_SHM:
       return "SHM";
       break;
-    case CONNECTION_TYPE_SCI:
-      return "SCI";
-      break;
     default:
       assert(false);
       break;
@@ -4116,7 +4457,6 @@ section2PrimaryKeys[]={
   {DB_TOKEN,  "NodeId"},
   {MGM_TOKEN, "NodeId"},
   {"TCP", "NodeId1,NodeId2"},
-  {"SCI", "NodeId1,NodeId2"},
   {"SHM", "NodeId1,NodeId2"},
   {0, 0}
 };
@@ -4160,6 +4500,16 @@ ConfigInfo::verify_enum(const Properties * section, const char* fname,
 }
 
 
+/*
+ * Get allowed values for enum parameters in a space separated list.
+ *
+ * It returns values in order of increasing numerical value to make it possible
+ * to map numerical value to string value.
+ *
+ * At least in the cases there enum values are consecutive and zero based,
+ * which is the case for ConfigInfo.
+ */
+
 void
 ConfigInfo::get_enum_values(const Properties * section, const char* fname,
                       BaseString& list) const {
@@ -4170,9 +4520,25 @@ ConfigInfo::get_enum_values(const Properties * section, const char* fname,
 
   const char* separator = "";
   Properties::Iterator it(values);
+  Vector<const char*> enum_names;
+  const char* fill = nullptr;
+  unsigned cnt = 0;
   for (const char* name = it.first(); name != NULL; name = it.next())
   {
-    list.appfmt("%s%s", separator, name);
+    Uint32 val;
+    values->get(name, &val);
+    enum_names.set(name, val, fill);
+    cnt++;
+  }
+  // Enum values should be consecutive starting at zero.
+  assert(enum_names.size() == cnt);
+  for (unsigned i = 0; i < enum_names.size(); i++)
+  {
+    if (enum_names[i] == nullptr)
+    {
+      continue;
+    }
+    list.appfmt("%s%s", separator, enum_names[i]);
     separator = " ";
   }
 }
@@ -4204,7 +4570,7 @@ public:
   ConfigPrinter(FILE* out = stdout) :
     m_out(out)
     {}
-  virtual ~ConfigPrinter() {};
+  virtual ~ConfigPrinter() {}
 
   virtual void start() {}
   virtual void end() {}
@@ -4223,17 +4589,17 @@ public:
 class PrettyPrinter : public ConfigPrinter {
 public:
   PrettyPrinter(FILE* out = stdout) : ConfigPrinter(out) {}
-  virtual ~PrettyPrinter() {}
+  ~PrettyPrinter() override {}
 
-  virtual void section_start(const char* name, const char* alias,
-                             const char* primarykeys = NULL) {
+  void section_start(const char* name, const char* alias,
+                     const char* primarykeys = NULL) override {
     fprintf(m_out, "****** %s ******\n\n", name);
   }
 
-  virtual void parameter(const char* section_name,
+  void parameter(const char* section_name,
                          const Properties* section,
                          const char* param_name,
-                         const ConfigInfo& info)
+                         const ConfigInfo& info) override
   {
     // Don't print deprecated parameters
     const Uint32 status = info.getStatus(section, param_name);
@@ -4347,11 +4713,11 @@ class XMLPrinter : public ConfigPrinter {
 
 public:
   XMLPrinter(FILE* out = stdout) : ConfigPrinter(out), m_indent(0) {}
-  virtual ~XMLPrinter() {
+  ~XMLPrinter() override {
     assert(m_indent == 0);
   }
 
-  virtual void start() {
+  void start() override {
     BaseString buf;
     Properties pairs;
     pairs.put("protocolversion", "1");
@@ -4369,14 +4735,14 @@ public:
     print_xml("configvariables", pairs, false);
     m_indent++;
   }
-  virtual void end() {
+  void end() override {
     m_indent--;
     Properties pairs;
     print_xml("/configvariables", pairs, false);
   }
 
-  virtual void section_start(const char* name, const char* alias,
-                             const char* primarykeys = NULL) {
+  void section_start(const char* name, const char* alias,
+                     const char* primarykeys = NULL) override {
     Properties pairs;
     pairs.put("name", alias ? alias : name);
     if (primarykeys)
@@ -4384,16 +4750,16 @@ public:
     print_xml("section", pairs, false);
     m_indent++;
   }
-  virtual void section_end(const char* name) {
+  void section_end(const char* name) override {
     m_indent--;
     Properties pairs;
     print_xml("/section", pairs, false);
   }
 
-  virtual void parameter(const char* section_name,
-                         const Properties* section,
-                         const char* param_name,
-                         const ConfigInfo& info){
+  void parameter(const char* section_name,
+                 const Properties* section,
+                 const char* param_name,
+                 const ConfigInfo& info) override{
     BaseString buf;
     Properties pairs;
     pairs.put("name", param_name);
@@ -4516,12 +4882,18 @@ void ConfigInfo::print_impl(const char* section_filter,
                             ConfigPrinter& printer) const {
   printer.start();
   /* Iterate through all sections */
-  Properties::Iterator it(&m_info);
-  for (const char* s = it.first(); s != NULL; s = it.next()) {
+  for (int i = 0; i < m_noOfSectionNames; i++)
+  {
+    const char* s = m_sectionNames[i];
     if (section_filter && strcmp(section_filter, s))
       continue; // Skip this section
 
     const Properties * sec = getInfo(s);
+    if (sec == nullptr)
+    {
+      // There was no such section
+      continue;
+    }
 
     if (is_internal_section(sec))
       continue; // Skip whole section
@@ -4634,7 +5006,9 @@ static bool checkLocalhostHostnameMix(InitConfigFileParser::Context & ctx, const
     DBUG_RETURN(true);
 
   Uint32 localhost_used= 0;
-  if(!strcmp(hostname, "localhost") || !strcmp(hostname, "127.0.0.1")){
+  if(!strcmp(hostname, "localhost") ||
+     !strcmp(hostname, "127.0.0.1") ||
+     !strcmp(hostname, "::1")){
     localhost_used= 1;
     ctx.m_userProperties.put("$computer-localhost-used", localhost_used);
     if(!ctx.m_userProperties.get("$computer-localhost", &hostname))
@@ -4733,15 +5107,7 @@ checkConnectionSupport(InitConfigFileParser::Context & ctx, const char * data)
   }
   else if (native_strcasecmp("SHM",ctx.fname) == 0)
   {
-#ifndef NDB_SHM_TRANSPORTER
-    error= 1;
-#endif
-  }
-  else if (native_strcasecmp("SCI",ctx.fname) == 0)
-  {
-#ifndef NDB_SCI_TRANSPORTER
-    error= 1;
-#endif
+    // always enabled
   }
 
   if (error)
@@ -5165,28 +5531,6 @@ fixShmKey(InitConfigFileParser::Context & ctx, const char *)
 {
   DBUG_ENTER("fixShmKey");
   {
-    static int last_signum= -1;
-    Uint32 signum = 0;
-    if(!ctx.m_currentSection->get("Signum", &signum))
-    {
-      if (signum <= 0)
-      {
-	  ctx.reportError("Unable to set default parameter for [SHM]Signum"
-			  " please specify [SHM DEFAULT]Signum");
-          DBUG_RETURN(false);
-      }
-      ctx.m_currentSection->put("Signum", signum);
-      DBUG_PRINT("info",("Added Signum=%u", signum));
-    }
-    if ( last_signum != (int)signum && last_signum >= 0 )
-    {
-      ctx.reportError("All shared memory transporters must have same [SHM]Signum defined."
-		      " Use [SHM DEFAULT]Signum");
-      DBUG_RETURN(false);
-    }
-    last_signum= (int)signum;
-  }
-  {
     Uint32 id1= 0, id2= 0, key= 0;
     require(ctx.m_currentSection->get("NodeId1", &id1));
     require(ctx.m_currentSection->get("NodeId2", &id2));
@@ -5204,30 +5548,86 @@ fixShmKey(InitConfigFileParser::Context & ctx, const char *)
 /**
  * DB Node rule: Check various constraints
  */
-static bool
-checkDbConstraints(InitConfigFileParser::Context & ctx, const char *){
+#define CHECK_RESERVED_LESS_THAN_OR_EQUAL_TO_MAX_NO_OF(name)           \
+  if (Reserved##name > MaxNoOf##name)                                  \
+  {                                                                    \
+    ctx.reportError("Reserved" #name " must be less than or equal to " \
+		    "MaxNoOf" #name " - [%s] starting at line: %d",    \
+		    ctx.fname, ctx.m_sectionLineno);                   \
+    ok = false;                                                        \
+  }
 
-  Uint32 t1 = 0, t2 = 0;
-  ctx.m_currentSection->get("MaxNoOfConcurrentOperations", &t1);
-  ctx.m_currentSection->get("MaxNoOfConcurrentTransactions", &t2);
+static bool
+checkDbConstraints(InitConfigFileParser::Context & ctx, const char *)
+{
+  bool ok = true;
+
+  Uint32 MaxDMLOperationsPerTransaction = ~Uint32(0);
+  Uint32 MaxNoOfConcurrentIndexOperations = 0;
+  Uint32 MaxNoOfConcurrentOperations = 0;
+  Uint32 MaxNoOfConcurrentScans = 0;
+  Uint32 MaxNoOfConcurrentTransactions = 0;
+  Uint32 MaxNoOfFiredTriggers = 0;
+  Uint32 MaxNoOfLocalScans = 0;
+  Uint32 ReservedConcurrentIndexOperations = 0;
+  Uint32 ReservedConcurrentOperations = 0;
+  Uint32 ReservedConcurrentScans = 0;
+  Uint32 ReservedConcurrentTransactions = 0;
+  Uint32 ReservedFiredTriggers = 0;
+  Uint32 ReservedLocalScans = 0;
+
+  ctx.m_currentSection->get("MaxDMLOperationsPerTransaction", &MaxDMLOperationsPerTransaction);
+  ctx.m_currentSection->get("MaxNoOfConcurrentIndexOperations", &MaxNoOfConcurrentIndexOperations);
+  ctx.m_currentSection->get("MaxNoOfConcurrentOperations", &MaxNoOfConcurrentOperations);
+  ctx.m_currentSection->get("MaxNoOfConcurrentScans", &MaxNoOfConcurrentScans);
+  ctx.m_currentSection->get("MaxNoOfConcurrentTransactions", &MaxNoOfConcurrentTransactions);
+  ctx.m_currentSection->get("MaxNoOfFiredTriggers", &MaxNoOfFiredTriggers);
+  ctx.m_currentSection->get("MaxNoOfLocalScans", &MaxNoOfLocalScans);
+  ctx.m_currentSection->get("ReservedConcurrentIndexOperations", &ReservedConcurrentIndexOperations);
+  ctx.m_currentSection->get("ReservedConcurrentOperations", &ReservedConcurrentOperations);
+  ctx.m_currentSection->get("ReservedConcurrentScans", &ReservedConcurrentScans);
+  ctx.m_currentSection->get("ReservedConcurrentTransactions", &ReservedConcurrentTransactions);
+  ctx.m_currentSection->get("ReservedFiredTriggers", &ReservedFiredTriggers);
+  ctx.m_currentSection->get("ReservedLocalScans", &ReservedLocalScans);
   
-  if (t1 < t2) {
+  if (MaxDMLOperationsPerTransaction != ~Uint32(0) &&
+      MaxNoOfConcurrentOperations < MaxDMLOperationsPerTransaction)
+  {
+    ctx.reportError("MaxDMLOperationsPerTransaction must not be greater than "
+		    "MaxNoOfConcurrentOperations - [%s] starting at line: %d",
+		    ctx.fname, ctx.m_sectionLineno);
+    ok = false;
+  }
+
+  if (MaxNoOfConcurrentOperations < MaxNoOfConcurrentTransactions)
+  {
     ctx.reportError("MaxNoOfConcurrentOperations must be greater than "
 		    "MaxNoOfConcurrentTransactions - [%s] starting at line: %d",
 		    ctx.fname, ctx.m_sectionLineno);
-    return false;
+    ok = false;
   }
+
+  CHECK_RESERVED_LESS_THAN_OR_EQUAL_TO_MAX_NO_OF(ConcurrentIndexOperations);
+  CHECK_RESERVED_LESS_THAN_OR_EQUAL_TO_MAX_NO_OF(ConcurrentOperations);
+  CHECK_RESERVED_LESS_THAN_OR_EQUAL_TO_MAX_NO_OF(ConcurrentScans);
+  CHECK_RESERVED_LESS_THAN_OR_EQUAL_TO_MAX_NO_OF(ConcurrentTransactions);
+  CHECK_RESERVED_LESS_THAN_OR_EQUAL_TO_MAX_NO_OF(FiredTriggers);
+  CHECK_RESERVED_LESS_THAN_OR_EQUAL_TO_MAX_NO_OF(LocalScans);
 
   Uint32 replicas = 0, otherReplicas;
   ctx.m_currentSection->get("NoOfReplicas", &replicas);
-  if(ctx.m_userProperties.get("NoOfReplicas", &otherReplicas)){
-    if(replicas != otherReplicas){
+  if (ctx.m_userProperties.get("NoOfReplicas", &otherReplicas))
+  {
+    if (replicas != otherReplicas)
+    {
       ctx.reportError("NoOfReplicas defined differently on different nodes"
 		      " - [%s] starting at line: %d",
 		      ctx.fname, ctx.m_sectionLineno);
-      return false;
+      ok = false;
     }
-  } else {
+  }
+  else
+  {
     ctx.m_userProperties.put("NoOfReplicas", replicas);
   }
 
@@ -5247,15 +5647,16 @@ checkDbConstraints(InitConfigFileParser::Context & ctx, const char *){
 
   Uint64 sum= (Uint64)noOfTables + noOfOrderedIndexes + noOfUniqueHashIndexes;
   
-  if (sum > ((Uint32)~0 - 2)) {
+  if (sum > ((Uint32)~0 - 2))
+  {
     ctx.reportError("The sum of MaxNoOfTables, MaxNoOfOrderedIndexes and"
 		    " MaxNoOfUniqueHashIndexes must not exceed %u - [%s]"
                     " starting at line: %d",
 		    ((Uint32)~0 - 2), ctx.fname, ctx.m_sectionLineno);
-    return false;
+    ok = false;
   } 
 
-  return true;
+  return ok;
 }
 
 #include <NdbThread.h>
@@ -5494,21 +5895,6 @@ uniqueConnection(InitConfigFileParser::Context & ctx, const char * data)
   return true;
 }
 
-static bool
-checkTCPConstraints(InitConfigFileParser::Context & ctx, const char * data){
-  
-  const char * host;
-  struct in_addr addr;
-  if(ctx.m_currentSection->get(data, &host) && strlen(host) && 
-     Ndb_getInAddr(&addr, host)){
-    ctx.reportError("Unable to lookup/illegal hostname %s"
-		    " - [%s] starting at line: %d",
-		    host, ctx.fname, ctx.m_sectionLineno);
-    return false;
-  }
-  return true;
-}
-
 static
 bool
 transform(InitConfigFileParser::Context & ctx,
@@ -5619,7 +6005,9 @@ fixDeprecated(InitConfigFileParser::Context & ctx, const char * data){
 }
 
 static bool
-saveInConfigValues(InitConfigFileParser::Context & ctx, const char * data){
+saveInConfigValues(InitConfigFileParser::Context & ctx,
+                   const char * data)
+{
   const Properties * sec;
   if(!ctx.m_currentInfo->get(ctx.fname, &sec)){
     require(false);
@@ -5642,10 +6030,8 @@ saveInConfigValues(InitConfigFileParser::Context & ctx, const char * data){
     Uint32 no = 0;
     ctx.m_userProperties.get("$Section", id, &no);
     ctx.m_userProperties.put("$Section", id, no+1, true);
-    
-    ctx.m_configValues.openSection(id, no);
-    ctx.m_configValues.put(CFG_TYPE_OF_SECTION, typeVal);
-    
+
+    ctx.m_configValues.createSection(id, typeVal);
     Properties::Iterator it(ctx.m_currentSection);
     for (const char* n = it.first(); n != NULL; n = it.next()) {
       const Properties * info;
@@ -5886,7 +6272,6 @@ add_node_connections(Vector<ConfigInfo::ConfigRuleSection>&sections,
   Uint32 i;
   Properties * props= ctx.m_config;
   Properties p_connections(true);
-  Properties p_connections2(true);
 
   for (i = 0;; i++){
     const Properties * tmp;
@@ -5895,12 +6280,9 @@ add_node_connections(Vector<ConfigInfo::ConfigRuleSection>&sections,
     if(!props->get("Connection", i, &tmp)) break;
 
     if(!tmp->get("NodeId1", &nodeId1)) continue;
-    p_connections.put("", nodeId1, nodeId1);
     if(!tmp->get("NodeId2", &nodeId2)) continue;
-    p_connections.put("", nodeId2, nodeId2);
-
-    p_connections2.put("", nodeId1 + (nodeId2<<16), nodeId1);
-    p_connections2.put("", nodeId2 + (nodeId1<<16), nodeId2);
+    p_connections.put("", nodeId1 + (nodeId2<<16), nodeId1);
+    p_connections.put("", nodeId2 + (nodeId1<<16), nodeId2);
   }
 
   Uint32 nNodes;
@@ -5920,7 +6302,9 @@ add_node_connections(Vector<ConfigInfo::ConfigRuleSection>&sections,
     if(!tmp->get("Type", &type)) continue;
 
     if (strcmp(type,DB_TOKEN) == 0)
+    {
       p_db_nodes.put("", i_db++, i);
+    }
     else if (strcmp(type,API_TOKEN) == 0)
       p_api_nodes.put("", i_api++, i);
     else if (strcmp(type,MGM_TOKEN) == 0)
@@ -5933,7 +6317,7 @@ add_node_connections(Vector<ConfigInfo::ConfigRuleSection>&sections,
   for (i= 0; p_db_nodes.get("", i, &nodeId1); i++){
     for (Uint32 j= i+1;; j++){
       if(!p_db_nodes.get("", j, &nodeId2)) break;
-      if(!p_connections2.get("", nodeId1+(nodeId2<<16), &dummy)) 
+      if(!p_connections.get("", nodeId1+(nodeId2<<16), &dummy)) 
       {
 	if (!add_a_connection(sections,ctx,nodeId1,nodeId2,false))
 	  goto err;
@@ -5942,21 +6326,37 @@ add_node_connections(Vector<ConfigInfo::ConfigRuleSection>&sections,
   }
 
   // API -> DB
-  for (i= 0; p_api_nodes.get("", i, &nodeId1); i++){
-    if(!p_connections.get("", nodeId1, &dummy)) {
-      for (Uint32 j= 0;; j++){
-	if(!p_db_nodes.get("", j, &nodeId2)) break;
-	if (!add_a_connection(sections,ctx,nodeId1,nodeId2,false))
+  for (i= 0; p_api_nodes.get("", i, &nodeId1); i++)
+  {
+    for (Uint32 j= 0; p_db_nodes.get("", j, &nodeId2); j++)
+    {
+      Uint32 use_shm = 0;
+      {
+        const Properties *shm_check;
+        if (props->get("Node", nodeId2, &shm_check))
+        {
+          shm_check->get("UseShm", &use_shm);
+        }
+      }
+      if(!p_connections.get("", nodeId1+(nodeId2<<16), &dummy))
+      {
+	if (!add_a_connection(sections,
+                              ctx,
+                              nodeId1,
+                              nodeId2,
+                              (bool)use_shm))
 	  goto err;
       }
     }
   }
 
   // MGM -> DB
-  for (i= 0; p_mgm_nodes.get("", i, &nodeId1); i++){
-    if(!p_connections.get("", nodeId1, &dummy)) {
-      for (Uint32 j= 0;; j++){
-	if(!p_db_nodes.get("", j, &nodeId2)) break;
+  for (i= 0; p_mgm_nodes.get("", i, &nodeId1); i++)
+  {
+    for (Uint32 j= 0; p_db_nodes.get("", j, &nodeId2); j++)
+    {
+      if(!p_connections.get("", nodeId1+(nodeId2<<16), &dummy))
+      {
 	if (!add_a_connection(sections,ctx,nodeId1,nodeId2,0))
 	  goto err;
       }
@@ -5967,7 +6367,7 @@ add_node_connections(Vector<ConfigInfo::ConfigRuleSection>&sections,
   for (i= 0; p_mgm_nodes.get("", i, &nodeId1); i++){
     for (Uint32 j= i+1;; j++){
       if(!p_mgm_nodes.get("", j, &nodeId2)) break;
-      if(!p_connections2.get("", nodeId1+(nodeId2<<16), &dummy))
+      if(!p_connections.get("", nodeId1+(nodeId2<<16), &dummy))
       {
 	if (!add_a_connection(sections,ctx,nodeId1,nodeId2,0))
 	  goto err;
@@ -6027,7 +6427,7 @@ check_node_vs_replicas(Vector<ConfigInfo::ConfigRuleSection>&sections,
       {
         if (ng == NDB_NO_NODEGROUP)
         {
-          break;
+          continue;
         }
         else if (ng >= MAX_NDB_NODES)
         {
@@ -6383,9 +6783,9 @@ saveSectionsInConfigValues(Vector<ConfigInfo::ConfigRuleSection>& notused,
     }
 
     assert(data_sz >> 32 == 0);
-    ctx.m_configValues.expand(keys, Uint32(data_sz));
   }
 
+  require(ctx.m_configValues.begin());
   for (const char * name = it.first(); name != 0; name = it.next())
   {
     PropertiesType pt;
@@ -6403,7 +6803,7 @@ saveSectionsInConfigValues(Vector<ConfigInfo::ConfigRuleSection>& notused,
       saveInConfigValues(ctx, 0);
     }
   }
-
+  require(ctx.m_configValues.commit(false));
   return true;
 }
 

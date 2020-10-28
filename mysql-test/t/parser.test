@@ -20,9 +20,6 @@ SET @save_sql_mode=@@sql_mode;
 # - an error is the expected result with the current implementation,
 #   and is a limitation.
 
-# Test needs MyISAM for a few subtests
---source include/have_myisam.inc
-
 set SQL_MODE='';
 
 create table ADDDATE(a int);
@@ -431,9 +428,6 @@ select "terminated, space";      $$
 select "non terminated, comment" /* comment */$$
 select "terminated, comment"; /* comment */$$
 
-# Multi queries can not be used in --ps-protocol test mode
---disable_ps_protocol
-
 select "stmt 1";select "stmt 2 non terminated"$$
 select "stmt 1";select "stmt 2 terminated";$$
 select "stmt 1";select "stmt 2 non terminated, space"      $$
@@ -449,8 +443,6 @@ $$
 
 DROP PROCEDURE IF EXISTS p26030; CREATE PROCEDURE p26030() SELECT 1; CALL p26030()
 $$
-
---enable_ps_protocol
 
 delimiter ;$$
 DROP PROCEDURE p26030;
@@ -748,50 +740,6 @@ DROP TABLE t1, t2, t3;
 --echo #
 
 #
-# Bug#31293 - Incorrect parser errors for create/alter/drop logfile group/tablespace
-#
-
---echo # Should use myisam
-
--- error ER_ILLEGAL_HA_CREATE_OPTION
-create logfile group ndb_lg1 add undofile 'ndb_undo1.dat' initial_size=32M engine=myisam; 
--- error ER_ILLEGAL_HA_CREATE_OPTION
-create logfile group ndb_lg1 add undofile 'ndb_undo1.dat' engine=myisam;
--- error ER_ILLEGAL_HA_CREATE_OPTION
-create logfile group ndb_lg1 add undofile 'ndb_undo1.dat';
-
--- error ER_ILLEGAL_HA_CREATE_OPTION
-create tablespace ndb_ts1 add datafile 'ndb_ts1.dat' use logfile group ndb_lg1 engine=myisam initial_size=32M;
--- error ER_ILLEGAL_HA_CREATE_OPTION
-create tablespace ndb_ts1 add datafile 'ndb_ts1.dat' use logfile group ndb_lg1 engine=myisam;
--- error ER_ILLEGAL_HA_CREATE_OPTION
-create tablespace ndb_ts1 add datafile 'ndb_ts1.dat' use logfile group ndb_lg1 engine=myisam;
-
--- error ER_ILLEGAL_HA_CREATE_OPTION
-alter logfile group ndb_lg1 add undofile 'ndb_undo1.dat' wait engine=myisam;
--- error ER_ILLEGAL_HA_CREATE_OPTION
-alter logfile group ndb_lg1 add undofile 'ndb_undo1.dat' engine=myisam;
--- error ER_ILLEGAL_HA_CREATE_OPTION
-alter logfile group ndb_lg1 add undofile 'ndb_undo1.dat' engine=myisam;
-
--- error ER_TABLESPACE_MISSING_WITH_NAME
-alter tablespace ndb_ts1 add datafile 'ndb_ts1.dat' initial_size=32M engine=myisam;
--- error ER_TABLESPACE_MISSING_WITH_NAME
-alter tablespace ndb_ts1 add datafile 'ndb_ts1.dat' engine=myisam;
--- error ER_TABLESPACE_MISSING_WITH_NAME
-alter tablespace ndb_ts1 add datafile 'ndb_ts1.dat' engine=myisam;
-
--- error ER_ILLEGAL_HA_CREATE_OPTION
-drop logfile group ndb_lg1 engine=myisam;
--- error ER_ILLEGAL_HA_CREATE_OPTION
-drop logfile group ndb_lg1 engine=myisam;
-
--- error ER_TABLESPACE_MISSING_WITH_NAME
-drop tablespace ndb_ts1 engine=myisam;
--- error ER_TABLESPACE_MISSING_WITH_NAME
-drop tablespace ndb_ts1 engine=myisam;
-
-#
 # Bug#12546960 - 60993: NAME QUOTED WITH QUOTE INSTEAD OF BACKTICK 
 #                       GIVES NO SYNTAX ERROR
 #
@@ -885,11 +833,11 @@ SELECT 1 INTO @var17727401 FROM t1;
 SELECT 1 INTO @var17727401 FROM DUAL;
 
 # Double "INTO" clause: parse error is "near 'INTO @var17727401_2' at line 1"
---error ER_PARSE_ERROR
+--error ER_MULTIPLE_INTO_CLAUSES
 SELECT 1 INTO @var17727401_1 FROM t1 INTO @var17727401_2;
 
 # Double "INTO" clause: parse error is "near 'INTO @var17727401_2' at line 2"
---error ER_PARSE_ERROR
+--error ER_MULTIPLE_INTO_CLAUSES
 SELECT 1 INTO @var17727401_1 FROM DUAL
   INTO @var17727401_2;
 
@@ -899,7 +847,7 @@ SELECT 1 FROM t1 WHERE 1 GROUP BY 1 HAVING 1 ORDER BY 1 LIMIT 1 INTO @var1772740
 --error ER_PARSE_ERROR
 SELECT 1 FROM t1 WHERE 1 INTO @var17727401 GROUP BY 1 HAVING 1 ORDER BY 1 LIMIT 1;
 
---error ER_PARSE_ERROR
+--error ER_MULTIPLE_INTO_CLAUSES
 SELECT 1 INTO @var17727401_1
   FROM t1 WHERE 1 GROUP BY 1 HAVING 1 ORDER BY 1 LIMIT 1
   INTO @var17727401_2;
@@ -925,6 +873,7 @@ SELECT 1 FROM t1 UNION SELECT 1 FROM t1 INTO @var17727401;
 (SELECT 1 FROM t1 ORDER BY 1) ORDER BY 1;
 (SELECT 1 FROM t1 LIMIT 1) LIMIT 1;
 
+--error ER_NOT_SUPPORTED_YET
 ((SELECT 1 FROM t1 ORDER BY 1) ORDER BY 1) ORDER BY 1;
 ((SELECT 1 FROM t1 LIMIT 1) LIMIT 1) LIMIT 1;
 
@@ -1337,7 +1286,7 @@ SELECT 1 UNION (SELECT 2);
 
 --error ER_PARSE_ERROR
 SELECT a FROM t1 LIMIT 1 UNION ALL SELECT a FROM t1;
---error ER_PARSE_ERROR
+--error ER_NOT_SUPPORTED_YET
 (SELECT 1) UNION (SELECT 2 UNION SELECT 3);
 #--error ER_WRONG_USAGE
 (SELECT a FROM t1 LIMIT 1) UNION ALL (SELECT a FROM t1 ORDER BY a) LIMIT 2;
@@ -1384,7 +1333,7 @@ SELECT 1 UNION (SELECT 2 FROM t1 ORDER BY a LIMIT 1);
   ORDER BY t1.b;
 
 # Generally speaking, we don't support nested unions:
---error ER_PARSE_ERROR
+--error ER_NOT_SUPPORTED_YET
 SELECT 1 UNION ( SELECT 1 UNION SELECT 1 );
 # OTOH union expressions are left-associative by their nature,
 # so "s1 UNION s2 UNION ..." and "(s1 UNION s2) UNION ..." are same,
@@ -1392,6 +1341,10 @@ SELECT 1 UNION ( SELECT 1 UNION SELECT 1 );
 ( SELECT 1 UNION SELECT 1 ) UNION SELECT 1;
 ( (SELECT 1 UNION SELECT 1 ) UNION SELECT 1 ) UNION SELECT 1;
 # But:
+--error ER_NOT_SUPPORTED_YET
+( SELECT 1 UNION ( SELECT 1 UNION SELECT 1 ) UNION SELECT 1 );
+
+# Missing ")":
 --error ER_PARSE_ERROR
 ( SELECT 1 UNION ( SELECT 1 UNION SELECT 1 ) UNION SELECT 1;
 
@@ -1657,13 +1610,13 @@ SELECT 1 FROM t1 INTO @v UNION (SELECT 1);
 --error ER_PARSE_ERROR
 ((SELECT 1 FROM t1 INTO @v) UNION (SELECT 1));
 
---error ER_WRONG_USAGE
+--error ER_MISPLACED_INTO
 SELECT 1 INTO @v UNION SELECT 1;
---error ER_WRONG_USAGE
+--error ER_MISPLACED_INTO
 (SELECT 1 INTO @v) UNION SELECT 1;
---error ER_WRONG_USAGE
+--error ER_MISPLACED_INTO
 SELECT 1 INTO @v UNION (SELECT 1);
---error ER_WRONG_USAGE
+--error ER_MISPLACED_INTO
 ((SELECT 1 INTO @v) UNION (SELECT 1));
 
 --error ER_TOO_MANY_ROWS
@@ -1701,9 +1654,9 @@ SELECT 1 UNION (SELECT 2 INTO OUTFILE 'parser.test.file2');
 --remove_file $datadir/test/parser.test.file4
 --remove_file $datadir/test/parser.test.file5
 
---error ER_PARSE_ERROR
+--error ER_MISPLACED_INTO
 SELECT * FROM (SELECT a INTO @v FROM t1) t1a;
---error ER_PARSE_ERROR
+--error ER_MISPLACED_INTO
 SELECT * FROM (SELECT a INTO @v) t1a;
 
 DROP TABLE t1;
@@ -1810,9 +1763,12 @@ INSERT INTO t2 VALUES         (2, 2), (3, 3), (4, 4);
 INSERT INTO t3 VALUES                 (3, 3), (4, 4), (5, 5);
 
 --echo # The two queries below should produce identical result sets.
+--sorted_result
 SELECT * FROM t1 NATURAL LEFT JOIN t2 NATURAL RIGHT JOIN t3;
+--sorted_result
 SELECT * FROM (t1 NATURAL LEFT JOIN t2) NATURAL RIGHT JOIN t3;
 --echo # This result should differ from the result sets above.
+--sorted_result
 SELECT * FROM t1 NATURAL LEFT JOIN (t2 NATURAL RIGHT JOIN t3);
 
 DROP TABLE t1, t2, t3;
@@ -1847,13 +1803,13 @@ CREATE UNIQUE INDEX b_index             ON t1( b );
 CREATE        INDEX c_index USING btree ON t1( c );
 --error ER_PARSE_ERROR
 CREATE        INDEX c_index USING btree USING btree ON t1( c );
---error ER_TOO_MANY_KEY_PARTS
+--error ER_SPATIAL_MUST_HAVE_GEOM_COL
 CREATE        INDEX d_index USING rtree ON t1( d );
 CREATE        INDEX e_index TYPE  btree ON t1( e );
 CREATE        INDEX type TYPE  btree ON t1( f );
 --error ER_PARSE_ERROR
 CREATE        INDEX TYPE  btree ON t1( g );
---error ER_TOO_MANY_KEY_PARTS
+--error ER_SPATIAL_MUST_HAVE_GEOM_COL
 CREATE        INDEX h_index TYPE  rtree ON t1( h );
 CREATE        INDEX i_index             ON t1( i ) KEY_BLOCK_SIZE = 1;
 CREATE        INDEX j_index             ON t1( j ) KEY_BLOCK_SIZE = 1 KEY_BLOCK_SIZE = 1;
@@ -1862,7 +1818,7 @@ CREATE        INDEX k_index2            ON t1( k ) COMMENT 'A comment' COMMENT '
 CREATE        INDEX l_index             ON t1( l ) USING btree;
 CREATE        INDEX m_index             ON t1( m ) TYPE btree;
 CREATE        INDEX n_index USING btree ON t1( n ) USING btree;
---error ER_TOO_MANY_KEY_PARTS
+--error ER_SPATIAL_MUST_HAVE_GEOM_COL
 CREATE        INDEX x_index USING btree ON t1( o ) USING rtree;
 CREATE        INDEX o_index USING rtree ON t1( o ) USING btree;
 
@@ -2128,9 +2084,6 @@ ALTER DATABASE db COLLATE DEFAULT;
 ALTER TABLE t COLLATE DEFAULT;
 
 --error ER_PARSE_ERROR
-ALTER TABLE t CONVERT TO CHARSET DEFAULT;
-
---error ER_PARSE_ERROR
 SET NAMES utf8 COLLATE DEFAULT;
 
 --error ER_PARSE_ERROR
@@ -2169,3 +2122,511 @@ CREATE FUNCTION f1() RETURNS CHAR(1) CHARSET DEFAULT RETURN '';
 
 --error ER_PARSE_ERROR
 CREATE FUNCTION f1() RETURNS CHAR(1) COLLATE DEFAULT RETURN '';
+
+
+--echo #
+--echo # Bug#27814204: THE "ADMIN" WORD SHOULD BE A NON-RESERVED WORD IN THE
+--echo #               SQL GRAMMAR
+--echo #
+
+CREATE TEMPORARY TABLE admin (admin INT);
+DROP TABLE admin;
+
+
+--echo #
+--echo # Bug#27760787: ERROR IN SQL SYNTAX WHEN USING "DEFAULT" KEYWORD IN
+--echo #               ALTER TABLE COMMAND
+
+SELECT @@default_collation_for_utf8mb4;
+
+--echo #########################################################################
+--echo #
+--echo # 1. @@default_collation_for_utf8mb4 does not matter:
+--echo #
+--echo #########################################################################
+
+CREATE DATABASE db1 CHARSET cp1251 COLLATE cp1251_general_ci;
+USE db1;
+CREATE TABLE t1 (i INT) CHARSET utf8mb4;
+
+--echo #
+--echo # Implicit COLLATE:
+--echo #
+
+ALTER TABLE t1 CONVERT TO CHARACTER SET DEFAULT;
+SHOW CREATE TABLE t1;
+
+--echo #
+--echo # Explicit COLLATE:
+--echo #
+
+ALTER TABLE t1 CONVERT TO CHARACTER SET DEFAULT COLLATE cp1251_bin;
+SHOW CREATE TABLE t1;
+
+DROP DATABASE db1;
+
+--echo #########################################################################
+--echo #
+--echo # 2. @@default_collation_for_utf8mb4 == utf8mb4_general_ci
+--echo #    @@collation_database            == utf8mb4_0900_ai_ci
+--echo #
+--echo #########################################################################
+
+SET @@default_collation_for_utf8mb4 = utf8mb4_general_ci;
+
+CREATE DATABASE db2 COLLATE utf8mb4_0900_ai_ci;
+USE db2;
+
+CREATE TABLE t2 (i INT) CHARSET latin1;
+
+--echo #
+--echo # Implicit COLLATE result in utf8mb4_0900_ai_ci (@@collation_database):
+--echo #
+
+ALTER TABLE t2 CONVERT TO CHARACTER SET DEFAULT;
+SHOW CREATE TABLE t2;
+
+--echo # Cleanup:
+ALTER TABLE t2 CONVERT TO CHARACTER SET latin1;
+
+--echo #
+--echo # Explicit COLLATE should result in utf8mb4_bin:
+--echo #
+
+ALTER TABLE t2 CONVERT TO CHARACTER SET DEFAULT COLLATE utf8mb4_bin;
+SHOW CREATE TABLE t2;
+
+DROP DATABASE db2;
+
+--echo #########################################################################
+--echo #
+--echo # 3. @@default_collation_for_utf8mb4 == utf8mb4_0900_ai_ci
+--echo #    @@collation_database            == utf8mb4_general_ci
+--echo #
+--echo #########################################################################
+
+SET @@default_collation_for_utf8mb4 = DEFAULT;
+SELECT @@default_collation_for_utf8mb4;
+
+CREATE DATABASE db3 COLLATE utf8mb4_general_ci;
+USE db3;
+
+CREATE TABLE t3 (i INT) CHARSET latin1;
+
+--echo #
+--echo # Implicit COLLATE should result in utf8mb4_general_ci (@@collation_database):
+--echo #
+
+ALTER TABLE t3 CONVERT TO CHARACTER SET DEFAULT;
+SHOW CREATE TABLE t3;
+
+--echo #
+--echo # Explicit COLLATE should result in utf8mb4_bin:
+--echo #
+
+ALTER TABLE t3 CONVERT TO CHARACTER SET DEFAULT COLLATE utf8mb4_bin;
+SHOW CREATE TABLE t3;
+
+--echo #########################################################################
+--echo #
+--echo # 4.  Incompatible character set in @@character_set_database and COLLATE should fail:
+--echo #
+--echo #########################################################################
+
+--error ER_COLLATION_CHARSET_MISMATCH
+ALTER TABLE t3 CONVERT TO CHARACTER SET DEFAULT COLLATE cp1251_general_cs;
+
+DROP DATABASE db3;
+
+--echo # Cleanup
+
+USE test;
+
+--echo
+--echo Bug #27714748: @@PARSER_MAX_MEM_SIZE DOES NOT WORK FOR ROUTINES
+--echo
+
+SET parser_max_mem_size = 10000000; # minimum allowed value
+--let $s = `SELECT REPEAT('x', @@parser_max_mem_size)`
+--disable_query_log
+--error ER_CAPACITY_EXCEEDED
+--eval CREATE PROCEDURE p() SELECT 1 FROM (SELECT '$s') a
+--enable_query_log
+SET parser_max_mem_size = default;
+
+--echo #
+--echo # Bug #28968848: SIMPLIFY MYSQL_YYABORT
+--echo #
+
+--error ER_PARSE_ERROR
+CREATE PROCEDURE p1 () wrong syntax;
+
+--echo #
+--echo # Bug #25220656: THE "PERSIST" EXTENSION IS A RESERVED KEYWORD
+--echo #
+
+# PERSIST and PERSIST_ONLY are not reserved words any more:
+
+SELECT 1 AS PERSIST, 2 AS PERSIST_ONLY;
+
+# Negative checks for non-reserved words not allowed as role names:
+
+--error ER_PARSE_ERROR
+CREATE ROLE EVENT;
+--error ER_PARSE_ERROR
+CREATE ROLE FILE;
+--error ER_PARSE_ERROR
+CREATE ROLE NONE;
+--error ER_PARSE_ERROR
+CREATE ROLE PROCESS;
+--error ER_PARSE_ERROR
+CREATE ROLE PROXY;
+--error ER_PARSE_ERROR
+CREATE ROLE RELOAD;
+--error ER_PARSE_ERROR
+CREATE ROLE REPLICATION;
+--error ER_PARSE_ERROR
+CREATE ROLE RESOURCE;
+--error ER_PARSE_ERROR
+CREATE ROLE SUPER;
+
+# Negative checks for non-reserved words not allowed as system variable names:
+
+--error ER_PARSE_ERROR
+SET GLOBAL = DEFAULT;
+--error ER_PARSE_ERROR
+SET LOCAL = DEFAULT;
+--error ER_PARSE_ERROR
+SET PERSIST = DEFAULT;
+--error ER_PARSE_ERROR
+SET PERSIST_ONLY = DEFAULT;
+--error ER_PARSE_ERROR
+SET SESSION = DEFAULT;
+--echo #
+--echo # Bug#29033659: SOME NON-RESERVED WORDS CAN'T BE USED AS SP LABELS
+--echo #
+
+DELIMITER |;
+
+CREATE FUNCTION f1() RETURNS INT
+BEGIN
+  ACCOUNT: LOOP RETURN 1; END LOOP;
+  ALWAYS: LOOP RETURN 1; END LOOP;
+  BACKUP: LOOP RETURN 1; END LOOP;
+  CLOSE: LOOP RETURN 1; END LOOP;
+  FORMAT: LOOP RETURN 1; END LOOP;
+  GROUP_REPLICATION: LOOP RETURN 1; END LOOP;
+  HOST: LOOP RETURN 1; END LOOP;
+  INVISIBLE: LOOP RETURN 1; END LOOP;
+  OPEN: LOOP RETURN 1; END LOOP;
+  OPTIONS: LOOP RETURN 1; END LOOP;
+  OWNER: LOOP RETURN 1; END LOOP;
+  PARSER: LOOP RETURN 1; END LOOP;
+  PORT: LOOP RETURN 1; END LOOP;
+  REMOVE: LOOP RETURN 1; END LOOP;
+  RESTORE: LOOP RETURN 1; END LOOP;
+  ROLE: LOOP RETURN 1; END LOOP;
+  SECONDARY: LOOP RETURN 1; END LOOP;
+  SECONDARY_ENGINE: LOOP RETURN 1; END LOOP;
+  SECONDARY_LOAD: LOOP RETURN 1; END LOOP;
+  SECONDARY_UNLOAD: LOOP RETURN 1; END LOOP;
+  SECURITY: LOOP RETURN 1; END LOOP;
+  SERVER: LOOP RETURN 1; END LOOP;
+  SOCKET: LOOP RETURN 1; END LOOP;
+  SONAME: LOOP RETURN 1; END LOOP;
+  UPGRADE: LOOP RETURN 1; END LOOP;
+  VISIBLE: LOOP RETURN 1; END LOOP;
+  WRAPPER: LOOP RETURN 1; END LOOP;
+END|
+
+DELIMITER ;|
+
+DROP FUNCTION f1;
+
+--echo #
+--echo # Bug#29205289: PARSER ACCEPTS UNDOCUMENTED SYNTAX: `... = TABLE_ALIAS`
+--echo #
+
+CREATE TABLE t1 (i INT);
+--error ER_PARSE_ERROR
+LOCK TABLES t1=a READ;
+--error ER_PARSE_ERROR
+HANDLER t1 OPEN=a;
+--error ER_PARSE_ERROR
+SELECT * FROM t1=a;
+--error ER_PARSE_ERROR
+SELECT * FROM (SELECT 1)=a;
+--error ER_PARSE_ERROR
+SELECT * FROM t1 JOIN t1=a;
+--error ER_PARSE_ERROR
+UPDATE t1=a SET i=0;
+DROP TABLE t1;
+
+--echo #
+--echo # Bug #22320942: ODBC OUTER JOIN ESCAPE SEQUENCE SYNTAX IS BROKEN
+--echo #
+
+CREATE TEMPORARY TABLE t1 (i INT);
+CREATE TEMPORARY TABLE t2 (i INT);
+
+SELECT * FROM { OJ t1 LEFT JOIN t2 ON TRUE };
+
+--error ER_PARSE_ERROR
+SELECT * FROM { `OJ` t1 LEFT JOIN t2 ON TRUE };
+
+--error ER_PARSE_ERROR
+SELECT * FROM { random_identifier t1 LEFT JOIN t2 ON TRUE };
+
+DROP TABLE t1, t2;
+
+--echo #
+--echo # Bug #28997518: "COLLATE X GENERATED ALWAYS ... COLLATE Y": X HAS
+--echo #                 A PRIORITY OVER Y
+--echo #
+
+# Even compatible multiple COLLATE clauses should fail:
+
+--error ER_PARSE_ERROR
+CREATE TABLE t1 (
+  x VARCHAR(10)
+  COLLATE ascii_bin
+  COLLATE ascii_bin
+);
+
+# Incompatible COLLATE clauses should fail with the same error message:
+
+--error ER_PARSE_ERROR
+CREATE TABLE t2 (
+  x VARCHAR(10)
+  COLLATE ascii_bin
+  COLLATE ascii_general_ci
+);
+
+# Multiple COLLATE clauses mixed with other column attributes should fail too:
+
+--error ER_PARSE_ERROR
+CREATE TABLE t3 (
+  x VARCHAR(10)
+  COLLATE ascii_bin
+  NOT NULL
+  COLLATE ascii_bin
+);
+
+# Multiple COLLATE clauses should fail in gcol definitions (syntax 1):
+
+--error ER_PARSE_ERROR
+CREATE TABLE t3 (
+  x VARCHAR(10)
+  COLLATE ascii_bin
+  GENERATED ALWAYS AS(NULL)
+  COLLATE ascii_bin
+);
+
+# Multiple COLLATE clauses should fail in gcol definitions (syntax 2):
+
+--error ER_PARSE_ERROR
+CREATE TABLE t4 (
+  x VARCHAR(10)
+  GENERATED ALWAYS AS(NULL)
+  COLLATE ascii_bin
+  COLLATE ascii_bin
+);
+
+--echo #
+--echo # Bug#28961997: REMOVE PARENTHESES INFORMATION FROM AST
+--echo #
+
+CREATE VIEW v1 AS (SELECT 1 ORDER BY 1) UNION (SELECT 3 ORDER BY 1) ORDER BY 1;
+SHOW CREATE VIEW v1;
+DROP VIEW v1;
+
+--echo #
+--echo # Bug#29871803: REQUIRED PARENTHESES NO LONGER PRINTED FOR CERTAIN UNION
+--echo # STATEMENTS
+--echo #
+CREATE TABLE t1(a INTEGER);
+CREATE TABLE t2(a INTEGER);
+CREATE TABLE t3(a INTEGER, b INTEGER, c INTEGER);
+INSERT INTO t3 VALUES(1, 10, 100), (2, 20, 200), (3, 30, 300), (4, 40, 400);
+ANALYZE TABLE t1, t2, t3;
+
+EXPLAIN (SELECT a FROM t1 ORDER BY a LIMIT 1) UNION SELECT a FROM t2;
+EXPLAIN SELECT a FROM t1 UNION (SELECT a FROM t2 LIMIT 1);
+
+CREATE VIEW v1 as (SELECT a FROM t1 ORDER BY a LIMIT 1) UNION SELECT a FROM t2;
+SHOW CREATE VIEW v1;
+
+CREATE VIEW v2 as SELECT a FROM t1 UNION (SELECT a FROM t2 ORDER BY a LIMIT 1);
+SHOW CREATE VIEW v2;
+
+EXPLAIN (SELECT * FROM t3 ORDER BY a LIMIT 3) ORDER BY b DESC LIMIT 2;
+--error ER_NOT_SUPPORTED_YET
+EXPLAIN ((SELECT * FROM t3 ORDER BY a LIMIT 3)
+            ORDER BY b DESC LIMIT 2)
+                ORDER BY c LIMIT 1;
+
+DROP VIEW v1;
+DROP VIEW v2;
+DROP TABLE t1, t2, t3;
+
+--echo #
+--echo # Bug#30131161: SYNTAX ERROR WITH || WHEN USING PIPES_AS_CONCAT AFTER
+--echo #               UPGRADING TO 8.0.17
+--echo #
+
+SET sql_mode=(SELECT CONCAT(@@sql_mode, ',PIPES_AS_CONCAT'));
+
+# `||` should have higher precedence than `LIKE` and `ESCAPE`:
+
+SELECT 'ab' LIKE 'a%', 'ab' LIKE 'a' || '%';
+SELECT 'ab' NOT LIKE 'a%', 'ab' NOT LIKE 'a' || '%';
+
+SELECT 'ab' LIKE 'ac', 'ab' LIKE 'a' || 'c';
+SELECT 'ab' NOT LIKE 'ac', 'ab' NOT LIKE 'a' || 'c';
+
+SELECT 'a%' LIKE 'a!%' ESCAPE '!', 'a%' LIKE 'a!' || '%' ESCAPE '!';
+SELECT 'a%' NOT LIKE 'a!%' ESCAPE '!', 'a%' NOT LIKE 'a!' || '%' ESCAPE '!';
+
+SELECT 'a%' LIKE 'a!%' ESCAPE '$', 'a%' LIKE 'a!' || '%' ESCAPE '$';
+SELECT 'a%' NOT LIKE 'a!%' ESCAPE '$', 'a%' NOT LIKE 'a!' || '%' ESCAPE '$';
+
+SELECT 'a%' LIKE 'a!%' ESCAPE '!', 'a%' LIKE 'a!%' ESCAPE '' || '!';
+SELECT 'a%' NOT LIKE 'a!%' ESCAPE '!', 'a%' NOT LIKE 'a!%' ESCAPE '' || '!';
+
+SELECT 'a%' LIKE 'a!%' ESCAPE '' || '$', 'a%' LIKE 'a!%' ESCAPE '' || '$';
+SELECT 'a%' NOT LIKE 'a!%' ESCAPE '' || '$', 'a%' NOT LIKE 'a!%' ESCAPE '' || '$';
+
+# `||` should have a higher precedence than `^`:
+
+SELECT 1 ^ 100, 1 ^ '10' || '0';
+
+# `||` should have a lower precedence than the unary `-`:
+
+SELECT -1 || '0';
+
+SET sql_mode=DEFAULT;
+
+--echo #
+--echo # WL#13559: Deprecate syntax: confusing combinations of UNION and INTO
+--echo #
+
+--echo #
+--echo # No warning expected:
+--echo #
+
+SELECT 1 UNION SELECT 1 INTO @var;
+(SELECT 1 UNION SELECT 1 INTO @var);
+
+SELECT 1 UNION SELECT 1 FROM DUAL INTO @var;
+(SELECT 1 UNION SELECT 1 FROM DUAL INTO @var);
+
+SELECT 1 UNION SELECT 1 FROM DUAL FOR UPDATE INTO @var;
+(SELECT 1 UNION SELECT 1 FROM DUAL FOR UPDATE INTO @var);
+
+--echo #
+--echo # Deprecation warning expected:
+--echo #
+
+SELECT 1 UNION SELECT 1 INTO @var FROM DUAL;
+SELECT 1 UNION (SELECT 1 INTO @var FROM DUAL);
+
+SELECT 1 UNION SELECT 1 FROM DUAL INTO @var FOR UPDATE;
+(SELECT 1 UNION SELECT 1 FROM DUAL INTO @var FOR UPDATE);
+
+SELECT 1 UNION SELECT 1 INTO @var FOR UPDATE;
+(SELECT 1 UNION SELECT 1 INTO @var FOR UPDATE);
+
+--echo #
+--echo # Syntax error expected:
+--echo #
+
+--error ER_PARSE_ERROR
+SELECT 1 UNION (SELECT 1 FROM DUAL INTO @var);
+
+--echo #
+--echo # Bug#30871301: CTE CAN FAIL WITH A PARSE ERROR ON PSEUDO-COMMENTS
+--echo #
+
+WITH cte AS (SELECT 0 /*! ) */ SELECT * FROM cte a, cte b;
+WITH cte AS /*! ( */ SELECT 0) SELECT * FROM cte a, cte b;
+
+--echo #
+--echo # Bug#30528450: SPECIAL SYMBOL NAMED COLUMN NOT HONORED IN A SELECT
+--echo #
+
+CREATE TABLE t1 (c1 INT, `*` INT, c3 INT);
+INSERT INTO t1 VALUES (1, 2, 3);
+
+SELECT `*` FROM t1;
+SELECT t1.`*`, t1.* FROM t1;
+SELECT test.t1.`*`, test.t1.* FROM t1;
+
+DROP TABLE t1;
+
+--echo #
+--echo # Bug#30592703: UNDOCUMENTED SYNTAX
+--echo #               '('<QUERY BLOCK>')' {LIMIT|ORDER [LIMIT]} INTO ...
+--echo #
+
+(SELECT 1) LIMIT 1 INTO @var;
+SELECT @var;
+
+(SELECT 2 AS c) ORDER BY c INTO @var;
+SELECT @var;
+
+(SELECT 3 AS c) ORDER BY c LIMIT 1 INTO @var;
+SELECT @var;
+
+(SELECT 4) INTO @var;
+SELECT @var;
+
+--echo #
+--echo # <time zone> syntax.
+--echo #
+
+SET time_zone = '+01:00';
+
+--error ER_NOT_SUPPORTED_YET
+SELECT cast( DATE'2019-10-10' AT LOCAL AS DATETIME );
+--error ER_INVALID_CAST
+SELECT cast( DATE'2019-10-10' AT TIME ZONE 'UTC' AS DATETIME );
+
+--error ER_NOT_SUPPORTED_YET
+SELECT cast( TIME'10:10' AT LOCAL AS DATETIME );
+--error ER_INVALID_CAST
+SELECT cast( TIME'10:10' AT TIME ZONE '+01:00' AS DATETIME );
+--error ER_INVALID_CAST
+SELECT cast( TIME'10:10' AT TIME ZONE INTERVAL 'UTC' AS DATETIME );
+--error ER_INVALID_CAST
+SELECT cast( TIME'10:10' AT TIME ZONE '' AS DATETIME );
+--error ER_INVALID_CAST
+SELECT cast( TIME'10:10' AT TIME ZONE INTERVAL '' AS DATETIME );
+
+--error ER_NOT_SUPPORTED_YET
+SELECT cast( TIMESTAMP'2019-10-10 10:11:12' AT LOCAL AS DATETIME );
+
+SELECT cast( NULL AT TIME ZONE 'UTC' AS DATETIME );
+
+--echo # Casting to prohibited types
+--error ER_PARSE_ERROR
+SELECT cast( TIMESTAMP'2019-10-10 10:40:00' AT TIME ZONE 'UTC' AS BINARY );
+--error ER_PARSE_ERROR
+SELECT cast( TIMESTAMP'2019-10-10 10:40:00' AT TIME ZONE 'UTC' AS CHAR );
+--error ER_PARSE_ERROR
+SELECT cast( TIMESTAMP'2019-10-10 10:40:00' AT TIME ZONE 'UTC' AS DATE );
+--error ER_PARSE_ERROR
+SELECT cast( TIMESTAMP'2019-10-10 10:40:00' AT TIME ZONE 'UTC' AS DECIMAL );
+--error ER_PARSE_ERROR
+SELECT cast( TIMESTAMP'2019-10-10 10:40:00' AT TIME ZONE 'UTC' AS DOUBLE );
+--error ER_PARSE_ERROR
+SELECT cast( TIMESTAMP'2019-10-10 10:40:00' AT TIME ZONE 'UTC' AS FLOAT );
+--error ER_PARSE_ERROR
+SELECT cast( TIMESTAMP'2019-10-10 10:40:00' AT TIME ZONE 'UTC' AS SIGNED INTEGER );
+--error ER_PARSE_ERROR
+SELECT cast( TIMESTAMP'2019-10-10 10:40:00' AT TIME ZONE 'UTC' AS TIME );
+--error ER_PARSE_ERROR
+SELECT cast( TIMESTAMP'2019-10-10 10:40:00' AT TIME ZONE 'UTC' AS UNSIGNED INTEGER );
+--error ER_PARSE_ERROR
+SELECT cast( TIMESTAMP'2019-10-10 10:40:00' AT TIME ZONE 'UTC' AS JSON );
+--error ER_PARSE_ERROR
+SELECT cast( TIMESTAMP'2019-10-10 10:40:00' AT TIME ZONE 'UTC' AS REAL );

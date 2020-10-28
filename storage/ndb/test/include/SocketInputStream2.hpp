@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2008, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2008, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -46,7 +46,7 @@ public:
     m_socket(socket),
     m_read_timeout(read_timeout),
     m_buffer_read_pos(0)
-    {};
+    {}
 
   /*
     Read a line from socket into the string "str" until
@@ -54,7 +54,7 @@ public:
 
     Returns:
      true - a line ended with newline was read from socket
-     false - EOF or read timeout occured
+     false - EOF or read timeout occurred
 
   */
   bool gets(BaseString& str);

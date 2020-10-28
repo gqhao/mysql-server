@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2020, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -44,12 +44,44 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #endif /* !UNIV_HOTBACKUP */
 #include "ut0new.h"
 
+#include "m_ctype.h"
 #include "sql/dd/object_id.h"
 
 #include <list>
 #include <vector>
 
-extern const char general_space_name[];
+/** Maximum number of tablespaces to be scanned by a thread while scanning
+for available tablespaces during server startup. This is a hard maximum.
+If the number of files to be scanned is more than
+FIL_SCAN_MAX_TABLESPACES_PER_THREAD,
+then additional threads will be spawned to scan the additional files in
+parallel. */
+constexpr size_t FIL_SCAN_MAX_TABLESPACES_PER_THREAD = 8000;
+
+/** Maximum number of threads that will be used for scanning the tablespace
+files. This can be further adjusted depending on the number of available
+cores. */
+constexpr size_t FIL_SCAN_MAX_THREADS = 16;
+
+/** Number of threads per core. */
+constexpr size_t FIL_SCAN_THREADS_PER_CORE = 2;
+
+/** Calculate the number of threads that can be spawned to scan the given
+number of files taking into the consideration, number of cores available
+on the machine.
+@param[in]	num_files	Number of files to be scanned
+@return number of threads to be spawned for scanning the files */
+size_t fil_get_scan_threads(size_t num_files);
+
+/** This tablespace name is used internally during file discovery to open a
+general tablespace before the data dictionary is recovered and available. */
+static constexpr char general_space_name[] = "innodb_general";
+
+/** This tablespace name is used as the prefix for implicit undo tablespaces
+and during file discovery to open an undo tablespace before the DD is
+recovered and available. */
+static constexpr char undo_space_name[] = "innodb_undo";
+
 extern volatile bool recv_recovery_on;
 
 #ifdef UNIV_HOTBACKUP
@@ -138,6 +170,10 @@ struct fil_node_t {
   if space->id == 0 */
   page_no_t size;
 
+  /** Size of the file when last flushed, used to force the flush when file
+  grows to keep the filesystem metadata synced when using O_DIRECT_NO_FSYNC */
+  page_no_t flush_size;
+
   /** initial size of the file in database pages;
   FIL_IBD_FILE_INITIAL_SIZE by default */
   page_no_t init_size;
@@ -175,6 +211,9 @@ struct fil_node_t {
   /** FIL_NODE_MAGIC_N */
   size_t magic_n;
 };
+
+/* Type of (un)encryption operation in progress for Tablespace. */
+enum encryption_op_type { ENCRYPTION = 1, DECRYPTION = 2, NONE };
 
 /** Tablespace or log data space */
 struct fil_space_t {
@@ -263,13 +302,16 @@ struct fil_space_t {
   Encryption::Type encryption_type;
 
   /** Encrypt key */
-  byte encryption_key[ENCRYPTION_KEY_LEN];
+  byte encryption_key[Encryption::KEY_LEN];
 
   /** Encrypt key length*/
   ulint encryption_klen;
 
   /** Encrypt initial vector */
-  byte encryption_iv[ENCRYPTION_KEY_LEN];
+  byte encryption_iv[Encryption::KEY_LEN];
+
+  /** Encryption is in progress */
+  encryption_op_type encryption_op_in_progress;
 
   /** Release the reserved free extents.
   @param[in]	n_reserved	number of reserved extents */
@@ -277,6 +319,13 @@ struct fil_space_t {
 
   /** FIL_SPACE_MAGIC_N */
   ulint magic_n;
+
+  /** LSN when the instance was deleted. */
+  lsn_t m_deleted_lsn;
+
+  /** Determine if this space was deleted with BUF_REMOVE_NONE.
+  @return true if the space was deleted */
+  bool is_deleted() { return m_deleted_lsn > 0; }
 
   /** System tablespace */
   static fil_space_t *s_sys_space;
@@ -305,13 +354,24 @@ constexpr size_t FIL_SPACE_MAGIC_N = 89472;
 constexpr size_t FIL_NODE_MAGIC_N = 89389;
 
 /** Common InnoDB file extentions */
-enum ib_file_suffix { NO_EXT = 0, IBD = 1, CFG = 2, CFP = 3 };
+enum ib_file_suffix {
+  NO_EXT = 0,
+  IBD = 1,
+  CFG = 2,
+  CFP = 3,
+  IBT = 4,
+  IBU = 5,
+  DWR = 6
+};
 
 extern const char *dot_ext[];
 
 #define DOT_IBD dot_ext[IBD]
 #define DOT_CFG dot_ext[CFG]
 #define DOT_CFP dot_ext[CFP]
+#define DOT_IBT dot_ext[IBT]
+#define DOT_IBU dot_ext[IBU]
+#define DOT_DWR dot_ext[DWR]
 
 #ifdef _WIN32
 /* Initialization of m_abs_path() produces warning C4351:
@@ -330,40 +390,41 @@ class Fil_path {
   static constexpr auto OS_SEPARATOR = OS_PATH_SEPARATOR;
 
   /** Directory separators that are supported. */
-#if defined(__SUNPRO_CC)
-  static char *SEPARATOR;
-  static char *DOT_SLASH;
-  static char *DOT_DOT_SLASH;
-#else
   static constexpr auto SEPARATOR = "\\/";
 #ifdef _WIN32
   static constexpr auto DOT_SLASH = ".\\";
   static constexpr auto DOT_DOT_SLASH = "..\\";
+  static constexpr auto SLASH_DOT_DOT_SLASH = "\\..\\";
 #else
   static constexpr auto DOT_SLASH = "./";
   static constexpr auto DOT_DOT_SLASH = "../";
+  static constexpr auto SLASH_DOT_DOT_SLASH = "/../";
 #endif /* _WIN32 */
 
-#endif /* __SUNPRO_CC */
+  /** Various types of file paths. */
+  enum path_type { absolute, relative, file_name_only, invalid };
 
   /** Default constructor. Defaults to MySQL_datadir_path.  */
   Fil_path();
 
   /** Constructor
-  @param[in]	path		Path, not necessarily NUL terminated
-                                  It's the callers responsibility to
-                                  ensure that the path is normalized.
-  @param[in]	len		Length of path */
-  Fil_path(const char *path, size_t len);
+  @param[in]  path            Path, not necessarily NUL terminated
+  @param[in]  len             Length of path
+  @param[in]  normalize_path  If false, it's the callers responsibility to
+                              ensure that the path is normalized. */
+  explicit Fil_path(const char *path, size_t len, bool normalize_path = false);
 
   /** Constructor
-  @param[in]	path	pathname (may also include the file basename)
-                                  It's the callers responsibility to
-                                  ensure that the path is normalized. */
-  explicit Fil_path(const std::string &path);
+  @param[in]  path            Path, not necessarily NUL terminated
+  @param[in]  normalize_path  If false, it's the callers responsibility to
+                              ensure that the path is normalized. */
+  explicit Fil_path(const char *path, bool normalize_path = false);
 
-  /** Destructor */
-  ~Fil_path();
+  /** Constructor
+  @param[in]  path            pathname (may also include the file basename)
+  @param[in]  normalize_path  If false, it's the callers responsibility to
+                              ensure that the path is normalized. */
+  explicit Fil_path(const std::string &path, bool normalize_path = false);
 
   /** Implicit type conversion
   @return pointer to m_path.c_str() */
@@ -383,52 +444,92 @@ class Fil_path {
     return (m_path.length());
   }
 
+  /** Return the absolute path by value. If m_abs_path is null, calculate
+  it and return it by value without trying to reset this const object.
+  m_abs_path can be empty if the path did not exist when this object
+  was constructed.
+  @return the absolute path by value. */
+  const std::string abs_path() const MY_ATTRIBUTE((warn_unused_result)) {
+    if (m_abs_path.empty()) {
+      return (get_real_path(m_path));
+    }
+
+    return (m_abs_path);
+  }
+
   /** @return the length of m_abs_path */
   size_t abs_len() const MY_ATTRIBUTE((warn_unused_result)) {
     return (m_abs_path.length());
   }
 
   /** Determine if this path is equal to the other path.
-  @param[in]	lhs		Path to compare to
+  @param[in]  other		path to compare to
   @return true if the paths are the same */
-  bool operator==(const Fil_path &lhs) const {
-    return (m_path.compare(lhs.m_path));
-  }
+  bool operator==(const Fil_path &other) const { return (is_same_as(other)); }
 
-  /** Check if m_path is the same as path.
-  @param[in]	path	directory path to compare to
+  /** Check if m_path is the same as this other path.
+  @param[in]  other  directory path to compare to
   @return true if m_path is the same as path */
-  bool is_same_as(const std::string &path) const
+  bool is_same_as(const Fil_path &other) const
+      MY_ATTRIBUTE((warn_unused_result));
+
+  /** Check if this path is the same as the other path.
+  @param[in]  other  directory path to compare to
+  @return true if this path is the same as the other path */
+  bool is_same_as(const std::string &other) const
+      MY_ATTRIBUTE((warn_unused_result));
+
+  /** Check if two path strings are equal. Put them into Fil_path objects
+  so that they can be compared correctly.
+  @param[in]  first   first path to check
+  @param[in]  second  socond path to check
+  @return true if these two paths are the same */
+  static bool is_same_as(const std::string &first, const std::string &second)
       MY_ATTRIBUTE((warn_unused_result)) {
-    if (m_path.empty() || path.empty()) {
+    if (first.empty() || second.empty()) {
       return (false);
     }
 
-    return (m_abs_path == get_real_path(path));
+    Fil_path first_path(first);
+    std::string first_abs = first_path.abs_path();
+    trim_separator(first_abs);
+
+    Fil_path second_path(second);
+    std::string second_abs = second_path.abs_path();
+    trim_separator(second_abs);
+
+    return (first_abs == second_abs);
   }
 
-  /** Check if m_path is the parent of name.
-  @param[in]	name		Path to compare to
-  @return true if m_path is an ancestor of name */
-  bool is_ancestor(const std::string &name) const
-      MY_ATTRIBUTE((warn_unused_result)) {
-    if (m_path.empty() || name.empty()) {
-      return (false);
-    }
-
-    return (is_ancestor(m_abs_path, name));
-  }
-
-  /** Check if m_path is the parent of other.m_path.
-  @param[in]	other		Path to compare to
+  /** Check if m_path is the parent of the other path.
+  @param[in]  other  path to compare to
   @return true if m_path is an ancestor of name */
   bool is_ancestor(const Fil_path &other) const
+      MY_ATTRIBUTE((warn_unused_result));
+
+  /** Check if this Fil_path is an ancestor of the other path.
+  @param[in]  other  path to compare to
+  @return true if this Fil_path is an ancestor of the other path */
+  bool is_ancestor(const std::string &other) const
+      MY_ATTRIBUTE((warn_unused_result));
+
+  /** Check if the first path is an ancestor of the second.
+  Do not assume that these paths have been converted to real paths
+  and are ready to compare. If the two paths are the same
+  we will return false.
+  @param[in]  first   Parent path to check
+  @param[in]  second  Descendent path to check
+  @return true if the first path is an ancestor of the second */
+  static bool is_ancestor(const std::string &first, const std::string &second)
       MY_ATTRIBUTE((warn_unused_result)) {
-    if (m_path.empty() || other.m_path.empty()) {
+    if (first.empty() || second.empty()) {
       return (false);
     }
 
-    return (is_ancestor(m_abs_path, other.m_abs_path));
+    Fil_path ancestor(first);
+    Fil_path descendant(second);
+
+    return (ancestor.is_ancestor(descendant));
   }
 
   /** @return true if m_path exists and is a file. */
@@ -437,82 +538,111 @@ class Fil_path {
   /** @return true if m_path exists and is a directory. */
   bool is_directory_and_exists() const MY_ATTRIBUTE((warn_unused_result));
 
-  /** Return the absolute path */
-  const std::string &abs_path() const MY_ATTRIBUTE((warn_unused_result)) {
-    return (m_abs_path);
-  }
-
-  /** @return true if the path is an absolute path. */
-  bool is_absolute_path() const MY_ATTRIBUTE((warn_unused_result)) {
-    if (m_path.empty()) {
-      return (false);
-    }
-
-    return (is_absolute_path(m_path));
-  }
-
   /** This validation is only for ':'.
   @return true if the path is valid. */
   bool is_valid() const MY_ATTRIBUTE((warn_unused_result));
 
+  /** Determine if m_path contains a circular section like "/anydir/../"
+  Fil_path::normalize() must be run before this.
+  @return true if a circular section if found, false if not */
+  bool is_circular() const MY_ATTRIBUTE((warn_unused_result));
+
+  /** Determine if the file or directory is considered HIDDEN.
+  Most file systems identify the HIDDEN attribute by a '.' preceeding the
+  basename.  On Windows, a HIDDEN path is identified by a file attribute.
+  We will use the preceeding '.' to indicate a HIDDEN attribute on ALL
+  file systems so that InnoDB tablespaces and their directory structure
+  remain portable.
+  @param[in]  path  The full or relative path of a file or directory.
+  @return true if the directory or path is HIDDEN. */
+  static bool is_hidden(std::string path);
+
+#ifdef _WIN32
+  /** Use the WIN32_FIND_DATA struncture to determine if the file or
+  directory is HIDDEN.  Consider a SYSTEM attribute also as an indicator
+  that it is HIDDEN to InnoDB.
+  @param[in]  dirent  A directory entry obtained from a call to FindFirstFile()
+  or FindNextFile()
+  @return true if the directory or path is HIDDEN. */
+  static bool is_hidden(WIN32_FIND_DATA &dirent);
+#endif /* WIN32 */
+
   /** Remove quotes e.g., 'a;b' or "a;b" -> a;b.
-  Assumes matching quotes.
+  This will only remove the quotes if they are matching on the whole string.
+  This will not work if each delimited string is quoted since this is called
+  before the string is parsed.
   @return pathspec with the quotes stripped */
-  static std::string parse(const char *pathspec) {
+  static std::string remove_quotes(const char *pathspec) {
     std::string path(pathspec);
 
     ut_ad(!path.empty());
 
-    if (path.size() >= 2 && (path.front() == '\'' || path.back() == '"')) {
+    if (path.size() >= 2 && ((path.front() == '\'' && path.back() == '\'') ||
+                             (path.front() == '"' && path.back() == '"'))) {
       path.erase(0, 1);
-
-      if (path.back() == '\'' || path.back() == '"') {
-        path.erase(path.size() - 1);
-      }
+      path.erase(path.size() - 1);
     }
 
     return (path);
   }
 
-  /** Convert the paths into absolute paths and compare them. The
-  paths to compare must be valid paths, otherwise the result is
-  undefined.
-  @param[in]	lhs		Filename to compare
-  @param[in]	rhs		Filename to compare
-  @return true if they are the same */
-  static bool equal(const std::string &lhs, const std::string &rhs)
+  /** Determine if a path is a relative path or not.
+  @param[in]  path  OS directory or file path to evaluate
+  @retval true if the path is relative
+  @retval false if the path is absolute or file_name_only */
+  static bool is_relative_path(const std::string &path)
       MY_ATTRIBUTE((warn_unused_result)) {
-    Fil_path path1(lhs);
-    Fil_path path2(rhs);
+    return (type_of_path(path) == relative);
+  }
 
-    return (path1.abs_path().compare(path2.abs_path()) == 0);
+  /** @return true if the path is an absolute path. */
+  bool is_absolute_path() const MY_ATTRIBUTE((warn_unused_result)) {
+    return (type_of_path(m_path) == absolute);
   }
 
   /** Determine if a path is an absolute path or not.
-  @param[in]	path		OS directory or file path to evaluate
-  @retval true if an absolute path
-  @retval false if a relative path */
+  @param[in]  path  OS directory or file path to evaluate
+  @retval true if the path is absolute
+  @retval false if the path is relative or file_name_only */
   static bool is_absolute_path(const std::string &path)
       MY_ATTRIBUTE((warn_unused_result)) {
+    return (type_of_path(path) == absolute);
+  }
+
+  /** Determine what type of path is provided.
+  @param[in]  path  OS directory or file path to evaluate
+  @return the type of filepath; 'absolute', 'relative',
+  'file_name_only', or 'invalid' if the path is empty. */
+  static path_type type_of_path(const std::string &path)
+      MY_ATTRIBUTE((warn_unused_result)) {
     if (path.empty()) {
-      return (false);
-
-    } else if (path.at(0) == '\\' || path.at(0) == '/') {
-      /* Any string that starts with an OS_SEPARATOR is
-      an absolute path. This includes any OS and even
-      paths like "\\Host\share" on Windows. */
-
-      return (true);
+      return (invalid);
     }
+
+    /* The most likely type is a file name only with no separators. */
+    auto first_separator = path.find_first_of(SEPARATOR);
+    if (first_separator == std::string::npos) {
+      return (file_name_only);
+    }
+
+    /* Any string that starts with an OS_SEPARATOR is
+    an absolute path. This includes any OS and even
+    paths like "\\Host\share" on Windows. */
+    if (first_separator == 0) {
+      return (absolute);
+    }
+
 #ifdef _WIN32
     /* Windows may have an absolute path like 'A:\' */
     if (path.length() >= 3 && isalpha(path.at(0)) && path.at(1) == ':' &&
         (path.at(2) == '\\' || path.at(2) == '/')) {
-      return (true);
+      return (absolute);
     }
 #endif /* _WIN32 */
 
-    return (false);
+    /* Since it contains separators and is not an absolute path,
+    it must be a relative path. */
+    return (relative);
   }
 
   /* Check if the path is prefixed with pattern.
@@ -523,9 +653,9 @@ class Fil_path {
             std::equal(prefix.begin(), prefix.end(), path.begin()));
   }
 
-  /** Normalizes a directory path for the current OS:
+  /** Normalize a directory path for the current OS:
   On Windows, we convert '/' to '\', else we convert '\' to '/'.
-  @param[in,out]	path	Directory and file path */
+  @param[in,out]  path  Directory and file path */
   static void normalize(std::string &path) {
     for (auto &c : path) {
       if (c == OS_PATH_SEPARATOR_ALT) {
@@ -534,9 +664,9 @@ class Fil_path {
     }
   }
 
-  /** Normalizes a directory path for the current OS:
+  /** Normalize a directory path for the current OS:
   On Windows, we convert '/' to '\', else we convert '\' to '/'.
-  @param[in,out]	path	A NUL terminated path */
+  @param[in,out]  path  A NUL terminated path */
   static void normalize(char *path) {
     for (auto ptr = path; *ptr; ++ptr) {
       if (*ptr == OS_PATH_SEPARATOR_ALT) {
@@ -545,30 +675,50 @@ class Fil_path {
     }
   }
 
+  /** Convert a path string to lower case using the CHARSET my_charset_filename.
+  @param[in,out]  path  Directory and file path */
+  static void to_lower(std::string &path) {
+    for (auto &c : path) {
+      c = my_tolower(&my_charset_filename, c);
+    }
+  }
+
   /** @return true if the path exists and is a file . */
   static os_file_type_t get_file_type(const std::string &path)
       MY_ATTRIBUTE((warn_unused_result));
 
-  /** Get the real path for a directory or a file name, useful for
-  comparing symlinked files.
-  @param[in]	path		Directory or filename
-  @return the absolute path of dir + filename, or "" on error.  */
-  static std::string get_real_path(const std::string &path)
+  /** Return a string to display the file type of a path.
+  @param[in]  path  path name
+  @return true if the path exists and is a file . */
+  static const char *get_file_type_string(const std::string &path);
+
+  /** Return a string to display the file type of a path.
+  @param[in]  type  OS file type
+  @return true if the path exists and is a file . */
+  static const char *get_file_type_string(os_file_type_t type);
+
+  /** Get the real path for a directory or a file name. This path can be
+  used to compare with another absolute path. It will be converted to
+  lower case on case insensitive file systems and if it is a directory,
+  it will end with a directory separator. The call to my_realpath() may
+  fail on non-Windows platforms if the path does not exist. If so, the
+  parameter 'force' determines what to return.
+  @param[in]  path   directory or filename to convert to a real path
+  @param[in]  force  if true and my_realpath() fails, use the path provided.
+                     if false and my_realpath() fails, return a null string.
+  @return  the absolute path prepared for making comparisons with other real
+           paths. */
+  static std::string get_real_path(const std::string &path, bool force = true)
       MY_ATTRIBUTE((warn_unused_result));
 
-  /** Check if lhs is the ancestor of rhs. If the two paths are the
-  same it will return false.
-  @param[in]	lhs		Parent path to check
-  @param[in]	rhs		Descendent path to check
-  @return true if lhs is an ancestor of rhs */
-  static bool is_ancestor(const std::string &lhs, const std::string &rhs)
-      MY_ATTRIBUTE((warn_unused_result)) {
-    if (lhs.empty() || rhs.empty() || rhs.length() <= lhs.length()) {
-      return (false);
-    }
-
-    return (std::equal(lhs.begin(), lhs.end(), rhs.begin()));
-  }
+  /** Separate the portion of a directory path that exists and the portion that
+  does not exist.
+  @param[in]      path   Path to evaluate
+  @param[in,out]  ghost  The portion of the path that does not exist.
+  @return the existing portion of a path. */
+  static std::string get_existing_path(const std::string &path,
+                                       std::string &ghost)
+      MY_ATTRIBUTE((warn_unused_result));
 
   /** Check if the name is an undo tablespace name.
   @param[in]	name		Tablespace name
@@ -576,21 +726,60 @@ class Fil_path {
   static bool is_undo_tablespace_name(const std::string &name)
       MY_ATTRIBUTE((warn_unused_result));
 
-  /** Check if the file has the .ibd suffix
+  /** Check if the file has the the specified suffix
+  @param[in]	sfx		suffix to look for
   @param[in]	path		Filename to check
   @return true if it has the the ".ibd" suffix. */
-  static bool has_ibd_suffix(const std::string &path) {
-    static const char suffix[] = ".ibd";
-    static constexpr auto len = sizeof(suffix) - 1;
+  static bool has_suffix(ib_file_suffix sfx, const std::string &path) {
+    const auto suffix = dot_ext[sfx];
+    size_t len = strlen(suffix);
 
     return (path.size() >= len &&
             path.compare(path.size() - len, len, suffix) == 0);
   }
 
+  /** Check if the file has the the specified suffix and truncate
+  @param[in]		sfx	suffix to look for
+  @param[in,out]	path	Filename to check
+  @return true if the suffix is found and truncated. */
+  static bool truncate_suffix(ib_file_suffix sfx, std::string &path) {
+    const auto suffix = dot_ext[sfx];
+    size_t len = strlen(suffix);
+
+    if (path.size() < len ||
+        path.compare(path.size() - len, len, suffix) != 0) {
+      return (false);
+    }
+
+    path.resize(path.size() - len);
+    return (true);
+  }
+
   /** Check if a character is a path separator ('\' or '/')
-  @param[in]	c		Character to check
+  @param[in]  c  Character to check
   @return true if it is a separator */
   static bool is_separator(char c) { return (c == '\\' || c == '/'); }
+
+  /** If the last character of a directory path is a separator ('\' or '/')
+  trim it off the string.
+  @param[in]  path  file system path */
+  static void trim_separator(std::string &path) {
+    if (!path.empty() && is_separator(path.back())) {
+      path.resize(path.size() - 1);
+    }
+  }
+
+  /** If the last character of a directory path is NOT a separator,
+  append a separator to the path.
+  NOTE: We leave it up to the caller to assure that the path is a directory
+  and not a file since if that directory does not yet exist, this function
+  cannot tell the difference.
+  @param[in]  path  file system path */
+  static void append_separator(std::string &path) {
+    if (!path.empty() && !is_separator(path.back())) {
+      path.push_back(OS_SEPARATOR);
+    }
+  }
 
   /** Allocate and build a file name from a path, a table or
   tablespace name and a suffix.
@@ -646,12 +835,22 @@ class Fil_path {
   /** Create an IBD path name after replacing the basename in an old path
   with a new basename.  The old_path is a full path name including the
   extension.  The tablename is in the normal form "schema/tablename".
-  @param[in]	path_in			Pathname
-  @param[in]	name_in			Contains new base name
+  @param[in]	path_in		Pathname
+  @param[in]	name_in		Contains new base name
+  @param[in]	extn		File extension
   @return new full pathname */
-  static std::string make_new_ibd(const std::string &path_in,
-                                  const std::string &name_in)
+  static std::string make_new_path(const std::string &path_in,
+                                   const std::string &name_in,
+                                   ib_file_suffix extn)
       MY_ATTRIBUTE((warn_unused_result));
+
+  /** Parse file-per-table file name and build Innodb dictionary table name.
+  @param[in]	file_path	File name with complete path
+  @param[in]	extn		File extension
+  @param[out]	dict_name	Innodb dictionary table name
+  @return true, if successful. */
+  static bool parse_file_path(const std::string &file_path, ib_file_suffix extn,
+                              std::string &dict_name);
 
   /** This function reduces a null-terminated full remote path name
   into the path that is sent by MySQL for DATA DIRECTORY clause.
@@ -667,25 +866,36 @@ class Fil_path {
   @param[in,out]	data_dir_path	Full path/data_dir_path */
   static void make_data_dir_path(char *data_dir_path);
 
-  /** @return the null path */
-  static const Fil_path &null() MY_ATTRIBUTE((warn_unused_result)) {
-    return (s_null_path);
-  }
-
 #ifndef UNIV_HOTBACKUP
   /** Check if the filepath provided is in a valid placement.
+  This routine is run during file discovery at startup.
   1) File-per-table must be in a dir named for the schema.
   2) File-per-table must not be in the datadir.
-  3) General tablespace must no be under the datadir.
-  @param[in]	space_name	tablespace name
-  @param[in]	path		filepath to validate
+  3) General tablespace must not be under the datadir.
+  @param[in]	space_name  tablespace name
+  @param[in]	space_id    tablespace ID
+  @param[in]	fsp_flags   tablespace flags
+  @param[in]	path        scanned realpath to an existing file to validate
   @retval true if the filepath is a valid datafile location */
-  static bool is_valid_location(const char *space_name,
-                                const std::string &path);
+  static bool is_valid_location(const char *space_name, space_id_t space_id,
+                                uint32_t fsp_flags, const std::string &path);
+
+  /** Check if the implicit filepath is immediately within a dir named for
+  the schema.
+  @param[in]	space_name  tablespace name
+  @param[in]	path        scanned realpath to an existing file to validate
+  @retval true if the filepath is valid */
+  static bool is_valid_location_within_db(const char *space_name,
+                                          const std::string &path);
 
   /** Convert filename to the file system charset format.
   @param[in,out]	name		Filename to convert */
   static void convert_to_filename_charset(std::string &name);
+
+  /** Convert to lower case using the file system charset.
+  @param[in,out]	path		Filepath to convert */
+  static void convert_to_lower_case(std::string &path);
+
 #endif /* !UNIV_HOTBACKUP */
 
  protected:
@@ -694,16 +904,20 @@ class Fil_path {
 
   /** A full absolute path to the same file. */
   std::string m_abs_path;
-
-  /** Empty (null) path. */
-  static Fil_path s_null_path;
 };
 
 /** The MySQL server --datadir value */
 extern Fil_path MySQL_datadir_path;
 
+/** The MySQL server --innodb-undo-directory value */
+extern Fil_path MySQL_undo_path;
+
+/** The undo path is different from any other known directory. */
+extern bool MySQL_undo_path_is_unique;
+
 /** Initial size of a single-table tablespace in pages */
 constexpr size_t FIL_IBD_FILE_INITIAL_SIZE = 7;
+constexpr size_t FIL_IBT_FILE_INITIAL_SIZE = 5;
 
 /** An empty tablespace (CREATE TABLESPACE) has minimum
 of 4 pages and an empty CREATE TABLE (file_per_table) has 6 pages.
@@ -844,8 +1058,8 @@ constexpr page_type_t FIL_PAGE_SDI_BLOB = 18;
 /** Commpressed SDI BLOB page */
 constexpr page_type_t FIL_PAGE_SDI_ZBLOB = 19;
 
-/** Available for future use */
-constexpr page_type_t FIL_PAGE_TYPE_UNUSED = 20;
+/** Legacy doublewrite buffer page. */
+constexpr page_type_t FIL_PAGE_TYPE_LEGACY_DBLWR = 20;
 
 /** Rollback Segment Array page */
 constexpr page_type_t FIL_PAGE_TYPE_RSEG_ARRAY = 21;
@@ -888,6 +1102,8 @@ index */
 #define fil_page_index_page_check(page) \
   fil_page_type_is_index(fil_page_get_type(page))
 
+/** @} */
+
 /** The number of fsyncs done to the log */
 extern ulint fil_n_log_flushes;
 
@@ -915,7 +1131,7 @@ fil_space_t *fil_space_get(space_id_t space_id)
 /** Returns the latch of a file space.
 @param[in]	space_id	Tablespace ID
 @return latch protecting storage allocation */
-rw_lock_t *fil_space_get_latch(space_id_t id)
+rw_lock_t *fil_space_get_latch(space_id_t space_id)
     MY_ATTRIBUTE((warn_unused_result));
 
 #ifdef UNIV_DEBUG
@@ -935,12 +1151,13 @@ NOTE: temporary tablespaces are never imported.
 void fil_space_set_imported(space_id_t space_id);
 #endif /* !UNIV_HOTBACKUP */
 
-/** Append a file to the chain of files of a space.
-@param[in]	name		file name of a file that is not open
-@param[in]	size		file size in entire database blocks
-@param[in,out]	space		tablespace from fil_space_create()
-@param[in]	is_raw		whether this is a raw device or partition
-@param[in]	atomic_write	true if atomic write enabled
+/** Attach a file to a tablespace. File must be closed.
+@param[in]	name		file name (file must be closed)
+@param[in]	size		file size in database blocks, rounded
+                                downwards to an integer
+@param[in,out]	space		space where to append
+@param[in]	is_raw		true if a raw device or a raw disk partition
+@param[in]	atomic_write	true if the file has atomic write enabled
 @param[in]	max_pages	maximum number of pages in file
 @return pointer to the file name
 @retval nullptr if error */
@@ -954,18 +1171,18 @@ The tablespace name is independent from the tablespace file-name.
 Error messages are issued to the server log.
 @param[in]	name		Tablespace name
 @param[in]	space_id	Tablespace ID
-@param[in]	flags		tablespace flags
-@param[in]	purpose		tablespace purpose
+@param[in]	flags		Tablespace flags
+@param[in]	purpose		Tablespace purpose
 @return pointer to created tablespace, to be filled in with fil_node_create()
 @retval nullptr on failure (such as when the same tablespace exists) */
 fil_space_t *fil_space_create(const char *name, space_id_t space_id,
-                              ulint flags, fil_type_t purpose)
+                              uint32_t flags, fil_type_t purpose)
     MY_ATTRIBUTE((warn_unused_result));
 
-/** Assigns a new space id for a new single-table tablespace.
-This works simply by incrementing the global counter. If 4 billion id's
-is not enough, we may need to recycle id's.
-@param[in,out]	space_id		New space ID
+/** Assigns a new space id for a new single-table tablespace. This works
+simply by incrementing the global counter. If 4 billion id's is not enough,
+we may need to recycle id's.
+@param[out]	space_id		Set this to the new tablespace ID
 @return true if assigned, false if not */
 bool fil_assign_new_space_id(space_id_t *space_id)
     MY_ATTRIBUTE((warn_unused_result));
@@ -990,14 +1207,14 @@ page_no_t fil_space_get_size(space_id_t space_id)
 in the memory cache.
 @param[in]	space_id	Tablespace ID for which to get the flags
 @return flags, ULINT_UNDEFINED if space not found */
-ulint fil_space_get_flags(space_id_t space_id)
+uint32_t fil_space_get_flags(space_id_t space_id)
     MY_ATTRIBUTE((warn_unused_result));
 
 /** Sets the flags of the tablespace. The tablespace must be locked
 in MDL_EXCLUSIVE MODE.
 @param[in]	space		tablespace in-memory struct
 @param[in]	flags		tablespace flags */
-void fil_space_set_flags(fil_space_t *space, ulint flags);
+void fil_space_set_flags(fil_space_t *space, uint32_t flags);
 
 /** Open each file of a tablespace if not already open.
 @param[in]	space_id	Tablespace ID
@@ -1018,7 +1235,7 @@ const page_size_t fil_space_get_page_size(space_id_t space_id, bool *found)
     MY_ATTRIBUTE((warn_unused_result));
 
 /** Initializes the tablespace memory cache.
-@param[in]	max_n_open	Max number of open files. */
+@param[in]	max_n_open	Maximum number of open files */
 void fil_init(ulint max_n_open);
 
 /** Initializes the tablespace memory cache. */
@@ -1054,9 +1271,11 @@ class Fil_iterator {
     return (iterate(include_log, [=](fil_node_t *file) { return (f(file)); }));
   }
 
-  /** Iterate over the spaces and file lists.
-  @param[in]	include_log	if true then fetch log files too
-  @param[in,out]	f		Callback */
+  /** Iterate through all persistent tablespace files (FIL_TYPE_TABLESPACE)
+  returning the nodes via callback function cbk.
+  @param[in]	include_log	include log files, if true
+  @param[in]	f		Callback
+  @return any error returned by the callback function. */
   static dberr_t iterate(bool include_log, Function &&f);
 };
 
@@ -1066,6 +1285,7 @@ previous value.
 void fil_set_max_space_id_if_bigger(space_id_t max_id);
 
 #ifndef UNIV_HOTBACKUP
+
 /** Write the flushed LSN to the page header of the first page in the
 system tablespace.
 @param[in]	lsn		Flushed LSN
@@ -1073,6 +1293,13 @@ system tablespace.
 dberr_t fil_write_flushed_lsn(lsn_t lsn) MY_ATTRIBUTE((warn_unused_result));
 
 #else /* !UNIV_HOTBACKUP */
+/** Frees a space object from the tablespace memory cache.
+Closes a tablespaces' files but does not delete them.
+There must not be any pending i/o's or flushes on the files.
+@param[in]	space_id	Tablespace ID
+@return true if success */
+bool meb_fil_space_free(space_id_t space_id);
+
 /** Extends all tablespaces to the size stored in the space header. During the
 mysqlbackup --apply-log phase we extended the spaces on-demand so that log
 records could be applied, but that may have left spaces still too small
@@ -1103,21 +1330,39 @@ fil_space_t *fil_space_acquire_silent(space_id_t space_id)
     MY_ATTRIBUTE((warn_unused_result));
 
 /** Release a tablespace acquired with fil_space_acquire().
-@param[in,out]	space		Tablespace to release  */
+@param[in,out]	space	Tablespace to release  */
 void fil_space_release(fil_space_t *space);
 
-/** Fetch the file name opened for a space_id during recovery
-from the file map.
-@param[in]	space_id	Undo tablespace ID
-@return file name that was opened, empty string if space ID not found. */
-std::string fil_system_open_fetch(space_id_t space_id)
-    MY_ATTRIBUTE((warn_unused_result));
+/** Fetch the file name opened for a space_id from the file map.
+@param[in]   space_id  tablespace ID
+@param[out]  name      the scanned filename
+@return true if the space_id is found. The name is set to an
+empty string if the space_id is not found. */
+bool fil_system_get_file_by_space_id(space_id_t space_id, std::string &name);
+
+/** Fetch the file name opened for an undo space number from the file map.
+@param[in]   space_num  Undo tablespace Number
+@param[out]  space_id   Undo tablespace ID
+@param[out]  name       the scanned filename
+@return true if the space_num was found. The name is set to an
+empty string if the space_num is not found. */
+bool fil_system_get_file_by_space_num(space_id_t space_num,
+                                      space_id_t &space_id, std::string &name);
 
 /** Truncate the tablespace to needed size.
-@param[in]	space_id	Id of tablespace to truncate
+@param[in]	space_id	Tablespace ID to truncate
 @param[in]	size_in_pages	Truncate size.
 @return true if truncate was successful. */
 bool fil_truncate_tablespace(space_id_t space_id, page_no_t size_in_pages)
+    MY_ATTRIBUTE((warn_unused_result));
+
+/** Drop and create an UNDO tablespace.
+@param[in]  old_space_id   Tablespace ID to truncate
+@param[in]  new_space_id   Tablespace ID to for the new file
+@param[in]  size_in_pages  Truncate size.
+@return true if truncate was successful. */
+bool fil_replace_tablespace(space_id_t old_space_id, space_id_t new_space_id,
+                            page_no_t size_in_pages)
     MY_ATTRIBUTE((warn_unused_result));
 
 /** Closes a single-table tablespace. The tablespace must be cached in the
@@ -1162,13 +1407,13 @@ The tablespace must exist in the memory cache.
 @param[in]	old_path	Old file name
 @param[in]	new_name	New tablespace name in the schema/name format
 @param[in]	new_path_in	New file name, or nullptr if it is located in
-                                The normal data directory
-@return true if success */
-bool fil_rename_tablespace(space_id_t space_id, const char *old_path,
-                           const char *new_name, const char *new_path_in)
+the normal data directory
+@return InnoDB error code */
+dberr_t fil_rename_tablespace(space_id_t space_id, const char *old_path,
+                              const char *new_name, const char *new_path_in)
     MY_ATTRIBUTE((warn_unused_result));
 
-/** Create a tablespace file.
+/** Create an IBD tablespace file.
 @param[in]	space_id	Tablespace ID
 @param[in]	name		Tablespace name in dbname/tablename format.
                                 For general tablespaces, the 'dbname/' part
@@ -1179,10 +1424,22 @@ bool fil_rename_tablespace(space_id_t space_id, const char *old_path,
                                 must be >= FIL_IBD_FILE_INITIAL_SIZE
 @return DB_SUCCESS or error code */
 dberr_t fil_ibd_create(space_id_t space_id, const char *name, const char *path,
-                       ulint flags, page_no_t size)
+                       uint32_t flags, page_no_t size)
     MY_ATTRIBUTE((warn_unused_result));
 
-/** Deletes an IBD tablespace, either general or single-table.
+/** Create a session temporary tablespace (IBT) file.
+@param[in]	space_id	Tablespace ID
+@param[in]	name		Tablespace name
+@param[in]	path		Path and filename of the datafile to create.
+@param[in]	flags		Tablespace flags
+@param[in]	size		Initial size of the tablespace file in pages,
+                                must be >= FIL_IBT_FILE_INITIAL_SIZE
+@return DB_SUCCESS or error code */
+dberr_t fil_ibt_create(space_id_t space_id, const char *name, const char *path,
+                       uint32_t flags, page_no_t size)
+    MY_ATTRIBUTE((warn_unused_result));
+
+/** Deletes an IBD  or IBU tablespace.
 The tablespace must be cached in the memory cache. This will delete the
 datafile, fil_space_t & fil_node_t entries from the file_system_t cache.
 @param[in]	space_id	Tablespace ID
@@ -1219,21 +1476,20 @@ from it
                                 by upgrade
 @return DB_SUCCESS or error code */
 dberr_t fil_ibd_open(bool validate, fil_type_t purpose, space_id_t space_id,
-                     ulint flags, const char *space_name,
+                     uint32_t flags, const char *space_name,
                      const char *table_name, const char *path_in, bool strict,
                      bool old_space) MY_ATTRIBUTE((warn_unused_result));
 
 /** Returns true if a matching tablespace exists in the InnoDB tablespace
 memory cache.
 @param[in]	space_id	Tablespace ID
-@param[in]	name		Tablespace name used in
-                                fil_space_create().
-@param[in]	print_err	detailed error information to the
+@param[in]	name		Tablespace name used in space_create().
+@param[in]	print_err	Print detailed error information to the
                                 error log if a matching tablespace is
                                 not found from memory.
-@param[in]	adjust_space	Whether to adjust spaceid on mismatch
+@param[in]	adjust_space	Whether to adjust space id on mismatch
 @param[in]	heap		Heap memory
-@param[in]	table_id	table id
+@param[in]	table_id	table ID
 @return true if a matching tablespace exists in the memory cache */
 bool fil_space_exists_in_mem(space_id_t space_id, const char *name,
                              bool print_err, bool adjust_space,
@@ -1287,7 +1543,7 @@ dberr_t fil_redo_io(const IORequest &type, const page_id_t &page_id,
                     const page_size_t &page_size, ulint byte_offset, ulint len,
                     void *buf) MY_ATTRIBUTE((warn_unused_result));
 
-/** Read or write data.
+/** Read or write data from a file.
 @param[in]	type		IO context
 @param[in]	sync		If true then do synchronous IO
 @param[in]	page_id		page id
@@ -1295,12 +1551,12 @@ dberr_t fil_redo_io(const IORequest &type, const page_id_t &page_id,
 @param[in]	byte_offset	remainder of offset in bytes; in aio this
                                 must be divisible by the OS block size
 @param[in]	len		how many bytes to read or write; this must
-                                not cross a file boundary; in aio this must
+                                not cross a file boundary; in AIO this must
                                 be a block size multiple
 @param[in,out]	buf		buffer where to store read data or from where
-                                to write; in aio this must be appropriately
+                                to write; in AIO this must be appropriately
                                 aligned
-@param[in]	message		message for aio handler if !sync, else ignored
+@param[in]	message		message for AIO handler if !sync, else ignored
 @return error code
 @retval DB_SUCCESS on success
 @retval DB_TABLESPACE_DELETED if the tablespace does not exist */
@@ -1308,7 +1564,7 @@ dberr_t fil_io(const IORequest &type, bool sync, const page_id_t &page_id,
                const page_size_t &page_size, ulint byte_offset, ulint len,
                void *buf, void *message) MY_ATTRIBUTE((warn_unused_result));
 
-/** Waits for an aio operation to complete. This function is used to write the
+/** Waits for an AIO operation to complete. This function is used to write the
 handler for completed requests. The aio array of pending requests is divided
 into segments (see os0file.cc for more info). The thread specifies which
 segment it wants to wait for.
@@ -1328,8 +1584,8 @@ void fil_flush_file_redo();
 
 /** Flush to disk the writes in file spaces of the given type
 possibly cached by the OS.
-@param[in]	purpose		FIL_TYPE_TABLESPACE or FIL_TYPE_LOG, can
-                                be ORred. */
+@param[in]	purpose		FIL_TYPE_TABLESPACE or FIL_TYPE_LOG, can be
+ORred. */
 void fil_flush_file_spaces(uint8_t purpose);
 
 #ifdef UNIV_DEBUG
@@ -1365,10 +1621,10 @@ void fil_page_set_type(byte *page, ulint type);
 Data files created before MySQL 5.1 may contain garbage in FIL_PAGE_TYPE.
 In MySQL 3.23.53, only undo log pages and index pages were tagged.
 Any other pages were written with uninitialized bytes in FIL_PAGE_TYPE.
-@param[in]	page_id		page number
-@param[in,out]	page		page with invalid FIL_PAGE_TYPE
-@param[in]	type		expected page type
-@param[in,out]	mtr		mini-transaction */
+@param[in]	page_id		Page number
+@param[in,out]	page		Page with invalid FIL_PAGE_TYPE
+@param[in]	type		Expected page type
+@param[in,out]	mtr		Mini-transaction */
 void fil_page_reset_type(const page_id_t &page_id, byte *page, ulint type,
                          mtr_t *mtr);
 
@@ -1383,10 +1639,10 @@ Data files created before MySQL 5.1 may contain
 garbage in the FIL_PAGE_TYPE field.
 In MySQL 3.23.53, only undo log pages and index pages were tagged.
 Any other pages were written with uninitialized bytes in FIL_PAGE_TYPE.
-@param[in]	page_id		page number
-@param[in,out]	page		page with possibly invalid FIL_PAGE_TYPE
-@param[in]	type		expected page type
-@param[in,out]	mtr		mini-transaction */
+@param[in]	page_id		Page number
+@param[in,out]	page		Page with possibly invalid FIL_PAGE_TYPE
+@param[in]	type		Expected page type
+@param[in,out]	mtr		Mini-transaction */
 inline void fil_page_check_type(const page_id_t &page_id, byte *page,
                                 ulint type, mtr_t *mtr) {
   ulint page_type = fil_page_get_type(page);
@@ -1401,18 +1657,18 @@ Data files created before MySQL 5.1 may contain
 garbage in the FIL_PAGE_TYPE field.
 In MySQL 3.23.53, only undo log pages and index pages were tagged.
 Any other pages were written with uninitialized bytes in FIL_PAGE_TYPE.
-@param[in,out]	block		block with possibly invalid FIL_PAGE_TYPE
-@param[in]	type		expected page type
-@param[in,out]	mtr		mini-transaction */
+@param[in,out]	block		Block with possibly invalid FIL_PAGE_TYPE
+@param[in]	type		Expected page type
+@param[in,out]	mtr		Mini-transaction */
 #define fil_block_check_type(block, type, mtr) \
   fil_page_check_type(block->page.id, block->frame, type, mtr)
 
 #ifdef UNIV_DEBUG
-/** Increase redo skipped of a tablespace.
+/** Increase redo skipped count for a tablespace.
 @param[in]	space_id	Tablespace ID */
 void fil_space_inc_redo_skipped_count(space_id_t space_id);
 
-/** Decrease redo skipped of a tablespace.
+/** Decrease redo skipped count for a tablespace.
 @param[in]	space_id	Tablespace ID */
 void fil_space_dec_redo_skipped_count(space_id_t space_id);
 
@@ -1425,7 +1681,7 @@ bool fil_space_is_redo_skipped(space_id_t space_id)
 
 /** Delete the tablespace file and any related files like .cfg.
 This should not be called for temporary tables.
-@param[in]	path		File path of the tablespace
+@param[in]	path		File path of the IBD tablespace
 @return true on success */
 bool fil_delete_file(const char *path) MY_ATTRIBUTE((warn_unused_result));
 
@@ -1497,26 +1753,31 @@ struct PageCallback {
 };
 
 /** Iterate over all the pages in the tablespace.
-@param table the table definiton in the server
-@param n_io_buffers number of blocks to read and write together
-@param callback functor that will do the page updates
+@param[in]  table the table definiton in the server
+@param[in]  n_io_buffers number of blocks to read and write together
+@param[in]  compression_type compression type if compression is enabled,
+else Compression::Type::NONE
+@param[in,out]  callback functor that will do the page updates
 @return DB_SUCCESS or error code */
 dberr_t fil_tablespace_iterate(dict_table_t *table, ulint n_io_buffers,
+                               Compression::Type compression_type,
                                PageCallback &callback)
     MY_ATTRIBUTE((warn_unused_result));
 
 /** Looks for a pre-existing fil_space_t with the given tablespace ID
-and, if found, returns the name and filepath in newly allocated buffers that
-the caller must free.
-@param[in] space_id The tablespace ID to search for.
-@param[out] name Name of the tablespace found.
-@param[out] filepath The filepath of the first datafile for thtablespace found.
+and, if found, returns the name and filepath in newly allocated buffers
+that the caller must free.
+@param[in]	space_id	The tablespace ID to search for.
+@param[out]	name		Name of the tablespace found.
+@param[out]	filepath	The filepath of the first datafile for the
+tablespace.
 @return true if tablespace is found, false if not. */
 bool fil_space_read_name_and_filepath(space_id_t space_id, char **name,
                                       char **filepath)
     MY_ATTRIBUTE((warn_unused_result));
 
-/** Convert a file name to a tablespace name.
+/** Convert a file name to a tablespace name. Strip the file name
+prefix and suffix, leaving only databasename/tablename.
 @param[in]	filename	directory/databasename/tablename.ibd
 @return database/tablename string, to be freed with ut_free() */
 char *fil_path_to_space_name(const char *filename)
@@ -1539,23 +1800,23 @@ dberr_t fil_rename_precheck(const dict_table_t *old_table,
                             const dict_table_t *new_table, const char *tmp_name)
     MY_ATTRIBUTE((warn_unused_result));
 
-/** Set the compression type for the tablespace of a table
-@param[in]	table		Table that should be compressesed
+/** Set the compression type for the tablespace
+@param[in]	space_id	Space ID of the tablespace
 @param[in]	algorithm	Text representation of the algorithm
 @return DB_SUCCESS or error code */
-dberr_t fil_set_compression(dict_table_t *table, const char *algorithm)
+dberr_t fil_set_compression(space_id_t space_id, const char *algorithm)
     MY_ATTRIBUTE((warn_unused_result));
 
-/** Get the compression type for the tablespace
+/** Get the compression algorithm for a tablespace.
 @param[in]	space_id	Space ID to check
 @return the compression algorithm */
 Compression::Type fil_get_compression(space_id_t space_id)
     MY_ATTRIBUTE((warn_unused_result));
 
-/** Set encryption.
+/** Set encryption information for IORequest.
 @param[in,out]	req_type	IO request
-@param[in]	page_id		Page address for IO
-@param[in,out]	space		Tablespace instance */
+@param[in]	page_id		page id
+@param[in]	space		table space */
 void fil_io_set_encryption(IORequest &req_type, const page_id_t &page_id,
                            fil_space_t *space);
 
@@ -1569,8 +1830,15 @@ dberr_t fil_set_encryption(space_id_t space_id, Encryption::Type algorithm,
                            byte *key, byte *iv)
     MY_ATTRIBUTE((warn_unused_result));
 
-/** @return true if the re-encrypt success */
-bool fil_encryption_rotate() MY_ATTRIBUTE((warn_unused_result));
+/** Reset the encryption type for the tablespace
+@param[in] space_id		Space ID of tablespace for which to set
+@return DB_SUCCESS or error code */
+dberr_t fil_reset_encryption(space_id_t space_id)
+    MY_ATTRIBUTE((warn_unused_result));
+
+/** Rotate the tablespace keys by new master key.
+@return the number of tablespaces that failed to rotate. */
+size_t fil_encryption_rotate() MY_ATTRIBUTE((warn_unused_result));
 
 /** During crash recovery, open a tablespace if it had not been opened
 yet, to get valid size and flags.
@@ -1596,8 +1864,9 @@ bool fil_fusionio_enable_atomic_write(pfs_os_file_t file)
     MY_ATTRIBUTE((warn_unused_result));
 #endif /* !NO_FALLOCATE && UNIV_LINUX */
 
-/** Note that the file system where the file resides doesn't support PUNCH HOLE
-@param[in,out]	file		File node to set */
+/** Note that the file system where the file resides doesn't support PUNCH HOLE.
+Called from AIO handlers when IO returns DB_IO_NO_PUNCH_HOLE
+@param[in,out]	file		file to set */
 void fil_no_punch_hole(fil_node_t *file);
 
 #ifdef UNIV_ENABLE_UNIT_TEST_MAKE_FILEPATH
@@ -1607,12 +1876,12 @@ void test_make_filepath();
 /** @return the system tablespace instance */
 #define fil_space_get_sys_space() (fil_space_t::s_sys_space)
 
-/** Redo a tablespace create
+/** Redo a tablespace create.
 @param[in]	ptr		redo log record
 @param[in]	end		end of the redo log buffer
 @param[in]	page_id		Tablespace Id and first page in file
 @param[in]	parsed_bytes	Number of bytes parsed so far
-@param[in]	parse_only	Don't apply the log if true
+@param[in]	parse_only	Don't apply, parse only
 @return pointer to next redo log record
 @retval nullptr if this log record was truncated */
 byte *fil_tablespace_redo_create(byte *ptr, const byte *end,
@@ -1620,12 +1889,12 @@ byte *fil_tablespace_redo_create(byte *ptr, const byte *end,
                                  bool parse_only)
     MY_ATTRIBUTE((warn_unused_result));
 
-/** Redo a tablespace drop
+/** Redo a tablespace delete.
 @param[in]	ptr		redo log record
 @param[in]	end		end of the redo log buffer
 @param[in]	page_id		Tablespace Id and first page in file
 @param[in]	parsed_bytes	Number of bytes parsed so far
-@param[in]	parse_only	Don't apply the log if true
+@param[in]	parse_only	Don't apply, parse only
 @return pointer to next redo log record
 @retval nullptr if this log record was truncated */
 byte *fil_tablespace_redo_delete(byte *ptr, const byte *end,
@@ -1633,7 +1902,21 @@ byte *fil_tablespace_redo_delete(byte *ptr, const byte *end,
                                  bool parse_only)
     MY_ATTRIBUTE((warn_unused_result));
 
-/** Redo a tablespace rename
+/** Redo a tablespace rename.
+This function doesn't do anything, simply parses the redo log record.
+@param[in]	ptr		redo log record
+@param[in]	end		end of the redo log buffer
+@param[in]	page_id		Tablespace Id and first page in file
+@param[in]	parsed_bytes	Number of bytes parsed so far
+@param[in]	parse_only	Don't apply, parse only
+@return pointer to next redo log record
+@retval nullptr if this log record was truncated */
+byte *fil_tablespace_redo_rename(byte *ptr, const byte *end,
+                                 const page_id_t &page_id, ulint parsed_bytes,
+                                 bool parse_only)
+    MY_ATTRIBUTE((warn_unused_result));
+
+/** Redo a tablespace extend
 @param[in]	ptr		redo log record
 @param[in]	end		end of the redo log buffer
 @param[in]	page_id		Tablespace Id and first page in file
@@ -1641,7 +1924,7 @@ byte *fil_tablespace_redo_delete(byte *ptr, const byte *end,
 @param[in]	parse_only	Don't apply the log if true
 @return pointer to next redo log record
 @retval nullptr if this log record was truncated */
-byte *fil_tablespace_redo_rename(byte *ptr, const byte *end,
+byte *fil_tablespace_redo_extend(byte *ptr, const byte *end,
                                  const page_id_t &page_id, ulint parsed_bytes,
                                  bool parse_only)
     MY_ATTRIBUTE((warn_unused_result));
@@ -1659,24 +1942,47 @@ byte *fil_tablespace_redo_encryption(byte *ptr, const byte *end,
 @param[in]	recovery	true if called from crash recovery */
 void fil_tablespace_open_init_for_recovery(bool recovery);
 
-/** Lookup the space ID.
-@param[in]	space_id	Tablespace ID to lookup
-@return true if space ID is known and open */
+/** Lookup the tablespace ID.
+@param[in]	space_id		Tablespace ID to lookup
+@return true if the space ID is known. */
 bool fil_tablespace_lookup_for_recovery(space_id_t space_id)
     MY_ATTRIBUTE((warn_unused_result));
+
+/** Compare and update space name and dd path for partitioned table. Uniformly
+converts partition separators and names to lower case.
+@param[in]	space_id	tablespace ID
+@param[in]	fsp_flags	tablespace flags
+@param[in]	update_space	update space name
+@param[in,out]	space_name	tablespace name
+@param[in,out]	dd_path		file name with complete path
+@return true, if names are updated. */
+bool fil_update_partition_name(space_id_t space_id, uint32_t fsp_flags,
+                               bool update_space, std::string &space_name,
+                               std::string &dd_path);
+
+/** Add tablespace to the set of tablespaces to be updated in DD.
+@param[in]	dd_object_id	Server DD tablespace ID
+@param[in]	space_id	Innodb tablespace ID
+@param[in]	space_name	New tablespace name
+@param[in]	old_path	Old Path in the data dictionary
+@param[in]	new_path	New path to be update in dictionary */
+void fil_add_moved_space(dd::Object_id dd_object_id, space_id_t space_id,
+                         const char *space_name, const std::string &old_path,
+                         const std::string &new_path);
 
 /** Lookup the tablespace ID and return the path to the file. The filename
 is ignored when testing for equality. Only the path up to the file name is
 considered for matching: e.g. ./test/a.ibd == ./test/b.ibd.
-@param[in]	dd_object_id	Server DD tablespace ID
-@param[in]	space_id	Tablespace ID to lookup
-@param[in]	space_name	Tablespace name
-@param[in]	old_path	Path in the data dictionary
-@param[out]	new_path	New path if scanned path not equal to path
+@param[in]  dd_object_id  server DD tablespace ID
+@param[in]  space_id      tablespace ID to lookup
+@param[in]  space_name    tablespace name
+@param[in]  fsp_flags     tablespace flags
+@param[in]  old_path      the path found in dd:Tablespace_files
+@param[out] new_path      the scanned path for this space_id
 @return status of the match. */
 Fil_state fil_tablespace_path_equals(dd::Object_id dd_object_id,
                                      space_id_t space_id,
-                                     const char *space_name,
+                                     const char *space_name, ulint fsp_flags,
                                      std::string old_path,
                                      std::string *new_path)
     MY_ATTRIBUTE((warn_unused_result));
@@ -1688,23 +1994,25 @@ or MLOG_FILE_RENAME record. These could not be recovered
 ignore redo log records during the apply phase */
 bool fil_check_missing_tablespaces() MY_ATTRIBUTE((warn_unused_result));
 
+/** Normalize and save a directory to scan for datafiles.
+@param[in]  directory    directory to scan for ibd and ibu files
+@param[in]  is_undo_dir  true for an undo directory */
+void fil_set_scan_dir(const std::string &directory, bool is_undo_dir = false);
+
+/** Normalize and save a list of directories to scan for datafiles.
+@param[in]  directories  Directories to scan for ibd and ibu files
+                         in the form:  "dir1;dir2; ... dirN" */
+void fil_set_scan_dirs(const std::string &directories);
+
 /** Discover tablespaces by reading the header from .ibd files.
-@param[in]	directories	Directories to scan
 @return DB_SUCCESS if all goes well */
-dberr_t fil_scan_for_tablespaces(const std::string &directories);
+dberr_t fil_scan_for_tablespaces();
 
 /** Open the tabelspace and also get the tablespace filenames, space_id must
 already be known.
 @param[in]	space_id	Tablespace ID to lookup
 @return true if open was successful */
 bool fil_tablespace_open_for_recovery(space_id_t space_id)
-    MY_ATTRIBUTE((warn_unused_result));
-
-/** Callback to check tablespace size with space header size and extend
-Caller must own the Fil_shard mutex that the file belongs to.
-@param[in]	file	file node
-@return	error code */
-dberr_t fil_check_extend_space(fil_node_t *file)
     MY_ATTRIBUTE((warn_unused_result));
 
 /** Replay a file rename operation for ddl replay.
@@ -1723,31 +2031,63 @@ bool fil_op_replay_rename_for_ddl(const page_id_t &page_id,
 dberr_t fil_open_for_business(bool read_only_mode)
     MY_ATTRIBUTE((warn_unused_result));
 
-/** Check if a path is known to InnoDB.
-@param[in]	path		Path to check
+/** Check if a path is known to InnoDB meaning that it is in or under
+one of the four path settings scanned at startup for file discovery.
+@param[in]  path    Path to check
 @return true if path is known to InnoDB */
-bool fil_check_path(const std::string &path) MY_ATTRIBUTE((warn_unused_result));
+bool fil_path_is_known(const std::string &path)
+    MY_ATTRIBUTE((warn_unused_result));
 
-/** Get the list of directories that InnoDB will search on startup.
+/** Get the list of directories that datafiles can reside in.
 @return the list of directories 'dir1;dir2;....;dirN' */
 std::string fil_get_dirs() MY_ATTRIBUTE((warn_unused_result));
 
-/** Rename a tablespace by its name only
+/** Rename a tablespace.  Use the space_id to find the shard.
+@param[in]	space_id	tablespace ID
 @param[in]	old_name	old tablespace name
 @param[in]	new_name	new tablespace name
 @return DB_SUCCESS on success */
-dberr_t fil_rename_tablespace_by_name(const char *old_name,
-                                      const char *new_name)
+dberr_t fil_rename_tablespace_by_id(space_id_t space_id, const char *old_name,
+                                    const char *new_name)
     MY_ATTRIBUTE((warn_unused_result));
 
 /** Free the data structures required for recovery. */
 void fil_free_scanned_files();
 
-/** Update the tablespace name. Incase, the new name
+/** Update the tablespace name. In case, the new name
 and old name are same, no update done.
 @param[in,out]	space		tablespace object on which name
                                 will be updated
 @param[in]	name		new name for tablespace */
 void fil_space_update_name(fil_space_t *space, const char *name);
+
+/** Adjust file name for import for partition files in different letter case.
+@param[in]	table	Innodb dict table
+@param[in]	path	file path to open
+@param[in]	extn	file extension */
+void fil_adjust_name_import(dict_table_t *table, const char *path,
+                            ib_file_suffix extn);
+
+#ifndef UNIV_HOTBACKUP
+
+/** Set the low water mark for the buffer pool. This will remove all
+dirty pages lower than this LSN in the BP.
+@param[in] lwm  Low water mark */
+void fil_checkpoint(lsn_t lwm);
+
+/** Count how many truncated undo space IDs are still tracked in
+the buffer pool and the file_system cache.
+@param[in]  undo_num  undo tablespace number.
+@return number of undo tablespaces that are still in memory. */
+size_t fil_count_deleted(space_id_t undo_num);
+
+/** Check if a particular undo space_id for a page in the buffer pool has
+been deleted recently.  Its space_id will be found in m_deleted until
+Fil:shard::checkpoint removes all its pages from the buffer pool and the
+fil_space_t from Fil_system.
+@return true if this space_id is in the list of recently deleted undo spaces. */
+bool fil_is_deleted(space_id_t space_id);
+
+#endif /* !UNIV_HOTBACKUP */
 
 #endif /* fil0fil_h */

@@ -1,4 +1,4 @@
-/* Copyright (c) 2007, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2007, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -49,10 +49,10 @@
 #define LF_DYNARRAY_LEVEL_LENGTH 256
 #define LF_DYNARRAY_LEVELS 4
 
-typedef struct {
+struct LF_DYNARRAY {
   std::atomic<void *> level[LF_DYNARRAY_LEVELS];
   uint size_of_element;
-} LF_DYNARRAY;
+};
 
 typedef int (*lf_dynarray_func)(void *, void *);
 
@@ -71,14 +71,14 @@ int lf_dynarray_iterate(LF_DYNARRAY *array, lf_dynarray_func func, void *arg);
 
 typedef void lf_pinbox_free_func(void *, void *, void *);
 
-typedef struct {
+struct LF_PINBOX {
   LF_DYNARRAY pinarray;
   lf_pinbox_free_func *free_func;
   void *free_func_arg;
   uint free_ptr_offset;
   std::atomic<uint32> pinstack_top_ver; /* this is a versioned pointer */
   std::atomic<uint32> pins_in_array;    /* number of elements in array */
-} LF_PINBOX;
+};
 
 struct LF_PINS {
   std::atomic<void *> pin[LF_PINBOX_PINS];
@@ -86,7 +86,7 @@ struct LF_PINS {
   void *purgatory;
   uint32 purgatory_count;
   std::atomic<uint32> link;
-/* we want sizeof(LF_PINS) to be 64 to avoid false sharing */
+  /* we want sizeof(LF_PINS) to be 64 to avoid false sharing */
 #if SIZEOF_INT * 2 + SIZEOF_CHARP * (LF_PINBOX_PINS + 2) != 64
   char pad[64 - sizeof(uint32) * 2 - sizeof(void *) * (LF_PINBOX_PINS + 2)];
 #endif
@@ -147,7 +147,9 @@ void lf_alloc_destroy(LF_ALLOCATOR *allocator);
 uint lf_alloc_pool_count(LF_ALLOCATOR *allocator);
 
 static inline void lf_alloc_direct_free(LF_ALLOCATOR *allocator, void *addr) {
-  if (allocator->destructor) allocator->destructor((uchar *)addr);
+  if (allocator->destructor) {
+    allocator->destructor((uchar *)addr);
+  }
   my_free(addr);
 }
 
@@ -162,7 +164,7 @@ typedef void lf_hash_init_func(uchar *dst, const uchar *src);
 #define MY_LF_ERRPTR ((void *)(intptr)1)
 
 /* lf_hash overhead per element (that is, sizeof(LF_SLIST) */
-extern const int LF_HASH_OVERHEAD;
+extern MYSQL_PLUGIN_IMPORT const int LF_HASH_OVERHEAD;
 
 /**
   Callback for extracting key and key length from user data in a LF_HASH.

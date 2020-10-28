@@ -1,4 +1,4 @@
-/* Copyright (c) 2006, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2006, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -33,7 +33,17 @@
 #include "my_inttypes.h"
 
 #define LIBLEN FN_REFLEN - FN_LEN /* Max l{ngd p} dev */
-/* extra 4+4 bytes for slave tmp tables */
+/**
+  The maximum length of a key in the table definition cache.
+
+  The key consists of the schema name, a '\0' character, the table
+  name and a '\0' character. Hence NAME_LEN * 2 + 1 + 1.
+
+  Additionally, the key can be suffixed with either 4 + 4 extra bytes
+  for slave tmp tables, or with a single extra byte for tables in a
+  secondary storage engine. Add 4 + 4 to account for either of these
+  suffixes.
+*/
 #define MAX_DBKEY_LENGTH (NAME_LEN * 2 + 1 + 1 + 4 + 4)
 #define MAX_ALIAS_NAME 256
 #define MAX_FIELD_NAME 34 /* Max colum name length +2 */
@@ -41,12 +51,7 @@
 #define MAX_KEY MAX_INDEXES  /* Max used keys */
 #define MAX_REF_PARTS 16U    /* Max parts used as ref */
 #define MAX_KEY_LENGTH 3072U /* max possible key */
-#if SIZEOF_OFF_T > 4
-#define MAX_REFLENGTH 8 /* Max length for record ref */
-#else
-#define MAX_REFLENGTH 4 /* Max length for record ref */
-#endif
-#define MAX_HOSTNAME 61 /* len+1 in mysql.user */
+#define MAX_REFLENGTH 8      /* Max length for record ref */
 
 #define MAX_MBWIDTH 3 /* Max multibyte sequence */
 #define MAX_FIELD_CHARLENGTH 255
@@ -96,8 +101,10 @@
   element, such as a random function or a non-deterministic function.
   Expressions containing this bit cannot be evaluated once and then cached,
   they must be evaluated at latest possible point.
+  MAX_TABLES_FOR_SIZE adds the pseudo bits and is used for sizing purposes only.
 */
-#define MAX_TABLES (sizeof(table_map) * 8 - 3) /* Max tables in join */
+#define MAX_TABLES_FOR_SIZE (sizeof(table_map) * 8)  ///< Use for sizing ONLY
+#define MAX_TABLES (MAX_TABLES_FOR_SIZE - 3)         ///< Max tables in join
 #define INNER_TABLE_BIT (((table_map)1) << (MAX_TABLES + 0))
 #define OUTER_REF_TABLE_BIT (((table_map)1) << (MAX_TABLES + 1))
 #define RAND_TABLE_BIT (((table_map)1) << (MAX_TABLES + 2))
@@ -344,20 +351,30 @@ static const ulong EVENT_DEF_CACHE_MIN = 256;
 #define OPTIMIZER_SWITCH_COND_FANOUT_FILTER (1ULL << 17)
 #define OPTIMIZER_SWITCH_DERIVED_MERGE (1ULL << 18)
 #define OPTIMIZER_SWITCH_USE_INVISIBLE_INDEXES (1ULL << 19)
-#define OPTIMIZER_SWITCH_LAST (1ULL << 20)
+#define OPTIMIZER_SKIP_SCAN (1ULL << 20)
+#define OPTIMIZER_SWITCH_HASH_JOIN (1ULL << 21)
+#define OPTIMIZER_SWITCH_SUBQUERY_TO_DERIVED (1ULL << 22)
+#define OPTIMIZER_SWITCH_PREFER_ORDERING_INDEX (1ULL << 23)
+#define OPTIMIZER_SWITCH_HYPERGRAPH_OPTIMIZER (1ULL << 24)
+#define OPTIMIZER_SWITCH_DERIVED_CONDITION_PUSHDOWN (1ULL << 25)
+#define OPTIMIZER_SWITCH_LAST (1ULL << 26)
 
-#define OPTIMIZER_SWITCH_DEFAULT                                         \
-  (OPTIMIZER_SWITCH_INDEX_MERGE | OPTIMIZER_SWITCH_INDEX_MERGE_UNION |   \
-   OPTIMIZER_SWITCH_INDEX_MERGE_SORT_UNION |                             \
-   OPTIMIZER_SWITCH_INDEX_MERGE_INTERSECT |                              \
-   OPTIMIZER_SWITCH_ENGINE_CONDITION_PUSHDOWN |                          \
-   OPTIMIZER_SWITCH_INDEX_CONDITION_PUSHDOWN | OPTIMIZER_SWITCH_MRR |    \
-   OPTIMIZER_SWITCH_MRR_COST_BASED | OPTIMIZER_SWITCH_BNL |              \
-   OPTIMIZER_SWITCH_MATERIALIZATION | OPTIMIZER_SWITCH_SEMIJOIN |        \
-   OPTIMIZER_SWITCH_LOOSE_SCAN | OPTIMIZER_SWITCH_FIRSTMATCH |           \
-   OPTIMIZER_SWITCH_DUPSWEEDOUT | OPTIMIZER_SWITCH_SUBQ_MAT_COST_BASED | \
-   OPTIMIZER_SWITCH_USE_INDEX_EXTENSIONS |                               \
-   OPTIMIZER_SWITCH_COND_FANOUT_FILTER | OPTIMIZER_SWITCH_DERIVED_MERGE)
+// Including the switch in this set, makes its default 'on'
+#define OPTIMIZER_SWITCH_DEFAULT                                          \
+  (OPTIMIZER_SWITCH_INDEX_MERGE | OPTIMIZER_SWITCH_INDEX_MERGE_UNION |    \
+   OPTIMIZER_SWITCH_INDEX_MERGE_SORT_UNION |                              \
+   OPTIMIZER_SWITCH_INDEX_MERGE_INTERSECT |                               \
+   OPTIMIZER_SWITCH_ENGINE_CONDITION_PUSHDOWN |                           \
+   OPTIMIZER_SWITCH_INDEX_CONDITION_PUSHDOWN | OPTIMIZER_SWITCH_MRR |     \
+   OPTIMIZER_SWITCH_MRR_COST_BASED | OPTIMIZER_SWITCH_BNL |               \
+   OPTIMIZER_SWITCH_MATERIALIZATION | OPTIMIZER_SWITCH_SEMIJOIN |         \
+   OPTIMIZER_SWITCH_LOOSE_SCAN | OPTIMIZER_SWITCH_FIRSTMATCH |            \
+   OPTIMIZER_SWITCH_DUPSWEEDOUT | OPTIMIZER_SWITCH_SUBQ_MAT_COST_BASED |  \
+   OPTIMIZER_SWITCH_USE_INDEX_EXTENSIONS |                                \
+   OPTIMIZER_SWITCH_COND_FANOUT_FILTER | OPTIMIZER_SWITCH_DERIVED_MERGE | \
+   OPTIMIZER_SKIP_SCAN | OPTIMIZER_SWITCH_HASH_JOIN |                     \
+   OPTIMIZER_SWITCH_PREFER_ORDERING_INDEX |                               \
+   OPTIMIZER_SWITCH_DERIVED_CONDITION_PUSHDOWN)
 
 enum SHOW_COMP_OPTION { SHOW_OPTION_YES, SHOW_OPTION_NO, SHOW_OPTION_DISABLED };
 
@@ -417,4 +434,37 @@ enum enum_resolution_type {
   RESOLVED_IGNORING_ALIAS
 };
 
+/// Enumeration for {Item,SELECT_LEX[_UNIT],Table_function}::walk
+enum class enum_walk {
+  PREFIX = 0x01,
+  POSTFIX = 0x02,
+  SUBQUERY = 0x04,
+  SUBQUERY_PREFIX = 0x05,  // Combine prefix and subquery traversal
+  SUBQUERY_POSTFIX = 0x06  // Combine postfix and subquery traversal
+};
+
+inline enum_walk operator|(enum_walk lhs, enum_walk rhs) {
+  return enum_walk(int(lhs) | int(rhs));
+}
+
+inline bool operator&(enum_walk lhs, enum_walk rhs) {
+  return (int(lhs) & int(rhs)) != 0;
+}
+
+class Item;
+/// Processor type for {Item,SELECT_LEX[_UNIT],Table_function}::walk
+typedef bool (Item::*Item_processor)(uchar *arg);
+
+/// Enumeration for SELECT_LEX::condition_context.
+/// If the expression being resolved belongs to a condition clause (WHERE, etc),
+/// it is connected to the clause's root through a chain of Items; tells if this
+/// chain matches ^(AND)*$ ("is top-level"), ^(AND|OR)*$, or neither.
+enum class enum_condition_context {
+  NEITHER,
+  ANDS,
+  ANDS_ORS,
+};
+
+/// Used to uniquely name expressions in derived tables
+#define SYNTHETIC_FIELD_NAME "Name_exp_"
 #endif /* SQL_CONST_INCLUDED */

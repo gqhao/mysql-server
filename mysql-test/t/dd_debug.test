@@ -134,7 +134,7 @@ CREATE TABLE t1 (pk INT PRIMARY KEY) TABLESPACE no_such_tablespace;
 --echo # 2.1c Fail while acquiring tablespace object during create.
 
 --connect (con1, localhost, root,,)
-SET DEBUG_SYNC= 'before_acquire_in_fill_dd_tablespace_id_or_name SIGNAL before_acquire WAIT_FOR cont';
+SET DEBUG_SYNC= 'before_acquire_in_read_tablespace_encryption SIGNAL before_acquire WAIT_FOR cont';
 --send CREATE TABLE t1 (pk INT PRIMARY KEY) TABLESPACE no_such_tablespace;
 
 --connection default
@@ -336,6 +336,17 @@ SET DEBUG_SYNC= "now SIGNAL killed";
 DROP TABLE t1;
 disconnect con1;
 SET DEBUG_SYNC= "RESET";
+
+--echo #
+--echo # Bug#27960500: UPGRADE 5.7 -> 8.0.11 -> 8.0.{12,13} FAILS DUE TO FTS TABLES WITH 0 TIMESTAMPS
+--echo #
+CREATE TABLE t1(pk INT PRIMARY KEY, s VARCHAR(10), FULLTEXT idx(s));
+SET debug = '+d,skip_dd_table_access_check';
+--let $assert_cond = "[SELECT COUNT(*) FROM mysql.tables WHERE created = 0 OR last_altered = 0]" = 0
+--let $assert_text = There are no tables with 0 timestamps.
+--source include/assert.inc
+SET debug = DEFAULT;
+DROP TABLE t1;
 
 --echo ###################################################################
 

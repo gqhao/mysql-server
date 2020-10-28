@@ -68,9 +68,8 @@ exec $MYSQLXTEST
 --echo # Enable back the "grant-tables", mysqlx client
 --echo # that uses invalid passord must be disconnected
 FLUSH PRIVILEGES;
---let $expected_error_msg= Invalid user or password \(code 1045\)
---source ../include/mysqlxtest_expected_error.inc
 exec $MYSQLXTEST $USER_CIPHER
+    --expect-error ER_ACCESS_DENIED_ERROR
     --socket=$MASTER_X_MYSOCK
     --user nonblank
     --password='invalid'
@@ -79,6 +78,9 @@ exec $MYSQLXTEST $USER_CIPHER
 #
 # Cleanup
 #
+--let $restart_parameters = restart:
+--source include/restart_mysqld.inc
+
 --remove_file $MYSQL_TMP_DIR/mysqlx-connection_uninstallplugin.tmp
 --remove_file $MYSQL_TMP_DIR/mysqlx-connection_current_user.tmp
 

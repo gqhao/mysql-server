@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -22,6 +22,8 @@
 
 #ifndef DD__DD_VERSION_INCLUDED
 #define DD__DD_VERSION_INCLUDED
+
+#include "mysql_version.h"  // MYSQL_VERSION_ID
 
 /**
   @file sql/dd/dd_version.h
@@ -58,7 +60,7 @@
 
 
   1: Published in 8.0.3-RC.
-  -------------------------
+  ----------------------------------------------------------------------------
   Introduced in MySQL 8.0.0 by WL#6378. Never published in a GA version.
   Last changes were:
 
@@ -69,7 +71,7 @@
 
 
   80004: Published in 8.0.4-RC.
-  -----------------------------
+  ----------------------------------------------------------------------------
   Changes from version 1:
 
   - WL#9059: Added collation clause for spatial_reference_systems.organization
@@ -97,8 +99,8 @@
     triggers.connection_collation_id, triggers.schema_collation_id,
 
 
-  80011: Current. Published in 8.0 GA.
-  ------------------------------------
+  80011: Published in 8.0 GA.
+  ----------------------------------------------------------------------------
   Changes from version 80004:
 
   - WL#8383 and WL#9465: Removed obsolete SQL modes from enums in 'events',
@@ -117,23 +119,127 @@
   - BUG#27309116: Add a new column `external_language` to `mysql`.`routines`
     and update `information_schema`.`routines` to reflect this column.
 
-  80012: Next DD version number to use when there is change.
-  ----------------------------------------------------------
-  No changes yet, hence this number is not used yet.
+  - Bug#27690593: CHANGE TYPE OF MYSQL.DD_PROPERTIES.PROPERTIES.
+    Changed type of 'dd_properties.properties' from MEDIUMTEXT to
+    MEDIUMBLOB.
 
-  If a new DD version is published in a MRU, that version may or may not
-  be possible to downgrade to previous MRUs within the same GA. If
-  downgrade is supported, the constant DD_VERSION_MINOR_DOWNGRADE_THRESHOLD
-  should be set to the lowest DD_VERSION that we may downgrade to. If minor
-  downgrade is not supported at all, DD_VERSION_MINOR_DOWNGRADE_THRESHOLD
-  should be set to DD_VERSION.
-*/
+
+  80012: Published in 8.0.12
+  ----------------------------------------------------------------------------
+  Changes from version 80011:
+
+  - Bug#27745526: Various adjustments to make the DD table definitions
+    in sync with WL#6379.
+
+
+  80013: Published in 8.0.13
+  ----------------------------------------------------------------------------
+  Changes from version 80012:
+
+  - Bug#24741307: add last_checked_for_upgrade column to msyql.tables table
+
+
+  80014: Published in 8.0.14
+  ----------------------------------------------------------------------------
+  Changes from version 80013:
+
+  - Bug#28492272: Synchronize sql_mode in server with that in DD.
+
+
+  80015: Not published. DD version still at 80014 in server 8.0.15.
+  ----------------------------------------------------------------------------
+  No changes from version 80014.
+
+
+  80016: Published in 8.0.16
+  ----------------------------------------------------------------------------
+  Changes from version 80014:
+
+  - WL#929 - CHECK CONSTRAINTS
+      New DD table check_constraints is introduced for the check
+      constraints metadata.
+
+  - WL#12261 adds new mysql.schemata.default_encryption DD column.
+
+  - Bug#29053560 Increases DD column mysql.tablespaces.name length to 268.
+
+  80017: Published in 8.0.17
+  ----------------------------------------------------------------------------
+  Changes from version 80016:
+
+  - WL#12731 adds new mysql.schemata.se_private_data DD column.
+  - WL#12571 Support fully qualified hostnames longer than 60 characters
+    Server metadata table columns size is increased to 255.
+
+  80021: Published in 8.0.21
+  ----------------------------------------------------------------------------
+  Changes from version 80017:
+
+  - WL#13341 adds new columns
+      mysql.tables.engine_attribute
+      mysql.tables.secondary_engine_attribute
+      mysql.columns.engine_attribute
+      mysql.columns.secondary_engine_attribute
+      mysql.indexes.engine_attribute
+      mysql.indexes.secondary_engine_attribute
+      mysql.tablespaces.engine_attribute
+
+  80022: Current.
+  ----------------------------------------------------------------------------
+  Changes from version 80021:
+
+  - Bug#31587625: PERFORMANCE DEGRADATION AFTER WL14073: Adds definer index for
+    mysql.{events, routines, tables, triggers}.
+
+  80023: Next DD version number after the previous is public.
+  ----------------------------------------------------------------------------
+  Changes from version 80022:
+  - No changes, this version number is not active yet.
+
+ */
 namespace dd {
 
-static const uint DD_VERSION = 80011;
+static const uint DD_VERSION = 80022;
+static_assert(DD_VERSION <= MYSQL_VERSION_ID,
+              "This release can not use a version number from the future");
 
-static const uint DD_VERSION_MINOR_DOWNGRADE_THRESHOLD = 80011;
+/**
+  If a new DD version is published in a MRU, that version may or may not
+  be possible to downgrade to previous MRUs within the same GA. From a
+  technical perspective, we may support downgrade for some types of
+  changes to the DD tables, such as:
 
+  i)   Addition of new attributes to a predefined general purpose option-like
+       field.
+  ii)  Addition of a column at the end of the table definition.
+  iii) Addition of elements at the end of an enumeration column type.
+  iv)  Extension of a VARCHAR field.
+  v)   Addition of an index on a column.
+
+  This means we can support downgrade in terms of being able to open the DD
+  tables and read from them. However, additional considerations are relevant
+  in order to determine whether downgrade should be supported or not, e.g.:
+
+  - For changes like i) and iii): In the older version, will invalid entries
+    just be ignored, or will they lead to a failure?
+  - For changes like iv): In the older version, are there buffer sizes that
+    may be insufficient?
+
+  If downgrade is supported, the constant DD_VERSION_MINOR_DOWNGRADE_THRESHOLD
+  should be set to the lowest DD_VERSION that we may downgrade to. If downgrade
+  is not supported at all, then DD_VERSION_MINOR_DOWNGRADE_THRESHOLD should be
+  set to DD_VERSION.
+
+  It has been decided that the default policy for MySQL 8.0 is not to allow
+  downgrade for any minor release. One of the major reasons for this is that
+  this would lead to a huge amount of possible upgrade/downgrade paths with
+  correspondingly complicated and effort demanding QA. Thus, we set this
+  constant to be equal to DD_VERSION to prohibit downgrade attempts. This
+  decision may be relaxed for future releases.
+*/
+static const uint DD_VERSION_MINOR_DOWNGRADE_THRESHOLD = DD_VERSION;
+static_assert(DD_VERSION_MINOR_DOWNGRADE_THRESHOLD <= MYSQL_VERSION_ID,
+              "This release can not use a version number from the future");
 }  // namespace dd
 
 #endif /* DD__DD_VERSION_INCLUDED */

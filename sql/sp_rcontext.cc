@@ -1,4 +1,4 @@
-/* Copyright (c) 2002, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2002, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -55,7 +55,7 @@ sp_rcontext::sp_rcontext(const sp_pcontext *root_parsing_ctx,
                          Field *return_value_fld, bool in_sub_stmt)
     : end_partial_result_set(false),
       m_root_parsing_ctx(root_parsing_ctx),
-      m_var_table(NULL),
+      m_var_table(nullptr),
       m_return_value_fld(return_value_fld),
       m_return_value_set(false),
       m_in_sub_stmt(in_sub_stmt),
@@ -64,11 +64,14 @@ sp_rcontext::sp_rcontext(const sp_pcontext *root_parsing_ctx,
       m_ccount(0) {}
 
 sp_rcontext::~sp_rcontext() {
-  if (m_var_table) free_blobs(m_var_table);
+  if (m_var_table) {
+    free_blobs(m_var_table);
+    destroy(m_var_table);
+  }
 
   delete_container_pointers(m_activated_handlers);
   delete_container_pointers(m_visible_handlers);
-  pop_all_cursors();
+  DBUG_ASSERT(m_ccount == 0);
 
   // Leave m_var_items and m_case_expr_holders untouched.
   // They are allocated in mem roots and will be freed accordingly.
@@ -79,12 +82,12 @@ sp_rcontext *sp_rcontext::create(THD *thd, const sp_pcontext *root_parsing_ctx,
   sp_rcontext *ctx = new (thd->mem_root)
       sp_rcontext(root_parsing_ctx, return_value_fld, thd->in_sub_stmt);
 
-  if (!ctx) return NULL;
+  if (!ctx) return nullptr;
 
   if (ctx->alloc_arrays(thd) || ctx->init_var_table(thd) ||
       ctx->init_var_items(thd)) {
     destroy(ctx);
-    return NULL;
+    return nullptr;
   }
 
   return ctx;
@@ -149,7 +152,7 @@ bool sp_rcontext::set_return_value(THD *thd, Item **return_value_item) {
   return sp_eval_expr(thd, m_return_value_fld, return_value_item);
 }
 
-bool sp_rcontext::push_cursor(THD *thd, sp_instr_cpush *i) {
+bool sp_rcontext::push_cursor(sp_instr_cpush *i) {
   /*
     We should create cursors on the system heap because:
      - they could be (and usually are) used in several instructions,
@@ -157,7 +160,7 @@ bool sp_rcontext::push_cursor(THD *thd, sp_instr_cpush *i) {
      - a cursor can be pushed/popped many times in a loop, having these objects
        on callers' mem-root would lead to a memory leak in every iteration.
   */
-  sp_cursor *c = new (std::nothrow) sp_cursor(thd, i);
+  sp_cursor *c = new (std::nothrow) sp_cursor(i);
 
   if (!c) {
     sql_alloc_error_handler();
@@ -171,7 +174,11 @@ bool sp_rcontext::push_cursor(THD *thd, sp_instr_cpush *i) {
 void sp_rcontext::pop_cursors(uint count) {
   DBUG_ASSERT(m_ccount >= count);
 
-  while (count--) delete m_cstack[--m_ccount];
+  while (count--) {
+    m_ccount--;
+    if (m_cstack[m_ccount]->is_open()) m_cstack[m_ccount]->close();
+    delete m_cstack[m_ccount];
+  }
 }
 
 bool sp_rcontext::push_handler(sp_handler *handler, uint first_ip) {
@@ -249,7 +256,7 @@ void sp_rcontext::exit_handler(THD *thd, sp_pcontext *target_scope) {
 
 bool sp_rcontext::handle_sql_condition(THD *thd, uint *ip,
                                        const sp_instr *cur_spi) {
-  DBUG_ENTER("sp_rcontext::handle_sql_condition");
+  DBUG_TRACE;
 
   /*
     If this is a fatal sub-statement error, and this runtime
@@ -257,11 +264,11 @@ bool sp_rcontext::handle_sql_condition(THD *thd, uint *ip,
     handlers from this context are applicable: try to locate one
     in the outer scope.
   */
-  if (thd->is_fatal_sub_stmt_error && m_in_sub_stmt) DBUG_RETURN(false);
+  if (thd->is_fatal_sub_stmt_error && m_in_sub_stmt) return false;
 
   Diagnostics_area *da = thd->get_stmt_da();
-  const sp_handler *found_handler = NULL;
-  Sql_condition *found_condition = NULL;
+  const sp_handler *found_handler = nullptr;
+  Sql_condition *found_condition = nullptr;
 
   if (thd->is_error()) {
     sp_pcontext *cur_pctx = cur_spi->get_parsing_ctx();
@@ -320,7 +327,7 @@ bool sp_rcontext::handle_sql_condition(THD *thd, uint *ip,
     }
   }
 
-  if (!found_handler) DBUG_RETURN(false);
+  if (!found_handler) return false;
 
   // At this point, we know that:
   //  - there is a pending SQL-condition (error or warning);
@@ -328,7 +335,7 @@ bool sp_rcontext::handle_sql_condition(THD *thd, uint *ip,
 
   DBUG_ASSERT(found_condition);
 
-  sp_handler_entry *handler_entry = NULL;
+  sp_handler_entry *handler_entry = nullptr;
   for (size_t i = 0; i < m_visible_handlers.size(); ++i) {
     sp_handler_entry *h = m_visible_handlers.at(i);
 
@@ -354,7 +361,7 @@ bool sp_rcontext::handle_sql_condition(THD *thd, uint *ip,
       DECLARE EXIT HANDLER ...     -- this handler does not catch the warning
     END
   */
-  if (!handler_entry) DBUG_RETURN(false);
+  if (!handler_entry) return false;
 
   uint continue_ip = handler_entry->handler->type == sp_handler::CONTINUE
                          ? cur_spi->get_cont_dest()
@@ -365,7 +372,7 @@ bool sp_rcontext::handle_sql_condition(THD *thd, uint *ip,
       Handler_call_frame(found_handler, found_condition, continue_ip);
   if (!frame) {
     sql_alloc_error_handler();
-    DBUG_RETURN(false);
+    return false;
   }
 
   m_activated_handlers.push_back(frame);
@@ -390,7 +397,7 @@ bool sp_rcontext::handle_sql_condition(THD *thd, uint *ip,
 
   *ip = handler_entry->first_ip;
 
-  DBUG_RETURN(true);
+  return true;
 }
 
 bool sp_rcontext::set_variable(THD *thd, Field *field, Item **value) {
@@ -405,14 +412,13 @@ bool sp_rcontext::set_variable(THD *thd, Field *field, Item **value) {
 Item_cache *sp_rcontext::create_case_expr_holder(THD *thd,
                                                  const Item *item) const {
   Item_cache *holder;
-  Query_arena current_arena;
+  Query_arena backup_arena;
 
-  thd->set_n_backup_active_arena(thd->sp_runtime_ctx->callers_arena,
-                                 &current_arena);
+  thd->swap_query_arena(*thd->sp_runtime_ctx->callers_arena, &backup_arena);
 
   holder = Item_cache::get_cache(item);
 
-  thd->restore_active_arena(thd->sp_runtime_ctx->callers_arena, &current_arena);
+  thd->swap_query_arena(backup_arena, thd->sp_runtime_ctx->callers_arena);
 
   return holder;
 }
@@ -447,31 +453,36 @@ bool sp_rcontext::set_case_expr(THD *thd, int case_expr_id,
 */
 
 bool sp_cursor::open(THD *thd) {
-  if (m_server_side_cursor) {
+  if (m_server_side_cursor != nullptr) {
     my_error(ER_SP_CURSOR_ALREADY_OPEN, MYF(0));
     return true;
   }
 
-  return mysql_open_cursor(thd, &m_result, &m_server_side_cursor);
+  bool rc = mysql_open_cursor(thd, &m_result, &m_server_side_cursor);
+
+  // If execution failed, ensure that the cursor is closed.
+  if (rc && m_server_side_cursor != nullptr) {
+    m_server_side_cursor->close();
+    m_server_side_cursor = nullptr;
+  }
+  return rc;
 }
 
 bool sp_cursor::close() {
-  if (!m_server_side_cursor) {
+  if (m_server_side_cursor == nullptr) {
     my_error(ER_SP_CURSOR_NOT_OPEN, MYF(0));
     return true;
   }
 
-  destroy();
+  m_server_side_cursor->close();
+  m_server_side_cursor = nullptr;
   return false;
 }
 
-void sp_cursor::destroy() {
-  delete m_server_side_cursor;
-  m_server_side_cursor = NULL;
-}
+void sp_cursor::destroy() { DBUG_ASSERT(m_server_side_cursor == nullptr); }
 
 bool sp_cursor::fetch(List<sp_variable> *vars) {
-  if (!m_server_side_cursor) {
+  if (m_server_side_cursor == nullptr) {
     my_error(ER_SP_CURSOR_NOT_OPEN, MYF(0));
     return true;
   }
@@ -509,30 +520,31 @@ bool sp_cursor::fetch(List<sp_variable> *vars) {
 // sp_cursor::Query_fetch_into_spvars implementation.
 ///////////////////////////////////////////////////////////////////////////
 
-bool sp_cursor::Query_fetch_into_spvars::prepare(List<Item> &fields,
-                                                 SELECT_LEX_UNIT *u) {
+bool sp_cursor::Query_fetch_into_spvars::prepare(
+    THD *thd, const mem_root_deque<Item *> &fields, SELECT_LEX_UNIT *u) {
   /*
     Cache the number of columns in the result set in order to easily
     return an error if column count does not match value count.
   */
-  field_count = fields.elements;
-  return Query_result_interceptor::prepare(fields, u);
+  field_count = CountVisibleFields(fields);
+  return Query_result_interceptor::prepare(thd, fields, u);
 }
 
-bool sp_cursor::Query_fetch_into_spvars::send_data(List<Item> &items) {
+bool sp_cursor::Query_fetch_into_spvars::send_data(
+    THD *thd, const mem_root_deque<Item *> &items) {
   List_iterator_fast<sp_variable> spvar_iter(*spvar_list);
-  List_iterator_fast<Item> item_iter(items);
+  auto item_iter = VisibleFields(items).begin();
   sp_variable *spvar;
-  Item *item;
 
-  /* Must be ensured by the caller */
-  DBUG_ASSERT(spvar_list->elements == items.elements);
+  DBUG_ASSERT(items.size() == CountVisibleFields(items));
+  DBUG_ASSERT(spvar_list->size() == items.size());
 
   /*
     Assign the row fetched from a server side cursor to stored
     procedure variables.
   */
-  for (; spvar = spvar_iter++, item = item_iter++;) {
+  while ((spvar = spvar_iter++)) {
+    Item *item = *item_iter++;
     if (thd->sp_runtime_ctx->set_variable(thd, spvar->offset, &item))
       return true;
   }

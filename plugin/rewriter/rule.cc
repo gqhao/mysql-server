@@ -1,4 +1,4 @@
-/*  Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+/*  Copyright (c) 2015, 2020, Oracle and/or its affiliates.
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License, version 2.0,
@@ -77,8 +77,8 @@ class Parse_error_recorder : public services::Condition_handler {
 
     @retval false We don't handle the error.
   */
-  bool handle(int sql_errno, const char *, const char *message) {
-    DBUG_ASSERT(message != NULL);
+  bool handle(int sql_errno, const char *, const char *message) override {
+    DBUG_ASSERT(message != nullptr);
     if (m_message.empty()) m_message.assign(message);
     switch (sql_errno) {
       case ER_PARSE_ERROR:
@@ -102,7 +102,7 @@ class Literal_collector : public services::Literal_visitor {
   vector<string> m_literals;
 
  public:
-  bool visit(MYSQL_ITEM item) {
+  bool visit(MYSQL_ITEM item) override {
     m_literals.push_back(services::print_item(item));
     return false;
   }
@@ -124,7 +124,7 @@ Pattern::Load_status Pattern::load(MYSQL_THD thd,
     return PARSE_ERROR;
   }
 
-  if (!services::is_select_statement(thd)) return NOT_A_SELECT_STATEMENT;
+  if (!services::is_supported_statement(thd)) return NOT_SUPPORTED_STATEMENT;
 
   // We copy the normalized_pattern to the plugin's memory.
   normalized_pattern = services::get_current_query_normalized(thd);

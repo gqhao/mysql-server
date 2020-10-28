@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -89,6 +89,13 @@ enum enum_transaction_write_set_hashing_algorithm {
 // Values for session_track_gtids sysvar
 enum enum_session_track_gtids { OFF = 0, OWN_GTID = 1, ALL_GTIDS = 2 };
 
+/** Values for use_secondary_engine sysvar. */
+enum use_secondary_engine {
+  SECONDARY_ENGINE_OFF = 0,
+  SECONDARY_ENGINE_ON = 1,
+  SECONDARY_ENGINE_FORCED = 2
+};
+
 /* Bits for different SQL modes modes (including ANSI mode) */
 #define MODE_REAL_AS_FLOAT 1
 #define MODE_PIPES_AS_CONCAT 2
@@ -123,6 +130,8 @@ enum enum_session_track_gtids { OFF = 0, OWN_GTID = 1, ALL_GTIDS = 2 };
   be truncated.
 */
 #define MODE_TIME_TRUNCATE_FRACTIONAL (1ULL << 32)
+
+#define MODE_LAST (1ULL << 33)
 
 #define MODE_ALLOWED_MASK                                                      \
   (MODE_REAL_AS_FLOAT | MODE_PIPES_AS_CONCAT | MODE_ANSI_QUOTES |              \
@@ -203,7 +212,7 @@ struct System_variables {
   ulong lock_wait_timeout;
   ulong max_allowed_packet;
   ulong max_error_count;
-  ulong max_length_for_sort_data;
+  ulong max_length_for_sort_data;  ///< Unused.
   ulong max_points_in_geometry;
   ulong max_sort_length;
   ulong max_insert_delayed_threads;
@@ -237,6 +246,9 @@ struct System_variables {
   ulong rbr_exec_mode_options;  // see enum_rbr_exec_mode
   bool binlog_direct_non_trans_update;
   ulong binlog_row_image;  // see enum_binlog_row_image
+  bool binlog_trx_compression;
+  ulong binlog_trx_compression_type;  // see enum_binlog_trx_compression
+  uint binlog_trx_compression_level_zstd;
   ulonglong binlog_row_value_options;
   bool sql_log_bin;
   // see enum_transaction_write_set_hashing_algorithm
@@ -340,6 +352,72 @@ struct System_variables {
       internal_tmp_mem_storage_engine;  // enum_internal_tmp_mem_storage_engine
 
   const CHARSET_INFO *default_collation_for_utf8mb4;
+
+  /** Used for controlling preparation of queries against secondary engine. */
+  ulong use_secondary_engine;
+
+  /**
+    Used for controlling which statements to execute in a secondary
+    storage engine. Only queries with an estimated cost higher than
+    this value will be attempted executed in a secondary storage
+    engine.
+  */
+  double secondary_engine_cost_threshold;
+
+  /** Used for controlling Group Replication consistency guarantees */
+  ulong group_replication_consistency;
+
+  bool sql_require_primary_key;
+
+  /**
+    Used in replication to determine the server version of the original server
+    where the transaction was executed.
+  */
+  uint32_t original_server_version;
+
+  /**
+    Used in replication to determine the server version of the immediate server
+    in the replication topology.
+  */
+  uint32_t immediate_server_version;
+
+  /**
+    Used to determine if the database or tablespace should be encrypted by
+    default.
+  */
+  bool default_table_encryption;
+
+  /**
+    @sa Sys_var_print_identified_with_as_hex
+  */
+  bool print_identified_with_as_hex;
+
+  /**
+    @sa Sys_var_show_create_table_skip_secondary_engine
+  */
+  bool show_create_table_skip_secondary_engine;
+
+  /**
+    @sa Sys_var_generated_random_password_length
+  */
+  uint32_t generated_random_password_length;
+
+  /**
+    @sa Sys_var_require_row_format
+  */
+  bool require_row_format;
+  /**
+    @sa Sys_select_into_buffer_size
+  */
+  ulong select_into_buffer_size;
+  /**
+    @sa Sys_select_into_disk_sync
+  */
+  bool select_into_disk_sync;
+  /**
+    @sa Sys_select_disk_sync_delay
+  */
+  uint select_into_disk_sync_delay;
 };
 
 /**
@@ -409,6 +487,9 @@ struct System_status_var {
   /* Number of statements sent from the client. */
   ulonglong questions;
 
+  /// How many queries have been executed on a secondary storage engine.
+  ulonglong secondary_engine_execution_count;
+
   ulong com_other;
   ulong com_stat[(uint)SQLCOM_END];
 
@@ -426,7 +507,7 @@ struct System_status_var {
   used as a global counter. It marks the end of a contiguous block of counters
   that can be iteratively totaled. See add_to_status().
 */
-#define LAST_STATUS_VAR questions
+#define LAST_STATUS_VAR secondary_engine_execution_count
 
 /*
   This must reference the FIRST ulonglong variable in system_status_var that is
@@ -445,7 +526,8 @@ const int COUNT_GLOBAL_STATUS_VARS =
 void add_diff_to_status(System_status_var *to_var, System_status_var *from_var,
                         System_status_var *dec_var);
 
-void add_to_status(System_status_var *to_var, System_status_var *from_var,
-                   bool reset_from_var);
+void add_to_status(System_status_var *to_var, System_status_var *from_var);
+
+void reset_system_status_vars(System_status_var *status_vars);
 
 #endif  // SYSTEM_VARIABLES_INCLUDED

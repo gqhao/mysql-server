@@ -20,7 +20,7 @@ let $XPLUGIN_SOCKET=$MASTER_X_MYSOCK;
 
 --replace_regex /restart: .+$XPLUGIN_SOCKE/restart: --skip-networking/
 --let $wait_for_tcpsocket_status = undefined_value
---source ../include/restart_mysqld_and_wait_for_xplugin.inc
+--source include/restart_mysqld.inc
 
 --enable_query_log
 --enable_result_log
@@ -43,11 +43,13 @@ let $XPLUGIN_SOCKET=$MASTER_X_MYSOCK;
  call mtr.add_suppression("Plugin mysqlx reported: .X Plugin failed to setup .+ .., with:");
  call mtr.add_suppression("Plugin mysqlx reported: .+ path is empt");
  call mtr.add_suppression("Plugin mysqlx reported: .+ is set to empty text");
+
  let $restart_parameters = $restart_parameters --loose-mysqlx-socket=;
 --replace_regex /restart: .+--loose-mysqlx-socket=/restart: --skip-networking --loose-mysqlx-socket=/
+
 --let $wait_for_tcpsocket_status = undefined_value
 --let $wait_for_unixsocket_status = undefined_value
---source ../include/restart_mysqld_and_wait_for_xplugin.inc
+--source include/restart_mysqld.inc
 
 --disable_result_log
 --echo # Verify that TCP is disabled
@@ -60,7 +62,7 @@ let $XPLUGIN_SOCKET=$MASTER_X_MYSOCK;
 
 --disable_query_log
 let $restart_parameters = restart:;
---source ../include/restart_mysqld_and_wait_for_xplugin.inc
+--source include/restart_mysqld.inc
 --enable_query_log
 --enable_result_log
 

@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+  Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -44,15 +44,16 @@
 // boost::geometry::empty_input_exception
 // boost::geometry::exception
 #include <boost/geometry/core/exception.hpp>
-#include <new>        // std::bad_alloc
+#include <new>  // std::bad_alloc
+#include <regex>
 #include <stdexcept>  // Other std exceptions
 #include <string>
 
-#include "my_inttypes.h"       // MYF
-#include "my_sys.h"            // my_error
-#include "mysqld_error.h"      // Error codes
-#include "sql/gis/functor.h"   // gis::not_implemented_exception
-#include "sql/gis/gc_utils.h"  // gis::invalid_geometry_exception
+#include "my_inttypes.h"      // MYF
+#include "my_sys.h"           // my_error
+#include "mysqld_error.h"     // Error codes
+#include "sql/gis/functor.h"  // gis::not_implemented_exception
+#include "sql/gis/gc_utils.h"  // gis::invalid_geometry_exception, gis::too_large_polygon_exception
 
 void handle_std_exception(const char *funcname) {
   try {
@@ -75,6 +76,8 @@ void handle_std_exception(const char *funcname) {
     my_error(ER_STD_UNDERFLOW_ERROR, MYF(0), e.what(), funcname);
   } catch (const std::logic_error &e) {
     my_error(ER_STD_LOGIC_ERROR, MYF(0), e.what(), funcname);
+  } catch (const std::regex_error &e) {
+    my_error(ER_STD_REGEX_ERROR, MYF(0), e.what(), funcname);
   } catch (const std::runtime_error &e) {
     my_error(ER_STD_RUNTIME_ERROR, MYF(0), e.what(), funcname);
   } catch (const std::exception &e) {
@@ -111,6 +114,8 @@ void handle_gis_exception(const char *funcname) {
     my_error(er_variant, MYF(0), funcname, e.typenames());
   } catch (const gis::invalid_geometry_exception &e) {
     my_error(ER_GIS_INVALID_DATA, MYF(0), funcname);
+  } catch (const gis::too_large_polygon_exception &e) {
+    my_error(ER_POLYGON_TOO_LARGE, MYF(0), funcname);
   } catch (const boost::geometry::centroid_exception &) {
     my_error(ER_BOOST_GEOMETRY_CENTROID_EXCEPTION, MYF(0), funcname);
   } catch (const boost::geometry::overlay_invalid_input_exception &) {

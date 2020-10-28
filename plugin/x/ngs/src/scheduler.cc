@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -24,40 +24,47 @@
 
 #include <stddef.h>
 
-#include "my_inttypes.h"
-#include "my_psi_config.h"
-#include "my_rdtsc.h"
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <utility>
+
+#include "my_psi_config.h"  // NOLINT(build/include_subdir)
+#include "my_rdtsc.h"       // NOLINT(build/include_subdir)
 #include "plugin/x/ngs/include/ngs/log.h"
 #include "plugin/x/ngs/include/ngs/memory.h"
 #include "plugin/x/ngs/include/ngs/scheduler.h"
-#include "plugin/x/ngs/include/ngs_common/bind.h"
+#include "plugin/x/src/xpl_performance_schema.h"
 
-using namespace ngs;
+namespace ngs {
 
 const uint64_t MILLI_TO_NANO = 1000000;
 const ulonglong TIME_VALUE_NOT_VALID = 0;
 
 Scheduler_dynamic::Scheduler_dynamic(const char *name,
-                                     PSI_thread_key thread_key)
+                                     PSI_thread_key thread_key,
+                                     std::unique_ptr<Monitor_interface> monitor)
     : m_name(name),
       m_worker_pending_mutex(KEY_mutex_x_scheduler_dynamic_worker_pending),
       m_worker_pending_cond(KEY_cond_x_scheduler_dynamic_worker_pending),
       m_thread_exit_mutex(KEY_mutex_x_scheduler_dynamic_thread_exit),
       m_thread_exit_cond(KEY_cond_x_scheduler_dynamic_thread_exit),
+      m_post_mutex(KEY_mutex_x_scheduler_post),
       m_is_running(0),
       m_min_workers_count(1),
       m_workers_count(0),
       m_tasks_count(0),
       m_idle_worker_timeout(60 * 1000),
+      m_monitor(std::move(monitor)),
       m_thread_key(thread_key) {}
 
 Scheduler_dynamic::~Scheduler_dynamic() { stop(); }
 
 void Scheduler_dynamic::launch() {
-  int32 int_0 = 0;
+  int32_t int_0 = 0;
   if (m_is_running.compare_exchange_strong(int_0, 1)) {
     create_min_num_workers();
-    log_info(ER_XPLUGIN_SCHEDULER_STARTED, m_name.c_str());
+    log_debug("Scheduler \"%s\" started.", m_name.c_str());
   }
 }
 
@@ -81,7 +88,7 @@ unsigned int Scheduler_dynamic::set_num_workers(unsigned int n) {
     (void)e;
     log_debug("Exception in set minimal number of workers \"%s\"", e.what());
 
-    const int32 m = m_workers_count.load();
+    const int32_t m = m_workers_count.load();
     log_warning(ER_XPLUGIN_FAILED_TO_SET_MIN_NUMBER_OF_WORKERS, n, m);
     m_min_workers_count.store(m);
     return m;
@@ -96,12 +103,12 @@ void Scheduler_dynamic::set_idle_worker_timeout(
 }
 
 void Scheduler_dynamic::stop() {
-  int32 int_1 = 1;
+  int32_t int_1 = 1;
   if (m_is_running.compare_exchange_strong(int_1, 0)) {
     while (m_tasks.empty() == false) {
-      Task *task = NULL;
+      Task *task = nullptr;
 
-      if (m_tasks.pop(task)) ngs::free_object(task);
+      if (m_tasks.pop(task)) free_object(task);
     }
 
     m_worker_pending_cond.broadcast(m_worker_pending_mutex);
@@ -114,17 +121,17 @@ void Scheduler_dynamic::stop() {
 
     Thread_t thread;
     while (m_threads.pop(thread)) {
-      ngs::thread_join(&thread, NULL);
+      thread_join(&thread, nullptr);
     }
 
-    log_info(ER_XPLUGIN_SCHEDULER_STOPPED, m_name.c_str());
+    log_debug("Scheduler \"%s\" stopped.", m_name.c_str());
   }
 }
 
 // NOTE: Scheduler takes ownership of the task and deletes it after
 //       completion with delete operator.
 bool Scheduler_dynamic::post(Task *task) {
-  if (is_running() == false || task == NULL) return false;
+  if (is_running() == false || task == nullptr) return false;
 
   {
     MUTEX_LOCK(lock, m_worker_pending_mutex);
@@ -150,38 +157,13 @@ bool Scheduler_dynamic::post(Task *task) {
 }
 
 bool Scheduler_dynamic::post(const Task &task) {
-  Task *copy_task = ngs::allocate_object<Task>(task);
+  Task *copy_task = allocate_object<Task>(task);
 
   if (post(copy_task)) return true;
 
-  ngs::free_object(copy_task);
+  free_object(copy_task);
 
   return false;
-}
-
-bool Scheduler_dynamic::post_and_wait(const Task &task_to_be_posted) {
-  Wait_for_signal future;
-
-  {
-    ngs::Scheduler_dynamic::Task task =
-        ngs::bind(&Wait_for_signal::Signal_when_done::execute,
-                  ngs::allocate_shared<ngs::Wait_for_signal::Signal_when_done>(
-                      ngs::ref(future), task_to_be_posted));
-
-    if (!post(task)) {
-      log_error(ER_XPLUGIN_TASK_SCHEDULING_FAILED);
-      return false;
-    }
-  }
-
-  future.wait();
-
-  return true;
-}
-
-// NOTE: Scheduler takes ownership of monitor.
-void Scheduler_dynamic::set_monitor(Monitor_interface *monitor) {
-  m_monitor.reset(monitor);
 }
 
 void *Scheduler_dynamic::worker_proxy(void *data) {
@@ -206,7 +188,7 @@ bool Scheduler_dynamic::wait_if_idle_then_delete_worker(
 
   if (!m_tasks.empty()) return false;
 
-  const int64 thread_waiting_for_delta_ms =
+  const int64_t thread_waiting_for_delta_ms =
       my_timer_milliseconds() - thread_waiting_started;
 
   if (thread_waiting_for_delta_ms < m_idle_worker_timeout) {
@@ -240,7 +222,7 @@ void *Scheduler_dynamic::worker() {
       bool task_available = false;
 
       try {
-        Task *task = NULL;
+        Task *task = nullptr;
 
         while (is_running() && m_tasks.empty() == false &&
                task_available == false) {
@@ -248,7 +230,7 @@ void *Scheduler_dynamic::worker() {
         }
 
         if (task_available && task) {
-          ngs::Memory_instrumented<Task>::Unique_ptr task_ptr(task);
+          Memory_instrumented<Task>::Unique_ptr task_ptr(task);
           thread_waiting_time = TIME_VALUE_NOT_VALID;
 
           (*task_ptr)();
@@ -279,7 +261,7 @@ void *Scheduler_dynamic::worker() {
 
   m_terminating_workers.push(my_thread_self());
 
-  return NULL;
+  return nullptr;
 }
 
 void Scheduler_dynamic::join_terminating_workers() {
@@ -287,9 +269,9 @@ void Scheduler_dynamic::join_terminating_workers() {
   while (m_terminating_workers.pop(tid)) {
     Thread_t thread;
     if (m_threads.remove_if(thread,
-                            ngs::bind(Scheduler_dynamic::thread_id_matches,
-                                      ngs::placeholders::_1, tid))) {
-      ngs::thread_join(&thread, NULL);
+                            std::bind(Scheduler_dynamic::thread_id_matches,
+                                      std::placeholders::_1, tid))) {
+      thread_join(&thread, nullptr);
     }
   }
 }
@@ -299,7 +281,7 @@ void Scheduler_dynamic::create_thread() {
     Thread_t thread;
     log_debug("Scheduler '%s', create threads", m_name.c_str());
 
-    ngs::thread_create(m_thread_key, &thread, worker_proxy, this);
+    thread_create(m_thread_key, &thread, worker_proxy, this);
     increase_workers_count();
     m_threads.push(thread);
   }
@@ -307,26 +289,28 @@ void Scheduler_dynamic::create_thread() {
 
 bool Scheduler_dynamic::is_running() { return m_is_running.load() != 0; }
 
-int32 Scheduler_dynamic::increase_workers_count() {
+int32_t Scheduler_dynamic::increase_workers_count() {
   if (m_monitor) m_monitor->on_worker_thread_create();
 
   return ++m_workers_count;
 }
 
-int32 Scheduler_dynamic::decrease_workers_count() {
+int32_t Scheduler_dynamic::decrease_workers_count() {
   if (m_monitor) m_monitor->on_worker_thread_destroy();
 
   return --m_workers_count;
 }
 
-int32 Scheduler_dynamic::increase_tasks_count() {
+int32_t Scheduler_dynamic::increase_tasks_count() {
   if (m_monitor) m_monitor->on_task_start();
 
   return ++m_tasks_count;
 }
 
-int32 Scheduler_dynamic::decrease_tasks_count() {
+int32_t Scheduler_dynamic::decrease_tasks_count() {
   if (m_monitor) m_monitor->on_task_end();
 
   return --m_tasks_count;
 }
+
+}  // namespace ngs

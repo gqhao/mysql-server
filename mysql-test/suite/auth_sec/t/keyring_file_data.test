@@ -1,5 +1,4 @@
 --disable_ps_protocol
---disable_warnings
 
 call mtr.add_suppression("keyring_file_data cannot be set to new value as the keyring file cannot be created/accessed in the provided path");
 call mtr.add_suppression("Error while loading keyring content. The keyring might be malformed");
@@ -23,3 +22,4 @@ SELECT @@global.keyring_file_data;
 # cleanup
 --replace_result $MYSQL_TMP_DIR MYSQL_TMP_DIR
 eval SET @@global.keyring_file_data= '$MYSQL_TMP_DIR/mysecret_keyring';
+--remove_file $MYSQL_TMP_DIR/new_keyring_file_data

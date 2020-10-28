@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -73,6 +73,36 @@ enum enum_query_type {
     don't reveal values.
   */
   QT_NO_DATA_EXPANSION = (1 << 10),
+
+  /**
+    Don't print the QB name. Used for the INSERT part of an INSERT...SELECT.
+  */
+  QT_IGNORE_QB_NAME = (1 << 11),
+
+  /**
+    Print only the QB name. Used for the SELECT part of an INSERT...SELECT.
+  */
+  QT_ONLY_QB_NAME = (1 << 12),
+
+  /**
+    When printing subselects, print only the select number
+    (like QT_SHOW_SELECT_NUMBER), not the actual subselect text.
+   */
+  QT_SUBSELECT_AS_ONLY_SELECT_NUMBER = (1 << 13),
+
+  /**
+    Suppress the internal rollup functions used for switching items to NULL
+    or between different sums; these are different from most other internal
+    Items we insert, since they are inserted during resolving and not
+    optimization. Used when getting the canonical representation of a view.
+   */
+  QT_HIDE_ROLLUP_FUNCTIONS = (1 << 14),
+
+  /**
+    When printing Item_view_ref, print the reference (i.e. column name of the
+    derived table), not the referenced (underlying) expression.
+  */
+  QT_DERIVED_TABLE_ORIG_FIELD_NAMES = (1 << 15),
 };
 
 #endif  // ENUM_QUERY_TYPE_INCLUDED

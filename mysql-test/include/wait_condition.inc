@@ -20,7 +20,7 @@
 #    --source include/wait_condition.inc
 #    --echo Executed the test condition $wait_condition_reps times
 #
-# 
+#
 # EXAMPLE
 #    events_bugs.test, events_time_zone.test
 #
@@ -54,7 +54,7 @@ while ($wait_counter)
     }
     if (!$success)
     {
-        real_sleep 0.1;
+        sleep 0.1;
         dec $wait_counter;
     }
 }

@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -46,6 +46,7 @@ class FsOpenReq {
   friend class Filename;
   friend class VoidFs;
   friend class AsyncIoThread;
+  friend class ndb_file;
 
   /**
    * Sender(s)
@@ -61,6 +62,8 @@ class FsOpenReq {
 
   friend class Dbtup;
 
+  friend class Cmvmi;
+
   /**
    * For printing
    */
@@ -72,7 +75,8 @@ public:
    */
   STATIC_CONST( SignalLength = 11 );
   SECTION( FILENAME = 0 );
-  
+  SECTION( PASSWORD = 1 );
+
 private:
 
   /**
@@ -88,9 +92,11 @@ private:
   Uint32 file_size_lo;
   Uint32 auto_sync_size; // In bytes
   
-  STATIC_CONST( OM_READONLY  = 0 );
-  STATIC_CONST( OM_WRITEONLY = 1 );
-  STATIC_CONST( OM_READWRITE = 2 );
+public:
+  STATIC_CONST( OM_READONLY        = 0 );
+  STATIC_CONST( OM_WRITEONLY       = 1 );
+  STATIC_CONST( OM_READWRITE       = 2 );
+  STATIC_CONST( OM_READ_WRITE_MASK = 3 );
 
   STATIC_CONST( OM_APPEND    = 0x8   ); // Not Implemented on W2k
   STATIC_CONST( OM_SYNC      = 0x10  );
@@ -107,6 +113,8 @@ private:
   STATIC_CONST( OM_WRITE_BUFFER   = 0x20000 );
   STATIC_CONST( OM_READ_SIZE      = 0x40000 );
   STATIC_CONST( OM_DIRECT_SYNC    = 0x80000 );
+  STATIC_CONST( OM_ENCRYPT        = 0x100000 );
+  STATIC_CONST( OM_PASSWORD       = 0x200000 ); // Not really needed, implicit by section PASSWORD
   
   enum Suffixes {
     S_DATA = 0,
@@ -155,11 +163,15 @@ private:
    */
   static Uint32 v2_getSequence(const Uint32 fileNumber[]);
   static Uint32 v2_getNodeId(const Uint32 fileNumber[]);
+  static Uint32 v2_getPartNum(const Uint32 fileNumber[]);
   static Uint32 v2_getCount(const Uint32 fileNumber[]);
+  static Uint32 v2_getTotalParts(const Uint32 fileNumber[]);
 
   static void v2_setSequence(Uint32 fileNumber[], Uint32 no);
   static void v2_setNodeId(Uint32 fileNumber[], Uint32 no);
+  static void v2_setPartNum(Uint32 fileNumber[], Uint32 no);
   static void v2_setCount(Uint32 fileNumber[], Uint32 no);
+  static void v2_setTotalParts(Uint32 fileNumber[], Uint32 no);
 
   /**
    * V4 - Specified filename
@@ -320,22 +332,46 @@ void FsOpenReq::v2_setSequence(Uint32 fileNumber[], Uint32 val){
 
 inline 
 Uint32 FsOpenReq::v2_getNodeId(const Uint32 fileNumber[]){
-  return fileNumber[1];
+  return (fileNumber[1] & 0x0000FFFF);
 }
 
 inline
 void FsOpenReq::v2_setNodeId(Uint32 fileNumber[], Uint32 val){
-  fileNumber[1] = val;
+  const Uint32 t = fileNumber[1];
+  fileNumber[1] = (t & 0xFFFF0000) | (((Uint32)val) & 0x0000FFFF);
 }
 
 inline 
+Uint32 FsOpenReq::v2_getPartNum(const Uint32 fileNumber[]){
+  return ((fileNumber[1] >> 16) & 0x0000FFFF);
+}
+
+inline
+void FsOpenReq::v2_setPartNum(Uint32 fileNumber[], Uint32 val){
+  Uint32 t = fileNumber[1] ;
+  fileNumber[1] = (t & 0x0000FFFF) | ((val << 16) & 0xFFFF0000);
+}
+
+inline
 Uint32 FsOpenReq::v2_getCount(const Uint32 fileNumber[]){
-  return fileNumber[2];
+  return (fileNumber[2] & 0x0000FFFF);
 }
 
 inline
 void FsOpenReq::v2_setCount(Uint32 fileNumber[], Uint32 val){
-  fileNumber[2] = val;
+  const Uint32 t = fileNumber[2];
+  fileNumber[2] = (t & 0xFFFF0000) | (((Uint32)val) & 0x0000FFFF);
+}
+
+inline
+Uint32 FsOpenReq::v2_getTotalParts(const Uint32 fileNumber[]){
+  return ((fileNumber[2] >> 16) & 0x0000FFFF);
+}
+
+inline
+void FsOpenReq::v2_setTotalParts(Uint32 fileNumber[], Uint32 val){
+  Uint32 t = fileNumber[2] ;
+  fileNumber[2] = (t & 0x0000FFFF) | ((val << 16) & 0xFFFF0000);
 }
 
 /****************/

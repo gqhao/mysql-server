@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -32,6 +32,7 @@
 #include <NdbTick.h>
 #include <stat_utils.hpp>
 
+#include "AssembleFragments.hpp"
 #include "NdbQueryOperationImpl.hpp"
 #include "ndb_cluster_connection_impl.hpp"
 #include "NdbDictionaryImpl.hpp"
@@ -97,7 +98,7 @@ class NdbImpl : public trp_client
 {
 public:
   NdbImpl(Ndb_cluster_connection *, Ndb&);
-  ~NdbImpl();
+  ~NdbImpl() override;
 
   int send_event_report(bool is_poll_owner, Uint32 *data, Uint32 length);
   int send_dump_state_all(Uint32 *dumpStateCodeArray, Uint32 len);
@@ -143,6 +144,7 @@ public:
 
   WakeupHandler* wakeHandler;
 
+  AssembleBatchedFragments m_suma_fragmented_signals[MAX_NDB_NODES];
   NdbEventOperationImpl *m_ev_op;
 
   int m_optimized_node_selection;
@@ -196,19 +198,19 @@ public:
     assert(stat < Ndb::NumClientStatistics);
     if (likely(stat < Ndb::NumClientStatistics))
       clientStats[ stat ] += inc;
-  };
+  }
 
   inline void decClientStat(const Ndb::ClientStatistics stat, const Uint64 dec) {
     assert(stat < Ndb::NumClientStatistics);
     if (likely(stat < Ndb::NumClientStatistics))
       clientStats[ stat ] -= dec;
-  };
+  }
   
   inline void setClientStat(const Ndb::ClientStatistics stat, const Uint64 val) {
     assert(stat < Ndb::NumClientStatistics);
     if (likely(stat < Ndb::NumClientStatistics))
       clientStats[ stat ] = val;
-  };
+  }
 
   /* We don't record the sent/received bytes of some GSNs as they are 
    * generated constantly and are not targetted to specific
@@ -259,10 +261,13 @@ public:
   /**
    * trp_client interface
    */
-  virtual void trp_deliver_signal(const NdbApiSignal*,
-                                  const LinearSectionPtr p[3]);
-  virtual void trp_wakeup();
-  virtual void recordWaitTimeNanos(Uint64 nanos);
+  void trp_deliver_signal(const NdbApiSignal*,
+                          const LinearSectionPtr p[3]) override;
+  void trp_wakeup() override;
+  void recordWaitTimeNanos(Uint64 nanos) override;
+
+  void drop_batched_fragments(AssembleBatchedFragments* batched_fragments);
+  Int32 assemble_data_event_signal(AssembleBatchedFragments* batched_fragments, NdbApiSignal* signal, LinearSectionPtr ptr[3]);
   // Is node available for running transactions
   bool   get_node_alive(NodeId nodeId) const;
   bool   get_node_stopping(NodeId nodeId) const;
@@ -291,8 +296,6 @@ public:
   void* int2void(Uint32 val);
   static NdbReceiver* void2rec(void* val);
   static NdbTransaction* void2con(void* val);
-  static NdbOperation* void2rec_op(void* val);
-  static NdbIndexOperation* void2rec_iop(void* val);
   NdbTransaction* lookupTransactionFromOperation(const TcKeyConf* conf);
   Uint32 select_node(NdbTableImpl *table_impl, const Uint16 *nodes, Uint32 cnt);
 };
@@ -356,20 +359,6 @@ NdbTransaction*
 NdbImpl::void2con(void* val)
 {
   return (NdbTransaction*)val;
-}
-
-inline
-NdbOperation*
-NdbImpl::void2rec_op(void* val)
-{
-  return (NdbOperation*)(void2rec(val)->getOwner());
-}
-
-inline
-NdbIndexOperation*
-NdbImpl::void2rec_iop(void* val)
-{
-  return (NdbIndexOperation*)(void2rec(val)->getOwner());
 }
 
 inline 

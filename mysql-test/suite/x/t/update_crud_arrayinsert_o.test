@@ -23,6 +23,7 @@
 --source include/xplugin_preamble.inc
 create user updatearrayinsert@localhost identified by 'updatearrayinsert';
 grant all on *.* to updatearrayinsert@localhost;
+CREATE SCHEMA mysqlxcoll;
 
 ## TEST STARTS HERE
 --echo ================================================================================
@@ -30,17 +31,18 @@ grant all on *.* to updatearrayinsert@localhost;
 --echo ================================================================================
 
 --write_file $MYSQL_TMP_DIR/mysqlx-update_collection_arrayinsert.tmp
+
+-->stmtadmin create_collection	{"schema":"mysqlxcoll","name":"maincoll"}
+-->recvresult
+
 -->sql
  SET SQL_SAFE_UPDATES = 0;
-DROP SCHEMA if EXISTS mysqlxcoll;
-CREATE SCHEMA mysqlxcoll;
 USE mysqlxcoll;
-CREATE TABLE maincoll (doc JSON, _id VARBINARY(32) NOT NULL PRIMARY KEY);
-INSERT INTO maincoll (doc, _id) values ('{"_id": "1", "name": ["Victor"], "last_name": ["Otero"],"amount": [4.99]}',json_unquote(json_extract(doc, '$._id')));
-INSERT INTO maincoll (doc, _id) values ('{"_id": "2", "name": ["Gonzalo"], "last_name": ["Chrystens"],"amount": [120.57]}',json_unquote(json_extract(doc, '$._id')));
-INSERT INTO maincoll (doc, _id) values ('{"_id": "3", "name": ["Abraham"], "last_name": ["Vega"],"amount": [74.56]}',json_unquote(json_extract(doc, '$._id')));
-INSERT INTO maincoll (doc, _id) values ('{"_id": "4", "name": ["Jennifer"], "last_name": ["Leon"],"amount": [387.14]}',json_unquote(json_extract(doc, '$._id')));
-INSERT INTO maincoll (doc, _id) values ('{"_id": "5", "name": ["Jhonny"], "last_name": ["Test"],"amount": [125.45]}',json_unquote(json_extract(doc, '$._id')));
+INSERT INTO maincoll (doc) values ('{"_id": "1", "name": ["Victor"], "last_name": ["Otero"],"amount": [4.99]}');
+INSERT INTO maincoll (doc) values ('{"_id": "2", "name": ["Gonzalo"], "last_name": ["Chrystens"],"amount": [120.57]}');
+INSERT INTO maincoll (doc) values ('{"_id": "3", "name": ["Abraham"], "last_name": ["Vega"],"amount": [74.56]}');
+INSERT INTO maincoll (doc) values ('{"_id": "4", "name": ["Jennifer"], "last_name": ["Leon"],"amount": [387.14]}');
+INSERT INTO maincoll (doc) values ('{"_id": "5", "name": ["Jhonny"], "last_name": ["Test"],"amount": [125.45]}');
 -->endsql
 
 -->echo Update insert String value into Array using == Operator for criteria
@@ -87,7 +89,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo Update a valid collection with == operator and for Quotes
@@ -134,7 +136,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo Update a valid collection with string value and > operator for multiple docs
@@ -181,7 +183,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo Update a valid collection with string value and < operator for multiple docs
@@ -228,7 +230,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo Update a valid collection with string value and <= operator for multiple docs
@@ -275,7 +277,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo Update a valid collection with string value and >= operator for multiple docs
@@ -322,7 +324,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo Update a valid collection with string value and != operator for multiple docs
@@ -369,10 +371,10 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
--->echo Update array insert a Double 
+-->echo Update array insert a Double
 Mysqlx.Crud.Update {
   collection {
     name: "maincoll"
@@ -416,10 +418,10 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
--->echo Update array insert a Float 
+-->echo Update array insert a Float
 Mysqlx.Crud.Update {
   collection {
     name: "maincoll"
@@ -455,7 +457,7 @@ Mysqlx.Crud.Update {
     value {
       type: LITERAL
       literal {
-        type: V_FLOAT v_float: 356.8594
+        type: V_FLOAT v_float: 356.859
       }
     }
   }
@@ -463,7 +465,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo Update array insert a NULL 
@@ -510,7 +512,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo Update array insert in different index values
@@ -558,7 +560,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo array index equal to 2
@@ -605,7 +607,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo array index equal to 3
@@ -652,7 +654,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo array index equal to 4
@@ -699,7 +701,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo Update array insert a String into a only numbers member
@@ -746,7 +748,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo Update array insert a number into a only String member
@@ -793,7 +795,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo Update with order clause update last _id in desc order (_id = 5)
@@ -852,7 +854,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo Update with order clause update first two _id in asc order (_id = 1,2)
@@ -911,7 +913,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 START TRANSACTION;
 -->endsql
 
@@ -959,9 +961,9 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 ROLLBACK;
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo Update transaction commit
@@ -1009,7 +1011,7 @@ Mysqlx.Crud.Update {
 
 -->sql
 COMMIT;
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo Update with non existing doc member
@@ -1057,7 +1059,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 -->echo Invalid type of update for Document
@@ -1148,7 +1150,7 @@ Mysqlx.Crud.Update {
 -->recvresult
 
 -->sql
-select * from maincoll;
+select doc from maincoll;
 -->endsql
 
 ## Cleanup
@@ -1156,7 +1158,6 @@ select * from maincoll;
 -->echo CLEAN UP
 -->echo ================================================================================
 -->sql
-DROP SCHEMA if EXISTS mysqlxcoll;
 DROP USER updatearrayinsert@localhost;
 SET SQL_SAFE_UPDATES = 1;
 -->endsql
@@ -1165,5 +1166,6 @@ EOF
 --exec $MYSQLXTEST -u updatearrayinsert --password='updatearrayinsert' --file=$MYSQL_TMP_DIR/mysqlx-update_collection_arrayinsert.tmp 2>&1
 
 ## Cleanup
+DROP SCHEMA if EXISTS mysqlxcoll;
 --remove_file $MYSQL_TMP_DIR/mysqlx-update_collection_arrayinsert.tmp
 

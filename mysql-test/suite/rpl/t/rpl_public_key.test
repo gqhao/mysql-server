@@ -20,6 +20,8 @@
 --echo #
 
 --source include/not_group_replication_plugin.inc
+--source include/set_privilege_checks_user_as_system_user.inc
+--let $rpl_privilege_checks_user_grant_option = 1
 --source include/master-slave.inc
 
 --echo ==== Create new replication user ====
@@ -79,8 +81,9 @@ eval CHANGE MASTER TO master_user='u27122947', master_password='pwd', master_pub
 CHANGE MASTER TO master_user='u27122947', master_password='pwd', master_public_key_path='';
 
 --echo ==== IO thread should start without issues because password is still cached ====
---source include/rpl_connection_slave.inc
 --source include/start_slave.inc
+--source include/rpl_connection_master.inc
+--source include/sync_slave_sql_with_master.inc
 SELECT * FROM t1;
 
 --echo ==== Reset and cleanup ====

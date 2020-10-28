@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2020, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2008, Google Inc.
 
 Portions of this file contain modifications contributed and copyrighted by
@@ -54,6 +54,7 @@ mysql_pfs_key_t autoinc_persisted_mutex_key;
 #ifndef PFS_SKIP_BUFFER_MUTEX_RWLOCK
 mysql_pfs_key_t buffer_block_mutex_key;
 #endif /* !PFS_SKIP_BUFFER_MUTEX_RWLOCK */
+mysql_pfs_key_t buf_pool_chunks_mutex_key;
 mysql_pfs_key_t buf_pool_flush_state_mutex_key;
 mysql_pfs_key_t buf_pool_LRU_list_mutex_key;
 mysql_pfs_key_t buf_pool_free_list_mutex_key;
@@ -84,11 +85,14 @@ mysql_pfs_key_t log_writer_mutex_key;
 mysql_pfs_key_t log_flusher_mutex_key;
 mysql_pfs_key_t log_write_notifier_mutex_key;
 mysql_pfs_key_t log_flush_notifier_mutex_key;
+mysql_pfs_key_t log_limits_mutex_key;
 mysql_pfs_key_t log_cmdq_mutex_key;
 mysql_pfs_key_t log_sn_lock_key;
+mysql_pfs_key_t log_sn_mutex_key;
 mysql_pfs_key_t log_sys_arch_mutex_key;
 mysql_pfs_key_t page_sys_arch_mutex_key;
 mysql_pfs_key_t page_sys_arch_oper_mutex_key;
+mysql_pfs_key_t page_sys_arch_client_mutex_key;
 mysql_pfs_key_t mutex_list_mutex_key;
 mysql_pfs_key_t recalc_pool_mutex_key;
 mysql_pfs_key_t page_cleaner_mutex_key;
@@ -108,19 +112,19 @@ mysql_pfs_key_t rtr_path_mutex_key;
 mysql_pfs_key_t rtr_ssn_mutex_key;
 mysql_pfs_key_t rw_lock_list_mutex_key;
 mysql_pfs_key_t rw_lock_mutex_key;
-mysql_pfs_key_t srv_dict_tmpfile_mutex_key;
 mysql_pfs_key_t srv_innodb_monitor_mutex_key;
 mysql_pfs_key_t srv_misc_tmpfile_mutex_key;
 mysql_pfs_key_t srv_monitor_file_mutex_key;
 #ifdef UNIV_DEBUG
 mysql_pfs_key_t sync_thread_mutex_key;
 #endif /* UNIV_DEBUG */
-mysql_pfs_key_t buf_dblwr_mutex_key;
 mysql_pfs_key_t trx_undo_mutex_key;
 mysql_pfs_key_t trx_mutex_key;
 mysql_pfs_key_t trx_pool_mutex_key;
 mysql_pfs_key_t trx_pool_manager_mutex_key;
-mysql_pfs_key_t lock_mutex_key;
+mysql_pfs_key_t temp_pool_manager_mutex_key;
+mysql_pfs_key_t lock_sys_table_mutex_key;
+mysql_pfs_key_t lock_sys_page_mutex_key;
 mysql_pfs_key_t lock_wait_mutex_key;
 mysql_pfs_key_t trx_sys_mutex_key;
 mysql_pfs_key_t srv_sys_mutex_key;
@@ -130,7 +134,6 @@ mysql_pfs_key_t event_mutex_key;
 mysql_pfs_key_t event_manager_mutex_key;
 #endif /* !PFS_SKIP_EVENT_MUTEX */
 mysql_pfs_key_t sync_array_mutex_key;
-mysql_pfs_key_t thread_mutex_key;
 mysql_pfs_key_t zip_pad_mutex_key;
 mysql_pfs_key_t row_drop_list_mutex_key;
 mysql_pfs_key_t file_open_mutex_key;
@@ -138,6 +141,8 @@ mysql_pfs_key_t master_key_id_mutex_key;
 mysql_pfs_key_t clone_sys_mutex_key;
 mysql_pfs_key_t clone_task_mutex_key;
 mysql_pfs_key_t clone_snapshot_mutex_key;
+mysql_pfs_key_t parallel_read_mutex_key;
+mysql_pfs_key_t dblwr_mutex_key;
 
 #endif /* UNIV_PFS_MUTEX */
 
@@ -151,6 +156,7 @@ mysql_pfs_key_t buf_block_debug_latch_key;
 #endif /* UNIV_DEBUG */
 mysql_pfs_key_t undo_spaces_lock_key;
 mysql_pfs_key_t rsegs_lock_key;
+mysql_pfs_key_t lock_sys_global_rw_lock_key;
 mysql_pfs_key_t dict_operation_lock_key;
 mysql_pfs_key_t dict_table_stats_key;
 mysql_pfs_key_t hash_table_locks_key;
@@ -167,7 +173,7 @@ mysql_pfs_key_t trx_purge_latch_key;
 even if their corresponding performance schema define is set. And this
 PFS_NOT_INSTRUMENTED is used as the key value to identify those objects that
 would be excluded from instrumentation.*/
-mysql_pfs_key_t PFS_NOT_INSTRUMENTED(ULINT32_UNDEFINED);
+mysql_pfs_key_t PFS_NOT_INSTRUMENTED(0);
 
 /** For monitoring active mutexes */
 MutexMonitor *mutex_monitor;
@@ -210,9 +216,8 @@ static void sync_print_wait_info(FILE *file) {
           std::max(uint64_t(1), (uint64_t)rw_lock_stats.rw_sx_spin_wait_count));
 }
 
-/**
-Prints info of the sync system.
-@param file - where to print */
+/** Prints info of the sync system.
+@param[in]	file	where to print */
 void sync_print(FILE *file) {
 #ifdef UNIV_DEBUG
   rw_lock_list_print_info(file);
@@ -295,7 +300,7 @@ void MutexMonitor::reset() {
 
   mutex_enter(&rw_lock_list_mutex);
 
-  for (rw_lock_t *rw_lock = UT_LIST_GET_FIRST(rw_lock_list); rw_lock != NULL;
+  for (rw_lock_t *rw_lock = UT_LIST_GET_FIRST(rw_lock_list); rw_lock != nullptr;
        rw_lock = UT_LIST_GET_NEXT(list, rw_lock)) {
     rw_lock->count_os_wait = 0;
   }

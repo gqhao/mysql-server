@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -35,9 +35,11 @@
 
 #ifndef MYSQL_ABI_CHECK
 #include <stdbool.h>
+#include <stdint.h>
 #endif
 
 #include "my_command.h"
+#include "my_compress.h"
 
 /*
   We need a definition for my_socket. On the client, <mysql.h> already provides
@@ -45,13 +47,13 @@
 */
 #ifndef my_socket_defined
 #include "my_io.h"
+#include "mysql/components/services/my_io_bits.h"
 #endif
 
 #ifndef MYSQL_ABI_CHECK
 #include <stdbool.h>
 #endif
 
-#define HOSTNAME_LENGTH 60
 #define SYSTEM_CHARSET_MBMAXLEN 3
 #define FILENAME_CHARSET_MBMAXLEN 5
 #define NAME_CHAR_LEN 64 /**< Field/table name length */
@@ -92,14 +94,6 @@
   @ref page_protocol_basic_eof_packet.
 */
 #define MAX_PACKET_LENGTH (256L * 256L * 256L - 1)
-
-/**
-  Length of string buffer, that is enough to contain
-  username and hostname parts of the user identifier with trailing zero in
-  MySQL standard format:
-  user_name_part\@host_name_part\\0
-*/
-#define USER_HOST_BUFF_SIZE HOSTNAME_LENGTH + USERNAME_LENGTH + 2
 
 #define LOCAL_HOST "localhost"
 #define LOCAL_HOST_NAMEDPIPE "."
@@ -187,6 +181,10 @@
 #define FIELD_IS_MARKED                   \
   (1 << 28) /**< Intern: field is marked, \
                  general purpose */
+
+/** Field will not be loaded in secondary engine. */
+#define NOT_SECONDARY_FLAG (1 << 29)
+
 /** @}*/
 
 /**
@@ -211,9 +209,14 @@
 #define REFRESH_HOSTS 8    /**< Flush host cache, FLUSH HOSTS */
 #define REFRESH_STATUS 16  /**< Flush status variables, FLUSH STATUS */
 #define REFRESH_THREADS 32 /**< Flush thread cache */
-#define REFRESH_SLAVE                         \
-  64 /**< Reset master info and restart slave \
-        thread, RESET SLAVE */
+#define REFRESH_REPLICA                         \
+  64 /**< Reset master info and restart replica \
+        thread, RESET REPLICA */
+#define REFRESH_SLAVE                                        \
+  REFRESH_REPLICA /**< Reset master info and restart replica \
+        thread, RESET REPLICA. This is deprecated,           \
+        use REFRESH_REPLICA instead. */
+
 #define REFRESH_MASTER                                                 \
   128                            /**< Remove all bin logs in the index \
                                     and truncate the index, RESET MASTER */
@@ -241,7 +244,7 @@
    @defgroup group_cs_capabilities_flags Capabilities Flags
    @ingroup group_cs
 
-   @brief Values for the capabilities flag bitmask used by @ref PAGE_PROTOCOL
+   @brief Values for the capabilities flag bitmask used by the MySQL protocol
 
    Currently need to fit into 32 bits.
 
@@ -687,6 +690,30 @@
 #define CLIENT_OPTIONAL_RESULTSET_METADATA (1UL << 25)
 
 /**
+  Compression protocol extended to support zstd compression method
+
+  This capability flag is used to send zstd compression level between
+  client and server provided both client and server are enabled with
+  this flag.
+
+  Server
+  ------
+  Server sets this flag when global variable protocol-compression-algorithms
+  has zstd in its list of supported values.
+
+  Client
+  ------
+  Client sets this flag when it is configured to use zstd compression method.
+
+*/
+#define CLIENT_ZSTD_COMPRESSION_ALGORITHM (1UL << 26)
+
+/**
+  This flag will be reserved to extend the 32bit capabilities structure to
+  64bits.
+*/
+#define CLIENT_CAPABILITY_EXTENSION (1UL << 29)
+/**
   Don't reset the options after an unsuccessful connect
 
   Client only flag.
@@ -713,7 +740,8 @@
    CLIENT_PLUGIN_AUTH | CLIENT_CONNECT_ATTRS |                                 \
    CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA |                                     \
    CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS | CLIENT_SESSION_TRACK |                \
-   CLIENT_DEPRECATE_EOF | CLIENT_OPTIONAL_RESULTSET_METADATA)
+   CLIENT_DEPRECATE_EOF | CLIENT_OPTIONAL_RESULTSET_METADATA |                 \
+   CLIENT_ZSTD_COMPRESSION_ALGORITHM)
 
 /**
   Switch off from ::CLIENT_ALL_FLAGS the flags that are optional and
@@ -721,9 +749,10 @@
   If any of the optional flags is supported by the build it will be switched
   on before sending to the client during the connection handshake.
 */
-#define CLIENT_BASIC_FLAGS                                 \
-  (((CLIENT_ALL_FLAGS & ~CLIENT_SSL) & ~CLIENT_COMPRESS) & \
-   ~CLIENT_SSL_VERIFY_SERVER_CERT)
+#define CLIENT_BASIC_FLAGS                                          \
+  (CLIENT_ALL_FLAGS &                                               \
+   ~(CLIENT_SSL | CLIENT_COMPRESS | CLIENT_SSL_VERIFY_SERVER_CERT | \
+     CLIENT_ZSTD_COMPRESSION_ALGORITHM))
 
 /** The status flags are a bit-field */
 enum SERVER_STATUS_flags_enum {
@@ -816,13 +845,15 @@ struct Vio;
 #define MYSQL_VIO struct Vio *
 #endif
 
-#define MAX_TINYINT_WIDTH 3     /**< Max width for a TINY w.o. sign */
-#define MAX_SMALLINT_WIDTH 5    /**< Max width for a SHORT w.o. sign */
-#define MAX_MEDIUMINT_WIDTH 8   /**< Max width for a INT24 w.o. sign */
-#define MAX_INT_WIDTH 10        /**< Max width for a LONG w.o. sign */
-#define MAX_BIGINT_WIDTH 20     /**< Max width for a LONGLONG */
-#define MAX_CHAR_WIDTH 255      /**< Max length for a CHAR colum */
-#define MAX_BLOB_WIDTH 16777216 /**< Default width for blob */
+#define MAX_TINYINT_WIDTH 3   /**< Max width for a TINY w.o. sign */
+#define MAX_SMALLINT_WIDTH 5  /**< Max width for a SHORT w.o. sign */
+#define MAX_MEDIUMINT_WIDTH 8 /**< Max width for a INT24 w.o. sign */
+#define MAX_INT_WIDTH 10      /**< Max width for a LONG w.o. sign */
+#define MAX_BIGINT_WIDTH 20   /**< Max width for a LONGLONG */
+/// Max width for a CHAR column, in number of characters
+#define MAX_CHAR_WIDTH 255
+/// Default width for blob in bytes @todo - align this with sizes from field.h
+#define MAX_BLOB_WIDTH 16777216
 
 typedef struct NET {
   MYSQL_VIO vio;
@@ -987,7 +1018,7 @@ bool my_net_init(struct NET *net, MYSQL_VIO vio);
 void my_net_local_init(struct NET *net);
 void net_end(struct NET *net);
 void net_clear(struct NET *net, bool check_buffer);
-void net_claim_memory_ownership(struct NET *net);
+void net_claim_memory_ownership(struct NET *net, bool claim);
 bool net_realloc(struct NET *net, size_t length);
 bool net_flush(struct NET *net);
 bool my_net_write(struct NET *net, const unsigned char *packet, size_t len);
@@ -997,7 +1028,6 @@ bool net_write_command(struct NET *net, unsigned char command,
 bool net_write_packet(struct NET *net, const unsigned char *packet,
                       size_t length);
 unsigned long my_net_read(struct NET *net);
-
 void my_net_set_write_timeout(struct NET *net, unsigned int timeout);
 void my_net_set_read_timeout(struct NET *net, unsigned int timeout);
 void my_net_set_retry_count(struct NET *net, unsigned int retry_count);
@@ -1008,7 +1038,7 @@ struct rand_struct {
 };
 
 /* Include the types here so existing UDFs can keep compiling */
-#include <mysql/udf_registration_types.h>
+#include "mysql/udf_registration_types.h"
 
 /**
   @addtogroup group_cs_compresson_constants Constants when using compression
@@ -1082,7 +1112,7 @@ unsigned long STDCALL net_field_length(unsigned char **packet);
 unsigned long STDCALL net_field_length_checked(unsigned char **packet,
                                                unsigned long max_length);
 #endif
-unsigned long long net_field_length_ll(unsigned char **packet);
+uint64_t net_field_length_ll(unsigned char **packet);
 unsigned char *net_store_length(unsigned char *pkg, unsigned long long length);
 unsigned int net_length_size(unsigned long long num);
 unsigned int net_field_length_size(const unsigned char *pos);
@@ -1090,6 +1120,4 @@ unsigned int net_field_length_size(const unsigned char *pos);
 #define NULL_LENGTH ((unsigned long)~0) /**< For ::net_store_length() */
 #define MYSQL_STMT_HEADER 4
 #define MYSQL_LONG_DATA_HEADER 6
-
-#define NOT_FIXED_DEC 31
 #endif

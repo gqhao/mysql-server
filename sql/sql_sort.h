@@ -1,7 +1,7 @@
 #ifndef SQL_SORT_INCLUDED
 #define SQL_SORT_INCLUDED
 
-/* Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -30,6 +30,7 @@
 #include "sql/filesort_utils.h"  // Filesort_buffer
 
 class Addon_fields;
+struct TABLE;
 
 /* Defines used by filesort and uniques */
 
@@ -44,18 +45,19 @@ constexpr size_t VARLEN_PREFIX = 4;
   temporary file. A Merge_chunk instance describes where this chunk is stored
   in the file, and where it is located when it is in memory.
 
-  It is a POD because
-   - we read/write them from/to files.
+  It is a POD because we read/write them from/to files (but note,
+  only m_file_position and m_rowcount are actually used in that
+  situation).
 
   We have accessors (getters/setters) for all struct members.
  */
 struct Merge_chunk {
  public:
   Merge_chunk()
-      : m_current_key(NULL),
+      : m_current_key(nullptr),
         m_file_position(0),
-        m_buffer_start(NULL),
-        m_buffer_end(NULL),
+        m_buffer_start(nullptr),
+        m_buffer_end(nullptr),
         m_rowcount(0),
         m_mem_count(0),
         m_max_keys(0) {}
@@ -73,8 +75,7 @@ struct Merge_chunk {
   }
   void set_buffer_start(uchar *start) { m_buffer_start = start; }
   void set_buffer_end(uchar *end) {
-    DBUG_ASSERT(m_buffer_end == NULL || end <= m_buffer_end);
-    DBUG_ASSERT(m_buffer_start != nullptr);
+    DBUG_ASSERT(m_buffer_end == nullptr || end <= m_buffer_end);
     m_buffer_end = end;
   }
 
@@ -131,10 +132,16 @@ typedef Bounds_checked_array<Merge_chunk> Merge_chunk_array;
   The result of Unique or filesort; can either be stored on disk
   (in which case io_cache points to the file) or in memory in one
   of two ways. See sorted_result_in_fsbuf.
+
+  Note if sort_result points into memory, it does _not_ own the sort buffer;
+  Filesort_info does.
+
+  TODO: Clean up so that Filesort / Filesort_info / Filesort_buffer /
+  Sort_result have less confusing overlap.
 */
 class Sort_result {
  public:
-  Sort_result() : sorted_result_in_fsbuf(false), sorted_result_end(NULL) {}
+  Sort_result() : sorted_result_in_fsbuf(false), sorted_result_end(nullptr) {}
 
   bool has_result_in_memory() const {
     return sorted_result || sorted_result_in_fsbuf;
@@ -180,20 +187,25 @@ class Filesort_info {
   Filesort_info(const Filesort_info &) = delete;
   Filesort_info &operator=(const Filesort_info &) = delete;
 
-  Filesort_info() : m_using_varlen_keys(false), m_sort_length(0){};
+  Filesort_info() : m_using_varlen_keys(false), m_sort_length(0) {}
 
-  /** Sort filesort_buffer */
-  void sort_buffer(Sort_param *param, uint count) {
-    filesort_buffer.sort_buffer(param, count);
+  /** Sort filesort_buffer
+    @return Number of records, after any deduplication
+   */
+  size_t sort_buffer(Sort_param *param, size_t num_input_rows,
+                     size_t max_output_rows) {
+    return filesort_buffer.sort_buffer(param, num_input_rows, max_output_rows);
   }
 
   /**
     Copies (unpacks) values appended to sorted fields from a buffer back to
     their regular positions specified by the Field::ptr pointers.
-    @param buff            Buffer which to unpack the value from
+    @param tables  Tables in the join; for NULL row flags.
+    @param buff    Buffer which to unpack the value from.
   */
   template <bool Packed_addon_fields>
-  inline void unpack_addon_fields(uchar *buff);
+  inline void unpack_addon_fields(const Prealloced_array<TABLE *, 4> &tables,
+                                  uchar *buff);
 
   /**
     Reads 'count' number of chunk descriptors into the merge_chunks array.
@@ -206,25 +218,16 @@ class Filesort_info {
   /// Are we using "addon fields"?
   bool using_addon_fields() const { return addon_fields != nullptr; }
 
-  /**
-    Accessors for filesort_buffer (@see Filesort_buffer for documentation).
-  */
-  size_t space_used_for_data() const {
-    return filesort_buffer.space_used_for_data();
+  void reset() { filesort_buffer.reset(); }
+
+  void clear_peak_memory_used() { filesort_buffer.clear_peak_memory_used(); }
+
+  Bounds_checked_array<uchar> get_next_record_pointer(size_t min_size) {
+    return filesort_buffer.get_next_record_pointer(min_size);
   }
 
-  bool isfull() const { return filesort_buffer.isfull(); }
-
-  void init_next_record_pointer() {
-    filesort_buffer.init_next_record_pointer();
-  }
-
-  uchar *get_next_record_pointer() {
-    return filesort_buffer.get_next_record_pointer();
-  }
-
-  void adjust_next_record_pointer(uint32 val) {
-    filesort_buffer.adjust_next_record_pointer(val);
+  void commit_used_memory(size_t num_bytes) {
+    filesort_buffer.commit_used_memory(num_bytes);
   }
 
   uchar *get_sorted_record(uint idx) {
@@ -233,19 +236,25 @@ class Filesort_info {
 
   uchar **get_sort_keys() { return filesort_buffer.get_sort_keys(); }
 
-  Bounds_checked_array<uchar> get_raw_buf() {
-    return filesort_buffer.get_raw_buf();
+  Bounds_checked_array<uchar> get_contiguous_buffer() {
+    return filesort_buffer.get_contiguous_buffer();
   }
 
-  uchar *alloc_sort_buffer(uint num_records, uint record_length) {
-    return filesort_buffer.alloc_sort_buffer(num_records, record_length);
+  void set_max_size(size_t max_size, size_t record_length) {
+    filesort_buffer.set_max_size(max_size, record_length);
   }
 
   void free_sort_buffer() { filesort_buffer.free_sort_buffer(); }
 
-  void init_record_pointers() { filesort_buffer.init_record_pointers(); }
+  bool preallocate_records(size_t num_records) {
+    return filesort_buffer.preallocate_records(num_records);
+  }
 
-  size_t sort_buffer_size() const { return filesort_buffer.sort_buffer_size(); }
+  size_t peak_memory_used() const { return filesort_buffer.peak_memory_used(); }
+
+  size_t max_size_in_bytes() const {
+    return filesort_buffer.max_size_in_bytes();
+  }
 
   uint sort_length() const { return m_sort_length; }
   bool using_varlen_keys() const { return m_using_varlen_keys; }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -46,7 +46,8 @@ static struct init_message_factory {
                       const std::string &full_name) {
     server_msgs_by_name[name] = std::make_pair(&create<T>, id);
     server_msgs_by_id[id] = std::make_pair(&create<T>, name);
-    server_msgs_by_full_name[full_name] = name;
+
+    if (!full_name.empty()) server_msgs_by_full_name[full_name] = name;
   }
 
   template <typename T, typename Message_type_id>
@@ -54,13 +55,17 @@ static struct init_message_factory {
                       const std::string &full_name) {
     client_msgs_by_name[name] = std::make_pair(&create<T>, id);
     client_msgs_by_id[id] = std::make_pair(&create<T>, name);
-    client_msgs_by_full_name[full_name] = name;
+
+    if (!full_name.empty()) client_msgs_by_full_name[full_name] = name;
   }
 
   init_message_factory() {
     server_message<Mysqlx::Connection::Capabilities>(
         Mysqlx::ServerMessages::CONN_CAPABILITIES, "CONN_CAPABILITIES",
         "Mysqlx.Connection.Capabilities");
+    server_message<Mysqlx::Session::AuthenticateContinue>(
+        Mysqlx::ServerMessages::SESS_AUTHENTICATE_CONTINUE,
+        "SESS_AUTHENTICATE_CONTINUE", "Mysqlx.Session.AuthenticateContinue");
     server_message<Mysqlx::Error>(Mysqlx::ServerMessages::ERROR, "ERROR",
                                   "Mysqlx.Error");
     server_message<Mysqlx::Notice::Frame>(Mysqlx::ServerMessages::NOTICE,
@@ -72,10 +77,17 @@ static struct init_message_factory {
     server_message<Mysqlx::Resultset::FetchDone>(
         Mysqlx::ServerMessages::RESULTSET_FETCH_DONE, "RESULTSET_FETCH_DONE",
         "Mysqlx.Resultset.FetchDone");
+    server_message<Mysqlx::Resultset::FetchDoneMoreOutParams>(
+        Mysqlx::ServerMessages::RESULTSET_FETCH_DONE_MORE_OUT_PARAMS,
+        "RESULTSET_FETCH_DONE_MORE_OUT_PARAMS",
+        "Mysqlx.Resultset.FetchDoneMoreOutParams");
     server_message<Mysqlx::Resultset::FetchDoneMoreResultsets>(
         Mysqlx::ServerMessages::RESULTSET_FETCH_DONE_MORE_RESULTSETS,
         "RESULTSET_FETCH_DONE_MORE_RESULTSETS",
         "Mysqlx.Resultset.FetchDoneMoreResultsets");
+    server_message<Mysqlx::Resultset::FetchSuspended>(
+        Mysqlx::ServerMessages::RESULTSET_FETCH_SUSPENDED,
+        "RESULTSET_FETCH_SUSPENDED", "Mysqlx.Resultset.FetchSuspended");
     server_message<Mysqlx::Resultset::Row>(
         Mysqlx::ServerMessages::RESULTSET_ROW, "RESULTSET_ROW",
         "Mysqlx.Resultset.Row");
@@ -85,6 +97,9 @@ static struct init_message_factory {
     server_message<Mysqlx::Sql::StmtExecuteOk>(
         Mysqlx::ServerMessages::SQL_STMT_EXECUTE_OK, "SQL_STMT_EXECUTE_OK",
         "Mysqlx.Sql.StmtExecuteOk");
+    server_message<Mysqlx::Connection::Compression>(
+        Mysqlx::ServerMessages::COMPRESSION, "COMPRESSION",
+        "Mysqlx.Connection.Compression");
 
     client_message<Mysqlx::Connection::CapabilitiesGet>(
         Mysqlx::ClientMessages::CON_CAPABILITIES_GET, "CON_CAPABILITIES_GET",
@@ -132,5 +147,26 @@ static struct init_message_factory {
     client_message<Mysqlx::Sql::StmtExecute>(
         Mysqlx::ClientMessages::SQL_STMT_EXECUTE, "SQL_STMT_EXECUTE",
         "Mysqlx.Sql.StmtExecute");
+    client_message<Mysqlx::Prepare::Prepare>(
+        Mysqlx::ClientMessages::PREPARE_PREPARE, "PREPARE_PREPARE",
+        "Mysqlx.Prepare.Prepare");
+    client_message<Mysqlx::Prepare::Execute>(
+        Mysqlx::ClientMessages::PREPARE_EXECUTE, "PREPARE_EXECUTE",
+        "Mysqlx.Prepare.Execute");
+    client_message<Mysqlx::Prepare::Deallocate>(
+        Mysqlx::ClientMessages::PREPARE_DEALLOCATE, "PREPARE_DEALLOCATE",
+        "Mysqlx.Prepare.Deallocate");
+
+    client_message<Mysqlx::Cursor::Open>(Mysqlx::ClientMessages::CURSOR_OPEN,
+                                         "CURSOR_OPEN", "Mysqlx.Cursor.Open");
+    client_message<Mysqlx::Cursor::Fetch>(Mysqlx::ClientMessages::CURSOR_FETCH,
+                                          "CURSOR_FETCH",
+                                          "Mysqlx.Cursor.Fetch");
+    client_message<Mysqlx::Cursor::Close>(Mysqlx::ClientMessages::CURSOR_CLOSE,
+                                          "CURSOR_CLOSE",
+                                          "Mysqlx.Cursor.Close");
+    client_message<Mysqlx::Connection::Compression>(
+        Mysqlx::ClientMessages::COMPRESSION, "COMPRESSION",
+        "Mysqlx.Connection.Compression");
   }
 } init_message_factory;

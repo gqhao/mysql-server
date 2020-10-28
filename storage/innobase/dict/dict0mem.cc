@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2020, Oracle and/or its affiliates.
 Copyright (c) 2012, Facebook Inc.
 
 This program is free software; you can redistribute it and/or modify it under
@@ -38,11 +38,11 @@ this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "data0type.h"
 #endif /* !UNIV_HOTBACKUP */
+#include "dict0dd.h"
 #include "dict0dict.h"
 #include "dict0mem.h"
 #ifndef UNIV_HOTBACKUP
 #include "fts0priv.h"
-#include "lock0lock.h"
 #include "mach0data.h"
 #include "my_dbug.h"
 #include "rem0rec.h"
@@ -81,31 +81,17 @@ std::ostream &operator<<(std::ostream &s, const id_name_t &id_name) {
 @return the output stream */
 std::ostream &operator<<(std::ostream &s, const table_name_t &table_name) {
 #ifndef UNIV_HOTBACKUP
-  return (s << ut_get_name(NULL, table_name.m_name));
+  return (s << ut_get_name(nullptr, table_name.m_name));
 #else  /* !UNIV_HOTBACKUP */
   return (s << table_name.m_name);
 #endif /* !UNIV_HOTBACKUP */
 }
 
 #ifndef UNIV_HOTBACKUP
-/** Adds a virtual column definition to a table.
-@param[in,out]	table		table
-@param[in,out]	heap		temporary memory heap, or NULL. It is
-                                used to store name when we have not finished
-                                adding all columns. When all columns are
-                                added, the whole name will copy to memory from
-                                table->heap
-@param[in]	name		column name
-@param[in]	mtype		main datatype
-@param[in]	prtype		precise type
-@param[in]	len		length
-@param[in]	pos		position in a table
-@param[in]	num_base	number of base columns
-@return the virtual column definition */
 dict_v_col_t *dict_mem_table_add_v_col(dict_table_t *table, mem_heap_t *heap,
                                        const char *name, ulint mtype,
                                        ulint prtype, ulint len, ulint pos,
-                                       ulint num_base) {
+                                       ulint num_base, bool is_visible) {
   dict_v_col_t *v_col;
   ulint i;
 
@@ -119,7 +105,7 @@ dict_v_col_t *dict_mem_table_add_v_col(dict_table_t *table, mem_heap_t *heap,
 
   table->n_t_def++;
 
-  if (name != NULL) {
+  if (name != nullptr) {
     if (table->n_v_def == table->n_v_cols) {
       heap = table->heap;
     }
@@ -136,14 +122,14 @@ dict_v_col_t *dict_mem_table_add_v_col(dict_table_t *table, mem_heap_t *heap,
 
   v_col = dict_table_get_nth_v_col(table, i);
 
-  dict_mem_fill_column_struct(&v_col->m_col, pos, mtype, prtype, len);
+  dict_mem_fill_column_struct(&v_col->m_col, pos, mtype, prtype, len, true);
   v_col->v_pos = i;
 
   if (num_base != 0) {
     v_col->base_col = static_cast<dict_col_t **>(
         mem_heap_zalloc(table->heap, num_base * sizeof(*v_col->base_col)));
   } else {
-    v_col->base_col = NULL;
+    v_col->base_col = nullptr;
   }
 
   v_col->num_base = num_base;
@@ -151,20 +137,21 @@ dict_v_col_t *dict_mem_table_add_v_col(dict_table_t *table, mem_heap_t *heap,
   /* Initialize the index list for virtual columns */
   v_col->v_indexes = UT_NEW_NOKEY(dict_v_idx_list());
 
+  v_col->m_col.is_visible = is_visible;
   return (v_col);
 }
 
 /** Adds a stored column definition to a table.
-@param[in]	table		table
+@param[in,out]	table		table
 @param[in]	num_base	number of base columns. */
 void dict_mem_table_add_s_col(dict_table_t *table, ulint num_base) {
   ulint i = table->n_def - 1;
   dict_col_t *col = table->get_col(i);
   dict_s_col_t s_col;
 
-  ut_ad(col != NULL);
+  ut_ad(col != nullptr);
 
-  if (table->s_cols == NULL) {
+  if (table->s_cols == nullptr) {
     table->s_cols = UT_NEW_NOKEY(dict_s_col_list());
   }
 
@@ -175,7 +162,7 @@ void dict_mem_table_add_s_col(dict_table_t *table, ulint num_base) {
     s_col.base_col = static_cast<dict_col_t **>(
         mem_heap_zalloc(table->heap, num_base * sizeof(dict_col_t *)));
   } else {
-    s_col.base_col = NULL;
+    s_col.base_col = nullptr;
   }
 
   s_col.num_base = num_base;
@@ -240,7 +227,7 @@ static void dict_mem_table_col_rename_low(
             full_len - (prefix_len + from_len));
 
     /* Replace the field names in every index. */
-    for (dict_index_t *index = table->first_index(); index != NULL;
+    for (dict_index_t *index = table->first_index(); index != nullptr;
          index = index->next()) {
       ulint n_fields = dict_index_get_n_fields(index);
 
@@ -319,14 +306,15 @@ static void dict_mem_table_col_rename_low(
   }
 }
 
-/** Renames a column of a table in the data dictionary cache. */
-void dict_mem_table_col_rename(dict_table_t *table, /*!< in/out: table */
-                               ulint nth_col,       /*!< in: column index */
-                               const char *from,    /*!< in: old column name */
-                               const char *to,      /*!< in: new column name */
-                               bool is_virtual)
-/*!< in: if this is a virtual column */
-{
+/** Renames a column of a table in the data dictionary cache.
+@param[in,out] table Table
+@param[in] nth_col Column index
+@param[in] from Old column name
+@param[in] to New column name
+@param[in] is_virtual If this is a virtual column */
+void dict_mem_table_col_rename(dict_table_t *table, ulint nth_col,
+                               const char *from, const char *to,
+                               bool is_virtual) {
   const char *s = is_virtual ? table->v_col_names : table->col_names;
 
   ut_ad((!is_virtual && nth_col < table->n_def) ||
@@ -351,7 +339,7 @@ void dict_mem_table_col_rename(dict_table_t *table, /*!< in/out: table */
 dict_foreign_t *dict_mem_foreign_create(void) {
   dict_foreign_t *foreign;
   mem_heap_t *heap;
-  DBUG_ENTER("dict_mem_foreign_create");
+  DBUG_TRACE;
 
   heap = mem_heap_create(100);
 
@@ -360,11 +348,11 @@ dict_foreign_t *dict_mem_foreign_create(void) {
 
   foreign->heap = heap;
 
-  foreign->v_cols = NULL;
+  foreign->v_cols = nullptr;
 
   DBUG_PRINT("dict_mem_foreign_create", ("heap: %p", heap));
 
-  DBUG_RETURN(foreign);
+  return foreign;
 }
 
 /** Sets the foreign_table_name_lookup pointer based on the value of
@@ -433,7 +421,7 @@ static void dict_mem_fill_vcol_has_index(const dict_index_t *index,
       dict_v_idx_t v_idx = *it;
 
       if (v_idx.index == index) {
-        if (*v_cols == NULL) {
+        if (*v_cols == nullptr) {
           *v_cols = UT_NEW_NOKEY(dict_vcol_set());
         }
 
@@ -452,8 +440,8 @@ static void dict_mem_fill_vcol_from_v_indexes(const char *col_name,
                                               const dict_table_t *table,
                                               dict_vcol_set **v_cols) {
   /* virtual column can't be Primary Key, so start with secondary index */
-  for (const dict_index_t *index = table->first_index()->next(); index != NULL;
-       index = index->next()) {
+  for (const dict_index_t *index = table->first_index()->next();
+       index != nullptr; index = index->next()) {
     /* Skip if the index have newly added
     virtual column because field name is NULL.
     Later virtual column set will be
@@ -489,7 +477,7 @@ static void dict_mem_fill_vcol_set_for_base_col(const char *col_name,
 
     for (ulint j = 0; j < v_col->num_base; j++) {
       if (strcmp(col_name, table->get_col_name(v_col->base_col[j]->ind)) == 0) {
-        if (*v_cols == NULL) {
+        if (*v_cols == nullptr) {
           *v_cols = UT_NEW_NOKEY(dict_vcol_set());
         }
 
@@ -547,11 +535,65 @@ void dict_mem_table_free_foreign_vcol_set(dict_table_t *table) {
   for (auto it = fk_set.begin(); it != fk_set.end(); ++it) {
     foreign = *it;
 
-    if (foreign->v_cols != NULL) {
+    if (foreign->v_cols != nullptr) {
       UT_DELETE(foreign->v_cols);
-      foreign->v_cols = NULL;
+      foreign->v_cols = nullptr;
     }
   }
+}
+
+/** Set default value
+@param[in]	value	Default value
+@param[in]	length	Default value length
+@param[in,out]	heap	Heap to allocate memory */
+void dict_col_t::set_default(const byte *value, size_t length,
+                             mem_heap_t *heap) {
+  ut_ad(instant_default == nullptr);
+  ut_ad(length == 0 || length == UNIV_SQL_NULL || value != nullptr);
+
+  instant_default = static_cast<dict_col_default_t *>(
+      mem_heap_alloc(heap, sizeof(dict_col_default_t)));
+
+  instant_default->col = this;
+
+  if (length != UNIV_SQL_NULL) {
+    const char *val =
+        (value == nullptr ? "\0" : reinterpret_cast<const char *>(value));
+
+    instant_default->value =
+        reinterpret_cast<byte *>(mem_heap_strdupl(heap, val, length));
+  } else {
+    ut_ad(!(prtype & DATA_NOT_NULL));
+    instant_default->value = nullptr;
+  }
+
+  instant_default->len = length;
+}
+
+bool dict_col_default_t::operator==(const dict_col_default_t &other) {
+  /* If the lengths are different, trivially the default values are not
+   * the same, return false immediately */
+  if (len != other.len) {
+    return false;
+  }
+  /* If the lengths are null or 0, the values are empty and equal.
+   * No need to check both lengths since we only reach this point
+   * if len == other.len */
+  if (len == UNIV_SQL_NULL || len == 0) {
+    return true;
+  }
+
+  auto length = len;
+  while (length-- > 0) {
+    if (value[length] != other.value[length]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool dict_col_default_t::operator!=(const dict_col_default_t &other) {
+  return !(*this == other);
 }
 
 /** Check whether index can be used by transaction
@@ -574,11 +616,32 @@ bool dict_index_t::is_usable(const trx_t *trx) const {
 }
 #endif /* !UNIV_HOTBACKUP */
 
-/** Gets pointer to the nth column in an index.
-@param[in] pos	position of the field
-@return column */
-const dict_col_t *dict_index_t::get_col(ulint pos) const {
-  return (get_field(pos)->col);
+bool dict_index_t::is_tuple_instant_format(
+    const uint16_t n_fields_in_tuple) const {
+  ut_ad(n_fields_in_tuple <= n_fields);
+
+  if (!has_instant_cols()) {
+    return false;
+  }
+
+  /* For instant index, if the tuple comes from UPDATE, its fields could be less
+  than index definition */
+  if (n_fields_in_tuple < n_fields) {
+    /* If PK is not specified, DB_ROW_ID will be part of tuple */
+    uint16_t sys_fields_in_tuple = 0;
+    if (innobase_strcasecmp(name, innobase_index_reserve_name) == 0) {
+      sys_fields_in_tuple = table->get_n_sys_cols();
+    } else {
+      sys_fields_in_tuple = table->get_n_sys_cols() - 1;
+    }
+
+    uint16_t fields_in_tuple = n_fields_in_tuple - sys_fields_in_tuple;
+    if (fields_in_tuple == table->get_instant_cols()) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /** Gets the column number the nth field in an index.
@@ -656,7 +719,7 @@ void dict_mem_index_free(dict_index_t *index) /*!< in: index */
          it != index->rtr_track->rtr_active->end(); ++it) {
       rtr_info = *it;
 
-      rtr_info->index = NULL;
+      rtr_info->index = nullptr;
     }
 
     mutex_destroy(&index->rtr_ssn.mutex);
@@ -751,7 +814,7 @@ bool dict_foreign_set_validate(const dict_table_t &table) {
 std::ostream &operator<<(std::ostream &out, const dict_foreign_t &foreign) {
   out << "[dict_foreign_t: id='" << foreign.id << "'";
 
-  if (foreign.foreign_table_name != NULL) {
+  if (foreign.foreign_table_name != nullptr) {
     out << ",for: '" << foreign.foreign_table_name << "'";
   }
 
@@ -764,4 +827,8 @@ std::ostream &operator<<(std::ostream &out, const dict_foreign_set &fk_set) {
   std::for_each(fk_set.begin(), fk_set.end(), dict_foreign_print(out));
   out << "]" << std::endl;
   return (out);
+}
+
+page_size_t dict_index_t::get_page_size() const {
+  return (dict_table_page_size(table));
 }

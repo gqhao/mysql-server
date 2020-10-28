@@ -1,4 +1,4 @@
-/* Copyright (c) 2006, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2006, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -30,13 +30,12 @@
 #include <utility>
 #include <vector>
 
-#include "dd/string_type.h"
-#include "m_ctype.h"
-#include "mdl.h"
 #include "my_compiler.h"
 #include "my_inttypes.h"
 #include "my_sharedlib.h"
 #include "mysql/components/services/mysql_mutex_bits.h"
+#include "sql/dd/string_type.h"
+#include "sql/mdl.h"
 
 class Alter_info;
 class Alter_table_ctx;
@@ -45,6 +44,7 @@ class FOREIGN_KEY;
 class KEY;
 class THD;
 class handler;
+struct CHARSET_INFO;
 struct TABLE;
 struct TABLE_LIST;
 struct handlerton;
@@ -68,9 +68,6 @@ enum enum_explain_filename_mode {
   EXPLAIN_PARTITIONS_AS_COMMENT
 };
 
-/* Maximum length of GEOM_POINT Field */
-#define MAX_LEN_GEOM_POINT_FIELD 25
-
 /* Flags for conversion functions. */
 static const uint FN_FROM_IS_TMP = 1 << 0;
 static const uint FN_TO_IS_TMP = 1 << 1;
@@ -84,6 +81,11 @@ static const uint NO_FK_CHECKS = 1 << 2;
 static const uint NO_DD_COMMIT = 1 << 3;
 /** Don't change generated foreign key names while renaming table. */
 static const uint NO_FK_RENAME = 1 << 4;
+/** Don't change generated check constraint names while renaming table. */
+static const uint NO_CC_RENAME = 1 << 5;
+
+handlerton *get_viable_handlerton_for_create(THD *thd, const char *table_name,
+                                             const HA_CREATE_INFO &ci);
 
 size_t filename_to_tablename(const char *from, char *to, size_t to_length,
                              bool stay_quiet = false);
@@ -149,9 +151,13 @@ bool adjust_fk_parents(THD *thd, const char *db, const char *name,
                        const Foreign_key_parents_invalidator *fk_invalidator);
 
 /**
-  Update the unique constraint name for the referencing tables.
+  Check if new definition of parent table is compatible with foreign keys
+  which reference it. Update the unique constraint names and referenced
+  column names for the foreign keys accordingly.
 
   @param thd                  Thread handle.
+  @param check_charsets       Indicates whether we need to check charsets of
+                              columns participating in foreign keys.
   @param parent_table_db      Parent table schema name.
   @param parent_table_name    Parent table name.
   @param hton                 Handlerton for table's storage engine.
@@ -166,38 +172,42 @@ bool adjust_fk_parents(THD *thd, const char *db, const char *name,
   @retval operation outcome, false if no error.
 */
 bool adjust_fk_children_after_parent_def_change(
-    THD *thd, const char *parent_table_db, const char *parent_table_name,
-    handlerton *hton, const dd::Table *parent_table_def,
-    Alter_info *parent_alter_info, bool invalidate_tdc)
-    MY_ATTRIBUTE((warn_unused_result));
+    THD *thd, bool check_charsets, const char *parent_table_db,
+    const char *parent_table_name, handlerton *hton,
+    const dd::Table *parent_table_def, Alter_info *parent_alter_info,
+    bool invalidate_tdc) MY_ATTRIBUTE((warn_unused_result));
 
 /**
-  Update the unique constraint name for the referencing tables with
-  mandatory TDC invalidation.
+  Check if new definition of parent table is compatible with foreign keys
+  which reference it. Update the unique constraint names and referenced
+  column names for the foreign keys accordingly. Do mandatory character
+  set checks and TDC invalidation.
 */
 inline bool adjust_fk_children_after_parent_def_change(
     THD *thd, const char *parent_table_db, const char *parent_table_name,
     handlerton *hton, const dd::Table *parent_table_def,
     Alter_info *parent_alter_info) {
   return adjust_fk_children_after_parent_def_change(
-      thd, parent_table_db, parent_table_name, hton, parent_table_def,
+      thd, true, parent_table_db, parent_table_name, hton, parent_table_def,
       parent_alter_info, true);
 }
 
 /**
-  Add MDL requests for exclusive lock on all tables referencing the given
+  Add MDL requests for specified lock type on all tables referencing the given
   schema qualified table name to the list.
 
   @param          thd           Thread handle.
   @param          schema        Schema name.
   @param          table_name    Table name.
   @param          hton          Handlerton for table's storage engine.
+  @param          lock_type     Type of MDL requests to add.
   @param[in,out]  mdl_requests  List to which MDL requests are to be added.
 
   @retval operation outcome, false if no error.
 */
 bool collect_fk_children(THD *thd, const char *schema, const char *table_name,
-                         handlerton *hton, MDL_request_list *mdl_requests)
+                         handlerton *hton, enum_mdl_type lock_type,
+                         MDL_request_list *mdl_requests)
     MY_ATTRIBUTE((warn_unused_result));
 
 /**
@@ -235,6 +245,7 @@ bool collect_fk_parents_for_new_fks(
   @param          table_name                    Table name.
   @param          alter_info                    Alter_info object with the
                                                 list of FKs to be added.
+  @param          hton                          Table's storage engine.
   @param          fk_max_generated_name_number  Max value of number component
                                                 among existing generated foreign
                                                 key names.
@@ -246,6 +257,7 @@ bool collect_fk_parents_for_new_fks(
 bool collect_fk_names_for_new_fks(THD *thd, const char *db_name,
                                   const char *table_name,
                                   const Alter_info *alter_info,
+                                  handlerton *hton,
                                   uint fk_max_generated_name_number,
                                   MDL_request_list *mdl_requests);
 
@@ -293,18 +305,37 @@ bool adjust_fks_for_rename_table(THD *thd, const char *db,
                                  const char *new_table_name, handlerton *hton)
     MY_ATTRIBUTE((warn_unused_result));
 
-/**
-  Find name of unique constraint in parent table which is referenced by
-  foreign key.
+/*
+  Check if parent key for the foreign key exists, set foreign key's unique
+  constraint name accordingly. Emit error if no parent key found.
 
-  @param parent_table_def Object describing the parent table.
-  @param fk               Object describing the foreign key.
+  @note Prefer unique key if possible. If parent key is non-unique
+        unique constraint name is set to NULL.
 
-  @retval non-"" - unique constraint name if matching constraint is found.
-  @retval ""     - if no matching unique constraint is found.
+  @note DDL code use this function for non-self-referencing foreign keys.
+
+  @sa prepare_fk_parent_key(THD, handlerton, FOREIGN_KEY)
+
+  @param  hton                  Handlerton for tables' storage engine.
+  @param  parent_table_def      Object describing new version of parent table.
+  @param  old_child_table_def   Object describing old version of child table.
+                                Can be nullptr if old_parent_table_def is
+                                nullptr. Used for error reporting.
+  @param  old_parent_table_def  Object describing old version of parent table.
+                                nullptr indicates that this is not ALTER TABLE
+                                operation. Used for error reporting.
+  @param  is_self_referencing_fk If the parent and child is the same table.
+  @param  fk[in,out]            Object describing the foreign key,
+                                its unique_constraint_name member
+                                will be updated if matching parent
+                                unique constraint is found.
+
+  @retval Operation result. False if success.
 */
-const char *find_fk_parent_key(const dd::Table *parent_table_def,
-                               const dd::Foreign_key *fk)
+bool prepare_fk_parent_key(handlerton *hton, const dd::Table *parent_table_def,
+                           const dd::Table *old_parent_table_def,
+                           const dd::Table *old_child_table_def,
+                           bool is_self_referencing_fk, dd::Foreign_key *fk)
     MY_ATTRIBUTE((warn_unused_result));
 
 /**
@@ -429,6 +460,7 @@ bool prepare_create_field(THD *thd, HA_CREATE_INFO *create_info,
   @param create_info               Create information (like MAX_ROWS).
   @param alter_info                List of columns and indexes to create
   @param file                      The handler for the new table.
+  @param is_partitioned            Indicates whether table is partitioned.
   @param[out] key_info_buffer      An array of KEY structs for the indexes.
   @param[out] key_count            The number of elements in the array.
   @param[out] fk_key_info_buffer   An array of FOREIGN_KEY structs for the
@@ -437,6 +469,9 @@ bool prepare_create_field(THD *thd, HA_CREATE_INFO *create_info,
   @param[in] existing_fks          An array of pre-existing FOREIGN KEYS
                                    (in case of ALTER).
   @param[in] existing_fks_count    The number of pre-existing foreign keys.
+  @param[in] existing_fks_table    dd::Table object for table version from
+                                   which pre-existing foreign keys come from.
+                                   Needed for error reporting.
   @param[in] fk_max_generated_name_number  Max value of number component among
                                            existing generated foreign key names.
   @param select_field_count        The number of fields coming from a select
@@ -452,20 +487,14 @@ bool prepare_create_field(THD *thd, HA_CREATE_INFO *create_info,
 bool mysql_prepare_create_table(
     THD *thd, const char *error_schema_name, const char *error_table_name,
     HA_CREATE_INFO *create_info, Alter_info *alter_info, handler *file,
-    KEY **key_info_buffer, uint *key_count, FOREIGN_KEY **fk_key_info_buffer,
-    uint *fk_key_count, FOREIGN_KEY *existing_fks, uint existing_fks_count,
-    uint fk_max_generated_name_number, int select_field_count,
-    bool find_parent_keys);
+    bool is_partitioned, KEY **key_info_buffer, uint *key_count,
+    FOREIGN_KEY **fk_key_info_buffer, uint *fk_key_count,
+    FOREIGN_KEY *existing_fks, uint existing_fks_count,
+    const dd::Table *existing_fks_table, uint fk_max_generated_name_number,
+    int select_field_count, bool find_parent_keys);
 
 size_t explain_filename(THD *thd, const char *from, char *to, size_t to_length,
                         enum_explain_filename_mode explain_mode);
-
-void parse_filename(const char *filename, size_t filename_length,
-                    const char **schema_name, size_t *schema_name_length,
-                    const char **table_name, size_t *table_name_length,
-                    const char **partition_name, size_t *partition_name_length,
-                    const char **subpartition_name,
-                    size_t *subpartition_name_length);
 
 extern MYSQL_PLUGIN_IMPORT const char *primary_key_name;
 
@@ -481,5 +510,57 @@ extern MYSQL_PLUGIN_IMPORT const char *primary_key_name;
 */
 
 bool lock_trigger_names(THD *thd, TABLE_LIST *tables);
+struct TYPELIB;
+TYPELIB *create_typelib(MEM_ROOT *mem_root, Create_field *field_def);
 
+/**
+  Method to collect check constraint names for the all the tables and acquire
+  MDL lock on them.
+
+  @param[in]    thd     Thread handle.
+  @param[in]    tables  Check constraints of tables to be locked.
+
+  @retval       false   Success.
+  @retval       true    Failure.
+*/
+bool lock_check_constraint_names(THD *thd, TABLE_LIST *tables);
+
+/**
+  Method to lock check constraint names for rename table operation.
+  Method acquire locks on the constraint names of source table and
+  also on the name of check constraint in the target table.
+
+  @param[in]    thd                 Thread handle.
+  @param[in]    db                  Database name.
+  @param[in]    table_name          Table name.
+  @param[in]    table_def           DD table object of source table.
+  @param[in]    target_db           Target database name.
+  @param[in]    target_table_name   Target table name.
+
+  @retval       false               Success.
+  @retval       true                Failure.
+*/
+bool lock_check_constraint_names_for_rename(THD *thd, const char *db,
+                                            const char *table_name,
+                                            const dd::Table *table_def,
+                                            const char *target_db,
+                                            const char *target_table_name);
+
+/**
+  Method to prepare check constraints for the CREATE operation. If name of the
+  check constraint is not specified then name is generated, check constraint
+  is pre-validated and MDL on check constraint is acquired.
+
+  @param            thd                      Thread handle.
+  @param            db_name                  Database name.
+  @param            table_name               Table name.
+  @param            alter_info               Alter_info object with list of
+                                             check constraints to be created.
+
+  @retval           false                    Success.
+  @retval           true                     Failure.
+*/
+bool prepare_check_constraints_for_create(THD *thd, const char *db_name,
+                                          const char *table_name,
+                                          Alter_info *alter_info);
 #endif /* SQL_TABLE_INCLUDED */

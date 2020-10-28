@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2.0,
@@ -59,11 +59,13 @@ more than a glorified
                  break;
   }
 
-Anything beyond that in a given source file is usually boilerplate code
-needed by the component framework (which is going to be there no matter
-how simple or complex our actual writer is), code to handle configuration
-variables (if any), and syntactic sugar (escaping characters/entities,
-writing tags, and such).
+Anything beyond that in a given source file is usually either
+boilerplate code needed by the component framework (which is
+going to be there no matter how simple or complex our actual
+writer is) or required by the specific output format the sink
+is intended to generate (writing e.g. JSON rows or XML tags,
+escaping characters/entities in string values, indentation,
+and so on).
 
 
 ERROR MESSAGES THAT AREN'T STRINGS, AND OTHER INSANITY
@@ -140,7 +142,7 @@ class log_service_imp {
     @retval  =0        no work was done
     @retval  >0        flush completed without incident
   */
-  static DEFINE_METHOD(int, flush, (void **instance));
+  static DEFINE_METHOD(log_service_error, flush, (void **instance));
 
   /**
     Open a new instance.
@@ -160,7 +162,8 @@ class log_service_imp {
     @retval  <0        a new instance could not be created
     @retval  =0        success, returned hande is valid
   */
-  static DEFINE_METHOD(int, open, (log_line * ll, void **instance));
+  static DEFINE_METHOD(log_service_error, open,
+                       (log_line * ll, void **instance));
 
   /**
     Close and release an instance. Flushes any buffers.
@@ -173,49 +176,55 @@ class log_service_imp {
     @retval  <0        an error occurred
     @retval  =0        success
   */
-  static DEFINE_METHOD(int, close, (void **instance));
-  /**
-    Variable listener.  This is a temporary solution until we have
-    per-component system variables.  "check" is called when the user
-    uses SQL statements trying to assign a value to certain server
-    system variables; the function can prevent assignment if e.g.
-    the supplied value has the wrong format.
-
-    If several listeners are registered, an error will be signaled
-    to the user on the SQL level as soon as one service identifies
-    a problem with the value.
-
-    @param   ll  a log_line containing a list-item describing the variable
-                 (name, new value)
-
-    @retval   0  for allow (including when we don't feel the event is for us),
-    @retval  <0  deny (nullptr, malformed structures, etc. -- caller broken?)
-    @retval  >0  deny (user input rejected)
-  */
-  static DEFINE_METHOD(int, variable_check, (log_line * ll));
+  static DEFINE_METHOD(log_service_error, close, (void **instance));
 
   /**
-    Variable listener.  This is a temporary solution until we have
-    per-component system variables. "update" is called when the user
-    uses SQL statements trying to assign a value to certain server
-    system variables. If we got this far, we have already been called
-    upon to "check" the new value, and have confirmed that it meets
-    the requirements. "update" should now update the internal
-    representation of the value. Since we have already checked the
-    new value, failure should be a rare occurrence (out of memory,
-    the operating system did not let us open the new file name, etc.).
+    Get characteristics of a log-service.
 
-    If several listeners are registered, all will currently be called
-    with the new value, even if one of them signals failure.
-
-    @param  ll  a log_line containing a list-item describing the variable
-                (name, new value)
-
-    @retval  0  the event is not for us
-    @retval <0  for failure
-    @retval >0  for success (at least one item was updated)
+    @retval  <0        an error occurred
+    @retval  >=0       characteristics (a set of log_service_chistics flags)
   */
-  static DEFINE_METHOD(int, variable_update, (log_line * ll));
+  static DEFINE_METHOD(int, characteristics, (void));
+
+  /**
+    Parse a single line in an error log of this format.  (optional)
+
+    @param line_start   pointer to the beginning of the line ('{')
+    @param line_length  length of the line
+
+    @retval  0   Success
+    @retval !=0  Failure (out of memory, malformed argument, etc.)
+  */
+  static DEFINE_METHOD(log_service_error, parse_log_line,
+                       (const char *line_start, size_t line_length));
+
+  /**
+    Provide the name for a log file this service would access.
+
+    @param instance  instance info returned by open() if requesting
+                     the file-name for a specific open instance.
+                     nullptr to get the name of the default instance
+                     (even if it that log is not open). This is used
+                     to determine the name of the log-file to load on
+                     start-up.
+    @param buf       Address of a buffer allocated in the caller.
+                     The callee may return an extension starting
+                     with '.', in which case the path and file-name
+                     will be the system's default, except with the
+                     given extension.
+                     Alternatively, the callee may return a file-name
+                     which is assumed to be in the same directory
+                     as the default log.
+                     Values are C-strings.
+    @param bufsize   The size of the allocation in the caller.
+
+    @retval LOG_SERVICE_SUCCESS  Success
+    @retval LOG_SERVICE_UNSUPPORTED_MODE  only default/only instances supported
+    @retval LOG_SERVICE_BUFFER_SIZE_INSUFFICIENT
+    @retval LOG_SERVICE_MISC_ERROR
+  */
+  static DEFINE_METHOD(log_service_error, get_log_name,
+                       (void *instance, char *buf, size_t bufsize));
 };
 
 #endif /* LOG_SERVICE_IMP_H */

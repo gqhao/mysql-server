@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -41,10 +41,10 @@ bool Abstract_program::callback_option_parsed(int, const struct my_option *opt,
   // Check if option uses My::Tools::Base::Options, and it should.
   Options::I_option *app_type = (Options::I_option *)opt->app_type;
   Options::I_option *option = dynamic_cast<Options::I_option *>(app_type);
-  if (option != NULL) {
+  if (option != nullptr) {
     option->call_callbacks(argument);
   }
-  return 0;
+  return false;
 }
 
 const string Abstract_program::get_name() { return this->m_name; }
@@ -57,7 +57,6 @@ Abstract_program::Abstract_program()
 }
 
 void Abstract_program::run(int argc, char **argv) {
-  vector<Options::I_options_provider *>::iterator it;
   this->init_name(argv[0]);
 
   MY_INIT(this->m_name.c_str());
@@ -128,7 +127,9 @@ void Abstract_program::aggregate_options() {
             &Abstract_program::options_by_name_comparer);
 
   // Adding sentinel, handle_options assume input as array with sentinel.
-  my_option sentinel = {0, 0, 0, 0, 0, 0, GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0};
+  my_option sentinel = {nullptr, 0,          nullptr, nullptr, nullptr,
+                        nullptr, GET_NO_ARG, NO_ARG,  0,       0,
+                        0,       nullptr,    0,       nullptr};
   this->m_options.push_back(sentinel);
 }
 

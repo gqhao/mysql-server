@@ -41,29 +41,19 @@ show create table child;
 # child pk, uk, oi
 # not supported
 
-# The failing alters spits out warnings, which include the
-# name of the temporary table...which has a random name
-# so disable_result_log :-(
---disable_result_log
-
---error ER_CANNOT_ADD_FOREIGN
+--error ER_FK_NO_INDEX_PARENT
 alter table child algorithm=copy, add constraint fk7 foreign key (a) references parent(c);
---error ER_CANNOT_ADD_FOREIGN
+--error ER_FK_NO_INDEX_PARENT
 alter table child algorithm=copy, add constraint fk8 foreign key (a) references parent(c);
---error ER_CANNOT_ADD_FOREIGN
+--error ER_FK_NO_INDEX_PARENT
 alter table child algorithm=copy, add constraint fk9 foreign key (a) references parent(c);
 
---enable_result_log
-
---error ER_CANNOT_ADD_FOREIGN
+--error ER_FK_NO_INDEX_PARENT
 alter table child algorithm=inplace, add constraint fk7 foreign key (a) references parent(c);
-show warnings;
---error ER_CANNOT_ADD_FOREIGN
+--error ER_FK_NO_INDEX_PARENT
 alter table child algorithm=inplace, add constraint fk8 foreign key (a) references parent(c);
-show warnings;
---error ER_CANNOT_ADD_FOREIGN
+--error ER_FK_NO_INDEX_PARENT
 alter table child algorithm=inplace, add constraint fk9 foreign key (a) references parent(c);
-show warnings;
 
 drop table child, parent;
 
@@ -100,6 +90,9 @@ drop table child, parent;
 --echo #
 --echo # Bug#24666177 : PARENT TABLE'S HANDLER NOT UPDATED AFTER ADDING A FK DEPENDENCY
 --echo #
+# Note : This bug and its fix became obsolete after the introduction of MySQL DD.
+# The fix was removed as a part of fix for Bug#31356801 and the test now exists to
+# verify that parent tables are updated properly in the DD after an FK create/drop.
 
 --echo #Setup tables
 create table parent(
@@ -114,22 +107,20 @@ insert into parent values(1), (2), (3);
 insert into child  values(1), (2), (3);
 
 --echo #Show create table on parent.
---echo #This will now load the m_fk_data of parent on handler
 show create table parent;
 
 --echo #Now create a foreign key dependency
-alter table child add foreign key fk1(ref) references parent(id);
+alter table child add constraint fk1 foreign key (ref) references parent(id);
 
 --echo #Now run a alter engine query.
---echo #m_fk_data of parent should be reloaded now and the query should fail
---error ER_ROW_IS_REFERENCED
+--error ER_FK_CANNOT_CHANGE_ENGINE
 alter table parent engine = innodb;
 
 show create table parent;
 
 --echo #Repeat same with truncate
 truncate table child;
---error ER_ROW_IS_REFERENCED
+--error ER_FK_CANNOT_CHANGE_ENGINE
 alter table parent engine = innodb;
 
 show create table parent;
@@ -189,9 +180,9 @@ create table test_fail (
 show warnings;
 
 --echo # Using distinct names should work
-alter table parent add foreign key fk_p2(b) references parent(a);
-alter table parent add foreign key fk_p3(c) references parent(a);
-alter table child  add foreign key fk_c2(b) references parent(a);
+alter table parent add constraint fk_p2 foreign key (b) references parent(a);
+alter table parent add constraint fk_p3 foreign key (c) references parent(a);
+alter table child  add constraint fk_c2 foreign key (b) references parent(a);
 
 --echo #Show create tables
 show create table parent;
@@ -205,7 +196,7 @@ drop table child, parent;
 --echo #
 
 --echo # Create a table with bad fk reference
---error ER_CANNOT_ADD_FOREIGN
+--error ER_FK_CANNOT_OPEN_PARENT
 create table test(
   a int,
   foreign key fk1(a) references bogus_table(a)

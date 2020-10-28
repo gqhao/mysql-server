@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -35,6 +35,7 @@
 #include "sql/dd/string_type.h"
 
 class THD;
+struct LEX_USER;
 
 namespace dd {
 class Schema;
@@ -188,7 +189,7 @@ class Dictionary_client {
     template <typename T>
     void auto_release(Cache_element<T> *element) {
       // Catch situations where we do not use a non-default releaser.
-      DBUG_ASSERT(m_prev != NULL);
+      DBUG_ASSERT(m_prev != nullptr);
       m_release_registry.put(element);
     }
 
@@ -374,6 +375,10 @@ class Dictionary_client {
     m_registry_uncommitted.get(
         static_cast<const typename T::Cache_partition *>(object), &element);
     DBUG_ASSERT(element == nullptr);
+
+    // We must require a top level non-default releaser to ensure a
+    // predictable life span of the objects.
+    DBUG_ASSERT(m_current_releaser != &m_default_releaser);
 #endif
 
     m_uncached_objects.push_back(object);
@@ -464,6 +469,9 @@ class Dictionary_client {
   template <typename T>
   void remove_uncommitted_objects(bool commit_to_shared_cache);
 
+  template <typename T>
+  using Const_ptr_vec = std::vector<const T *>;
+
   /**
     Fetch objects from DD tables that match the supplied key.
 
@@ -476,9 +484,6 @@ class Dictionary_client {
     @return true        Failure (error is reported).
   */
 
-  template <typename T>
-  using Const_ptr_vec = std::vector<const T *>;
-
   template <typename Object_type>
   bool fetch(Const_ptr_vec<Object_type> *coll, const Object_key *object_key)
       MY_ATTRIBUTE((warn_unused_result));
@@ -490,6 +495,8 @@ class Dictionary_client {
   // Make sure all objects are released.
   ~Dictionary_client();
 
+  MY_COMPILER_DIAGNOSTIC_PUSH()
+  MY_COMPILER_CLANG_WORKAROUND_TPARAM_DOCBUG()
   /**
     Retrieve an object by its object id.
 
@@ -500,6 +507,7 @@ class Dictionary_client {
     @retval       false   No error.
     @retval       true    Error (from handling a cache miss).
   */
+  MY_COMPILER_DIAGNOSTIC_POP()
 
   template <typename T>
   bool acquire(Object_id id, const T **object)
@@ -836,11 +844,25 @@ class Dictionary_client {
       MY_ATTRIBUTE((warn_unused_result));
 
   /**
+    Check if schema contains check constraint with specified name.
+
+    @param        schema            Schema containing the check constraint.
+    @param        check_cons_name   Name of the check constraint.
+    @param  [out] exists            Set to true if check constraint with
+                                    the name provided exists in the
+                                    schema, false otherwise.
+
+    @retval      false    No error.
+    @retval      true     Error.
+  */
+
+  bool check_constraint_exists(const Schema &schema,
+                               const String_type &check_cons_name,
+                               bool *exists);
+
+  /**
     Fetch the names of the components in the schema. Hidden components are
     ignored. E.g., Object with dd::Table::hidden() == true will be ignored.
-
-    @note          This is an intermediate solution which will be replaced
-                   by the implementation in WL#6599.
 
     @tparam        T              Type of object to retrieve names for.
     @param         schema         Schema for which to get component names.
@@ -853,6 +875,39 @@ class Dictionary_client {
   template <typename T>
   bool fetch_schema_component_names(const Schema *schema,
                                     std::vector<String_type> *names) const
+      MY_ATTRIBUTE((warn_unused_result));
+
+  /**
+    Fetch the names of the tables in the schema belonging to specific
+    storage engine. E.g., Object with dd::Table::hidden() == true will be
+    ignored.
+
+    @param         schema         Schema for which to get component names.
+    @param         engine         Engine name of tables to match.
+    @param   [out] names          An std::vector containing all object names.
+
+    @return      true   Failure (error is reported).
+    @return      false  Success.
+  */
+
+  bool fetch_schema_table_names_by_engine(const Schema *schema,
+                                          const String_type &engine,
+                                          std::vector<String_type> *names) const
+      MY_ATTRIBUTE((warn_unused_result));
+
+  /**
+    Fetch the names of the server tables in the schema.  Ignore tables
+    hidden by SE.
+
+    @param         schema         Schema for which to get component names.
+    @param   [out] names          An std::vector containing all object names.
+
+    @return      true   Failure (error is reported).
+    @return      false  Success.
+  */
+
+  bool fetch_schema_table_names_not_hidden_by_se(
+      const Schema *schema, std::vector<String_type> *names) const
       MY_ATTRIBUTE((warn_unused_result));
 
   /**
@@ -910,6 +965,21 @@ class Dictionary_client {
 
   template <typename T>
   bool fetch_global_components(Const_ptr_vec<T> *coll)
+      MY_ATTRIBUTE((warn_unused_result));
+
+  /**
+     Check if a user is referenced as definer by some object of the given type.
+
+     @tparam        T              Type of dictionary objects to check.
+     @param         user           User name, including @ and host.
+     @param   [out] is_definer     True if the user is referenced as definer
+                                   by some object.
+
+     @return      true   Failure (error is reported, is_definer is undefined).
+     @return      false  Success.
+   */
+  template <typename T>
+  bool is_user_definer(const LEX_USER &user, bool *is_definer) const
       MY_ATTRIBUTE((warn_unused_result));
 
   /**

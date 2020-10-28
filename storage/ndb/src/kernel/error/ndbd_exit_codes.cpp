@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -133,6 +133,9 @@ static const ErrStruct errArray[] =
    {NDBD_EXIT_RESTART_DURING_SHUTDOWN, XRE,
     "Node started while node shutdown in progress. "
     "Please wait until shutdown complete before starting node"},
+   {NDBD_EXIT_UPGRADE_INITIAL_REQUIRED, XRE,
+    "Node upgrade requires initial restart to rebuild filesystem. "
+    "Please retry with --initial or reconsider."},
 
    /* DIH */
    {NDBD_EXIT_MAX_CRASHED_REPLICAS, XFL,
@@ -177,6 +180,8 @@ static const ErrStruct errArray[] =
     "System reports no more file system resources"},
    {NDBD_EXIT_AFS_NO_SUCH_FILE          , XFI, "File not found"},
    {NDBD_EXIT_AFS_READ_UNDERFLOW        , XFI, "Read underflow"},
+   {NDBD_EXIT_AFS_ZLIB_INIT_FAIL       , XIE,
+      "Zlib init failure, please chekt the zlib version" },
    
    {NDBD_EXIT_INVALID_LCP_FILE, XFI, "Invalid LCP" },
    {NDBD_EXIT_INSUFFICENT_NODES, XRE, "Insufficent nodes for system restart" },

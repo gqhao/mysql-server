@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,6 +22,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
+#include <memory>
+
 #include "plugin/x/src/auth_plain.h"
 
 #include "plugin/x/src/native_plain_verification.h"
@@ -30,42 +32,46 @@
 
 namespace xpl {
 
-ngs::Authentication_interface_ptr Sasl_plain_auth::create(
-    ngs::Session_interface *session,
-    ngs::SHA256_password_cache_interface *sha256_password_cache) {
-  Account_verification_handler *handler =
-      ngs::allocate_object<Account_verification_handler>(session);
+std::unique_ptr<iface::Authentication> Sasl_plain_auth::create(
+    iface::Session *session,
+    iface::SHA256_password_cache *sha256_password_cache) {
+  auto handler = new Account_verification_handler(session);
+
   handler->add_account_verificator(
-      ngs::Account_verification_interface::Account_native,
-      ngs::allocate_object<Native_plain_verification>(sha256_password_cache));
+      iface::Account_verification::Account_type::k_native,
+      new Native_plain_verification(sha256_password_cache));
   handler->add_account_verificator(
-      ngs::Account_verification_interface::Account_sha256,
-      ngs::allocate_object<Sha256_plain_verification>(sha256_password_cache));
+      iface::Account_verification::Account_type::k_sha256,
+      new Sha256_plain_verification(sha256_password_cache));
   handler->add_account_verificator(
-      ngs::Account_verification_interface::Account_sha2,
-      ngs::allocate_object<Sha2_plain_verification>(sha256_password_cache));
-  return ngs::Authentication_interface_ptr(
-      ngs::allocate_object<Sasl_plain_auth>(handler));
+      iface::Account_verification::Account_type::k_sha2,
+      new Sha2_plain_verification(sha256_password_cache));
+
+  return std::make_unique<Sasl_plain_auth>(handler);
 }
 
 Sasl_plain_auth::Response Sasl_plain_auth::handle_start(const std::string &,
                                                         const std::string &data,
                                                         const std::string &) {
-  if (ngs::Error_code error = m_verification_handler->authenticate(*this, data))
-    return {Failed, error.error, error.message};
-  return {Succeeded};
+  m_auth_info.reset();
+
+  if (ngs::Error_code error =
+          m_verification_handler->authenticate(*this, &m_auth_info, data))
+    return {Status::k_failed, error.error, error.message};
+  return {Status::k_succeeded};
 }
 
 Sasl_plain_auth::Response Sasl_plain_auth::handle_continue(
     const std::string &) {
   // never supposed to get called
-  return {Error, ER_NET_PACKETS_OUT_OF_ORDER};
+  return {Status::k_error, ER_NET_PACKETS_OUT_OF_ORDER};
 }
 
 ngs::Error_code Sasl_plain_auth::authenticate_account(
     const std::string &user, const std::string &host,
     const std::string &passwd) const {
-  return m_verification_handler->verify_account(user, host, passwd);
+  return m_verification_handler->verify_account(user, host, passwd,
+                                                &m_auth_info);
 }
 
 }  // namespace xpl

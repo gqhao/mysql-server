@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1997, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1997, 2019, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -24,8 +24,6 @@ this program; if not, write to the Free Software Foundation, Inc.,
 
 *****************************************************************************/
 
-#include "my_compiler.h"
-
 /** @file include/row0uins.h
  Fresh insert undo
 
@@ -35,13 +33,14 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #ifndef row0uins_h
 #define row0uins_h
 
+#include "univ.i"
+
 #include "data0data.h"
 #include "dict0types.h"
 #include "mtr0mtr.h"
 #include "que0types.h"
 #include "row0types.h"
 #include "trx0types.h"
-#include "univ.i"
 
 /** Undoes a fresh insert of a row to a table. A fresh insert means that
  the same clustered index unique key did not have any record, even delete
@@ -52,7 +51,5 @@ this program; if not, write to the Free Software Foundation, Inc.,
 dberr_t row_undo_ins(undo_node_t *node, /*!< in: row undo node */
                      que_thr_t *thr)    /*!< in: query thread */
     MY_ATTRIBUTE((warn_unused_result));
-
-#include "row0uins.ic"
 
 #endif

@@ -1,4 +1,4 @@
-/* Copyright (c) 2008, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2008, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -25,10 +25,10 @@
 
 #include "my_thread_local.h"         // my_thread_id
 #include "mysql/psi/mysql_thread.h"  // mysql_mutex_t
-#include "sql/handler.h"             // enum_tx_isolation
+#include "rpl_context.h"
+#include "sql/handler.h"  // enum_tx_isolation
 
 struct MYSQL;
-struct IO_CACHE;
 
 #ifdef __cplusplus
 class THD;
@@ -45,16 +45,20 @@ extern "C" {
   Struct to share server ssl variables
 */
 struct st_server_ssl_variables {
-  bool have_ssl_opt;
   char *ssl_ca;
   char *ssl_capath;
   char *tls_version;
+  char *tls_ciphersuites;
   char *ssl_cert;
   char *ssl_cipher;
   char *ssl_key;
   char *ssl_crl;
   char *ssl_crlpath;
   unsigned int ssl_fips_mode;
+
+  void init();
+
+  void deinit();
 };
 
 /**
@@ -93,7 +97,7 @@ typedef struct Trans_table_info {
  */
 typedef struct Trans_context_info {
   bool binlog_enabled;
-  ulong gtid_mode;  // enum values in enum_gtid_mode
+  ulong gtid_mode;  // enum values in Gtid_mode::value_type
   bool log_slave_updates;
   ulong binlog_checksum_options;  // enum values in enum
                                   // enum_binlog_checksum_alg
@@ -108,6 +112,7 @@ typedef struct Trans_context_info {
   bool parallel_applier_preserve_commit_order;
   enum_tx_isolation tx_isolation;  // enum values in enum_tx_isolation
   uint lower_case_table_names;
+  bool default_table_encryption;
 } Trans_context_info;
 
 /**
@@ -119,6 +124,7 @@ typedef struct Trans_gtid_info {
   long long int gno;  // transaction gno
 } Trans_gtid_info;
 
+class Binlog_cache_storage;
 /**
    Transaction observer parameter
 */
@@ -146,8 +152,8 @@ typedef struct Trans_param {
   /*
     Set on before_commit hook.
   */
-  IO_CACHE *trx_cache_log;
-  IO_CACHE *stmt_cache_log;
+  Binlog_cache_storage *trx_cache_log;
+  Binlog_cache_storage *stmt_cache_log;
   ulonglong cache_log_max_size;
   /*
     The flag designates the transaction is a DDL contained is
@@ -168,8 +174,27 @@ typedef struct Trans_param {
   Trans_context_info trans_ctx_info;
 
   /// pointer to the status var original_commit_timestamp
-  uint64 *original_commit_timestamp;
+  unsigned long long *original_commit_timestamp;
 
+  /** Replication channel info associated to this transaction/THD */
+  enum_rpl_channel_type rpl_channel_type;
+
+  /** contains the session value of group_replication_consistency */
+  ulong group_replication_consistency;
+
+  /** value of session wait_timeout, timeout to hold transaction */
+  ulong hold_timeout;
+
+  /// pointer to original_server_version
+  uint32_t *original_server_version;
+
+  /// pointer to immediate_server_version
+  uint32_t *immediate_server_version;
+
+  /*
+    Flag to identify a 'CREATE TABLE ... AS SELECT'.
+  */
+  bool is_create_table_as_select;
 } Trans_param;
 
 /**
@@ -244,6 +269,17 @@ typedef int (*after_commit_t)(Trans_param *param);
 typedef int (*after_rollback_t)(Trans_param *param);
 
 /**
+  This callback is called before a sql command is executed.
+
+  @param param   The parameter for transaction observers
+  @param out_val Return value from observer execution
+
+  @retval 0 Success
+  @retval 1 Failure
+*/
+typedef int (*begin_t)(Trans_param *param, int &out_val);
+
+/**
    Observes and extends transaction execution
 */
 typedef struct Trans_observer {
@@ -254,6 +290,7 @@ typedef struct Trans_observer {
   before_rollback_t before_rollback;
   after_commit_t after_commit;
   after_rollback_t after_rollback;
+  begin_t begin;
 } Trans_observer;
 
 /**
@@ -336,6 +373,17 @@ typedef int (*before_server_shutdown_t)(Server_state_param *param);
 typedef int (*after_server_shutdown_t)(Server_state_param *param);
 
 /**
+  This is called just after an upgrade from MySQL 5.7 populates the data
+  dictionary for the first time.
+
+  @param[in]  param Observer common parameter
+
+  @retval 0 Success
+  @retval >0 Failure
+*/
+typedef int (*after_dd_upgrade_t)(Server_state_param *param);
+
+/**
   Observer server state
  */
 typedef struct Server_state_observer {
@@ -347,6 +395,7 @@ typedef struct Server_state_observer {
   after_recovery_t after_recovery;
   before_server_shutdown_t before_server_shutdown;
   after_server_shutdown_t after_server_shutdown;
+  after_dd_upgrade_t after_dd_upgrade_from_57;
 } Server_state_observer;
 
 /**
@@ -650,7 +699,9 @@ typedef int (*after_reset_slave_t)(Binlog_relay_IO_param *param);
   This callback is called before event gets applied
 
   @param param  Observer common parameter
-  @param reason Event skip reason
+  @param trans_param The parameter for transaction observers
+  @param out Return value from observer execution to help validate event
+  according to observer requirement.
 
   @retval 0 Success
   @retval 1 Failure

@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2005, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2005, 2020, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2012, Facebook Inc.
 
 This program is free software; you can redistribute it and/or modify it under
@@ -33,7 +33,6 @@ this program; if not, write to the Free Software Foundation, Inc.,
 
 #include "page0zip.h"
 
-#include "my_inttypes.h"
 #include "page0size.h"
 
 /** A BLOB field reference full of zero, for use in assertions and tests.
@@ -71,6 +70,10 @@ const byte field_ref_zero[FIELD_REF_SIZE] = {
 
 #include <algorithm>
 #include <map>
+
+static_assert(DATA_TRX_ID_LEN == 6, "DATA_TRX_ID_LEN != 6");
+static_assert(DATA_ROLL_PTR_LEN == 7, "DATA_ROLL_PTR_LEN != 7");
+static_assert(DATA_TRX_ID + 1 == DATA_ROLL_PTR, "DATA_TRX_ID invalid value!");
 
 #ifndef UNIV_HOTBACKUP
 /** Statistics on compression, indexed by page_zip_des_t::ssize - 1 */
@@ -148,15 +151,16 @@ bool page_zip_is_too_big(const dict_index_t *index, const dtuple_t *entry) {
   records on an empty non-leaf page.  This prevents
   infinite page splits. */
 
-  if (entry->n_fields >= n_uniq && (REC_NODE_PTR_SIZE +
-                                        rec_get_converted_size_comp_prefix(
-                                            index, entry->fields, n_uniq, NULL)
-                                        /* On a compressed page, there is
-                                        a two-byte entry in the dense
-                                        page directory for every record.
-                                        But there is no record header. */
-                                        - (REC_N_NEW_EXTRA_BYTES - 2) >
-                                    free_space_zip / 2)) {
+  if (entry->n_fields >= n_uniq &&
+      (REC_NODE_PTR_SIZE +
+           rec_get_converted_size_comp_prefix(index, entry->fields, n_uniq,
+                                              nullptr)
+           /* On a compressed page, there is
+           a two-byte entry in the dense
+           page directory for every record.
+           But there is no record header. */
+           - (REC_N_NEW_EXTRA_BYTES - 2) >
+       free_space_zip / 2)) {
     return (true);
   }
 
@@ -199,14 +203,12 @@ static void page_zip_compress_write_log(
     dict_index_t *index,            /*!< in: index of the B-tree node */
     mtr_t *mtr)                     /*!< in: mini-transaction */
 {
-  byte *log_ptr;
+  byte *log_ptr = nullptr;
   ulint trailer_size;
 
   ut_ad(!dict_index_is_ibuf(index));
 
-  log_ptr = mlog_open(mtr, 11 + 2 + 2);
-
-  if (!log_ptr) {
+  if (!mlog_open(mtr, 11 + 2 + 2, log_ptr)) {
     return;
   }
 
@@ -252,14 +254,13 @@ static void page_zip_compress_write_log(
 #endif /* !UNIV_HOTBACKUP */
 
 /** Determine how many externally stored columns are contained
- in existing records with smaller heap_no than rec. */
-static ulint page_zip_get_n_prev_extern(
-    const page_zip_des_t *page_zip, /*!< in: dense page directory on
-                                   compressed page */
-    const rec_t *rec,               /*!< in: compact physical record
-                                    on a B-tree leaf page */
-    const dict_index_t *index)      /*!< in: record descriptor */
-{
+ in existing records with smaller heap_no than rec.
+@param[in] page_zip Dense page directory on compressed page
+@param[in] rec Compact physical record on a b-tree leaf page
+@param[in] index Record descriptor */
+static ulint page_zip_get_n_prev_extern(const page_zip_des_t *page_zip,
+                                        const rec_t *rec,
+                                        const dict_index_t *index) {
   const page_t *page = page_align(rec);
   ulint n_ext = 0;
   ulint i;
@@ -618,7 +619,7 @@ static int page_zip_compress_node_ptrs(
     mem_heap_t *heap)                /*!< in: temporary memory heap */
 {
   int err = Z_OK;
-  ulint *offsets = NULL;
+  ulint *offsets = nullptr;
 
   do {
     const rec_t *rec = *recs++;
@@ -827,7 +828,7 @@ static int page_zip_compress_clust(
     mem_heap_t *heap)                /*!< in: temporary memory heap */
 {
   int err = Z_OK;
-  ulint *offsets = NULL;
+  ulint *offsets = nullptr;
   /* BTR_EXTERN_FIELD_REF storage */
   byte *externs = storage - n_dense * (DATA_TRX_ID_LEN + DATA_ROLL_PTR_LEN);
 
@@ -956,10 +957,10 @@ ibool page_zip_compress(page_zip_des_t *page_zip, /*!< in: size; out: data,
   byte *storage; /* storage of uncompressed
                  columns */
 #ifndef UNIV_HOTBACKUP
-  uintmax_t usec = ut_time_us(NULL);
+  const auto usec = ut_time_monotonic_us();
 #endif /* !UNIV_HOTBACKUP */
 #ifdef PAGE_ZIP_COMPRESS_DBG
-  FILE *logfile = NULL;
+  FILE *logfile = nullptr;
 #endif
 #ifndef UNIV_HOTBACKUP
   /* A local copy of srv_cmp_per_index_enabled to avoid reading that
@@ -1178,7 +1179,7 @@ ibool page_zip_compress(page_zip_des_t *page_zip, /*!< in: size; out: data,
       dict_index_zip_failure(index);
     }
 
-    uintmax_t time_diff = ut_time_us(NULL) - usec;
+    const auto time_diff = ut_time_monotonic_us() - usec;
     page_zip_stat[page_zip->ssize - 1].compressed_usec += time_diff;
     if (cmp_per_index_enabled) {
       mutex_enter(&page_zip_stat_per_index_mutex);
@@ -1246,7 +1247,7 @@ ibool page_zip_compress(page_zip_des_t *page_zip, /*!< in: size; out: data,
   }
 #endif /* PAGE_ZIP_COMPRESS_DBG */
 #ifndef UNIV_HOTBACKUP
-  uintmax_t time_diff = ut_time_us(NULL) - usec;
+  const auto time_diff = ut_time_monotonic_us() - usec;
   page_zip_stat[page_zip->ssize - 1].compressed_ok++;
   page_zip_stat[page_zip->ssize - 1].compressed_usec += time_diff;
   if (cmp_per_index_enabled) {
@@ -1278,7 +1279,7 @@ ibool page_zip_decompress(
                               after page creation */
 {
 #ifndef UNIV_HOTBACKUP
-  uintmax_t usec = ut_time_us(NULL);
+  const auto usec = ut_time_monotonic_us();
 #endif /* !UNIV_HOTBACKUP */
 
   if (!page_zip_decompress_low(page_zip, page, all)) {
@@ -1286,7 +1287,7 @@ ibool page_zip_decompress(
   }
 
 #ifndef UNIV_HOTBACKUP
-  uintmax_t time_diff = ut_time_us(NULL) - usec;
+  const auto time_diff = ut_time_monotonic_us() - usec;
   page_zip_stat[page_zip->ssize - 1].decompressed++;
   page_zip_stat[page_zip->ssize - 1].decompressed_usec += time_diff;
 
@@ -1479,8 +1480,8 @@ ibool page_zip_validate_low(
     }
 
     /* Compare the records. */
-    heap = NULL;
-    offsets = NULL;
+    heap = nullptr;
+    offsets = nullptr;
     rec = page_rec_get_next_low(page + PAGE_NEW_INFIMUM, TRUE);
     trec = page_rec_get_next_low(temp_page + PAGE_NEW_INFIMUM, TRUE);
 
@@ -1562,16 +1563,16 @@ static ibool page_zip_header_cmp(
  columns.  The data must already have been written to the uncompressed page.
  @return end of modification log */
 static byte *page_zip_write_rec_ext(
-    page_zip_des_t *page_zip, /*!< in/out: compressed page */
-    const page_t *page,       /*!< in: page containing rec */
-    const byte *rec,          /*!< in: record being written */
-    dict_index_t *index,      /*!< in: record descriptor */
-    const ulint *offsets,     /*!< in: rec_get_offsets(rec, index) */
-    ulint create,             /*!< in: nonzero=insert, zero=update */
-    ulint trx_id_col,         /*!< in: position of DB_TRX_ID */
-    ulint heap_no,            /*!< in: heap number of rec */
-    byte *storage,            /*!< in: end of dense page directory */
-    byte *data)               /*!< in: end of modification log */
+    page_zip_des_t *page_zip,  /*!< in/out: compressed page */
+    const page_t *page,        /*!< in: page containing rec */
+    const byte *rec,           /*!< in: record being written */
+    const dict_index_t *index, /*!< in: record descriptor */
+    const ulint *offsets,      /*!< in: rec_get_offsets(rec, index) */
+    ulint create,              /*!< in: nonzero=insert, zero=update */
+    ulint trx_id_col,          /*!< in: position of DB_TRX_ID */
+    ulint heap_no,             /*!< in: heap number of rec */
+    byte *storage,             /*!< in: end of dense page directory */
+    byte *data)                /*!< in: end of modification log */
 {
   const byte *start = rec;
   ulint i;
@@ -1665,11 +1666,11 @@ static byte *page_zip_write_rec_ext(
 /** Write an entire record on the compressed page.  The data must already
  have been written to the uncompressed page. */
 void page_zip_write_rec(
-    page_zip_des_t *page_zip, /*!< in/out: compressed page */
-    const byte *rec,          /*!< in: record being written */
-    dict_index_t *index,      /*!< in: the index the record belongs to */
-    const ulint *offsets,     /*!< in: rec_get_offsets(rec, index) */
-    ulint create)             /*!< in: nonzero=insert, zero=update */
+    page_zip_des_t *page_zip,  /*!< in/out: compressed page */
+    const byte *rec,           /*!< in: record being written */
+    const dict_index_t *index, /*!< in: the index the record belongs to */
+    const ulint *offsets,      /*!< in: rec_get_offsets(rec, index) */
+    ulint create)              /*!< in: nonzero=insert, zero=update */
 {
   const page_t *page;
   byte *data;
@@ -1841,12 +1842,12 @@ byte *page_zip_parse_write_blob_ptr(
   ulint offset;
   ulint z_offset;
 
-  ut_ad(ptr != NULL);
-  ut_ad(end_ptr != NULL);
+  ut_ad(ptr != nullptr);
+  ut_ad(end_ptr != nullptr);
   ut_ad(!page == !page_zip);
 
   if (UNIV_UNLIKELY(end_ptr < ptr + (2 + 2 + BTR_EXTERN_FIELD_REF_SIZE))) {
-    return (NULL);
+    return (nullptr);
   }
 
   offset = mach_read_from_2(ptr);
@@ -1857,7 +1858,7 @@ byte *page_zip_parse_write_blob_ptr(
   corrupt:
     recv_sys->found_corrupt_log = TRUE;
 
-    return (NULL);
+    return (nullptr);
   }
 
   if (page) {
@@ -1866,14 +1867,14 @@ byte *page_zip_parse_write_blob_ptr(
     }
 
 #ifdef UNIV_ZIP_DEBUG
-    ut_a(page_zip_validate(page_zip, page, NULL));
+    ut_a(page_zip_validate(page_zip, page, nullptr));
 #endif /* UNIV_ZIP_DEBUG */
 
     memcpy(page + offset, ptr + 4, BTR_EXTERN_FIELD_REF_SIZE);
     memcpy(page_zip->data + z_offset, ptr + 4, BTR_EXTERN_FIELD_REF_SIZE);
 
 #ifdef UNIV_ZIP_DEBUG
-    ut_a(page_zip_validate(page_zip, page, NULL));
+    ut_a(page_zip_validate(page_zip, page, nullptr));
 #endif /* UNIV_ZIP_DEBUG */
   }
 
@@ -1898,15 +1899,15 @@ void page_zip_write_blob_ptr(
   ulint blob_no;
   ulint len;
 
-  ut_ad(page_zip != NULL);
-  ut_ad(rec != NULL);
-  ut_ad(index != NULL);
-  ut_ad(offsets != NULL);
+  ut_ad(page_zip != nullptr);
+  ut_ad(rec != nullptr);
+  ut_ad(index != nullptr);
+  ut_ad(offsets != nullptr);
   ut_ad(page_simple_validate_new((page_t *)page));
   ut_ad(page_zip_simple_validate(page_zip));
   ut_ad(page_zip_get_size(page_zip) > PAGE_DATA + page_zip_dir_size(page_zip));
   ut_ad(rec_offs_comp(offsets));
-  ut_ad(rec_offs_validate(rec, NULL, offsets));
+  ut_ad(rec_offs_validate(rec, nullptr, offsets));
   ut_ad(rec_offs_any_extern(offsets));
   ut_ad(rec_offs_nth_extern(offsets, n));
 
@@ -1940,24 +1941,25 @@ void page_zip_write_blob_ptr(
   ut_a(page_zip_validate(page_zip, page, index));
 #endif /* UNIV_ZIP_DEBUG */
 
-  if (mtr) {
-#ifndef UNIV_HOTBACKUP
-    byte *log_ptr = mlog_open(mtr, 11 + 2 + 2 + BTR_EXTERN_FIELD_REF_SIZE);
-    if (UNIV_UNLIKELY(!log_ptr)) {
-      return;
-    }
-
-    log_ptr = mlog_write_initial_log_record_fast(
-        (byte *)field, MLOG_ZIP_WRITE_BLOB_PTR, log_ptr, mtr);
-    mach_write_to_2(log_ptr, page_offset(field));
-    log_ptr += 2;
-    mach_write_to_2(log_ptr, externs - page_zip->data);
-    log_ptr += 2;
-    memcpy(log_ptr, externs, BTR_EXTERN_FIELD_REF_SIZE);
-    log_ptr += BTR_EXTERN_FIELD_REF_SIZE;
-    mlog_close(mtr, log_ptr);
-#endif /* !UNIV_HOTBACKUP */
+  if (mtr == nullptr) {
+    return;
   }
+#ifndef UNIV_HOTBACKUP
+  byte *log_ptr = nullptr;
+  if (!mlog_open(mtr, 11 + 2 + 2 + BTR_EXTERN_FIELD_REF_SIZE, log_ptr)) {
+    return;
+  }
+
+  log_ptr = mlog_write_initial_log_record_fast(
+      (byte *)field, MLOG_ZIP_WRITE_BLOB_PTR, log_ptr, mtr);
+  mach_write_to_2(log_ptr, page_offset(field));
+  log_ptr += 2;
+  mach_write_to_2(log_ptr, externs - page_zip->data);
+  log_ptr += 2;
+  memcpy(log_ptr, externs, BTR_EXTERN_FIELD_REF_SIZE);
+  log_ptr += BTR_EXTERN_FIELD_REF_SIZE;
+  mlog_close(mtr, log_ptr);
+#endif /* !UNIV_HOTBACKUP */
 }
 
 /** Parses a log record of writing the node pointer of a record.
@@ -1971,12 +1973,12 @@ byte *page_zip_parse_write_node_ptr(
   ulint offset;
   ulint z_offset;
 
-  ut_ad(ptr != NULL);
-  ut_ad(end_ptr != NULL);
+  ut_ad(ptr != nullptr);
+  ut_ad(end_ptr != nullptr);
   ut_ad(!page == !page_zip);
 
   if (UNIV_UNLIKELY(end_ptr < ptr + (2 + 2 + REC_NODE_PTR_SIZE))) {
-    return (NULL);
+    return (nullptr);
   }
 
   offset = mach_read_from_2(ptr);
@@ -1987,7 +1989,7 @@ byte *page_zip_parse_write_node_ptr(
   corrupt:
     recv_sys->found_corrupt_log = TRUE;
 
-    return (NULL);
+    return (nullptr);
   }
 
   if (page) {
@@ -2001,7 +2003,7 @@ byte *page_zip_parse_write_node_ptr(
     }
 
 #ifdef UNIV_ZIP_DEBUG
-    ut_a(page_zip_validate(page_zip, page, NULL));
+    ut_a(page_zip_validate(page_zip, page, nullptr));
 #endif /* UNIV_ZIP_DEBUG */
 
     field = page + offset;
@@ -2021,21 +2023,21 @@ byte *page_zip_parse_write_node_ptr(
     memcpy(storage, ptr + 4, REC_NODE_PTR_SIZE);
 
 #ifdef UNIV_ZIP_DEBUG
-    ut_a(page_zip_validate(page_zip, page, NULL));
+    ut_a(page_zip_validate(page_zip, page, nullptr));
 #endif /* UNIV_ZIP_DEBUG */
   }
 
   return (ptr + (2 + 2 + REC_NODE_PTR_SIZE));
 }
 
-/** Write the node pointer of a record on a non-leaf compressed page. */
-void page_zip_write_node_ptr(
-    page_zip_des_t *page_zip, /*!< in/out: compressed page */
-    byte *rec,                /*!< in/out: record */
-    ulint size,               /*!< in: data size of rec */
-    ulint ptr,                /*!< in: node pointer */
-    mtr_t *mtr)               /*!< in: mini-transaction, or NULL */
-{
+/** Write the node pointer of a record on a non-leaf compressed page.
+@param[in,out] page_zip Compressed page
+@param[in,out] rec Record
+@param[in] size Data size of rec
+@param[in] ptr Node pointer
+@param[in] mtr Mini-transaction, or null */
+void page_zip_write_node_ptr(page_zip_des_t *page_zip, byte *rec, ulint size,
+                             ulint ptr, mtr_t *mtr) {
   byte *field;
   byte *storage;
 #ifdef UNIV_DEBUG
@@ -2068,35 +2070,39 @@ void page_zip_write_node_ptr(
   mach_write_to_4(field, ptr);
   memcpy(storage, field, REC_NODE_PTR_SIZE);
 
-  if (mtr) {
-#ifndef UNIV_HOTBACKUP
-    byte *log_ptr = mlog_open(mtr, 11 + 2 + 2 + REC_NODE_PTR_SIZE);
-    if (UNIV_UNLIKELY(!log_ptr)) {
-      return;
-    }
-
-    log_ptr = mlog_write_initial_log_record_fast(field, MLOG_ZIP_WRITE_NODE_PTR,
-                                                 log_ptr, mtr);
-    mach_write_to_2(log_ptr, page_offset(field));
-    log_ptr += 2;
-    mach_write_to_2(log_ptr, storage - page_zip->data);
-    log_ptr += 2;
-    memcpy(log_ptr, field, REC_NODE_PTR_SIZE);
-    log_ptr += REC_NODE_PTR_SIZE;
-    mlog_close(mtr, log_ptr);
-#endif /* !UNIV_HOTBACKUP */
+  if (mtr == nullptr) {
+    return;
   }
+
+#ifndef UNIV_HOTBACKUP
+  byte *log_ptr = nullptr;
+
+  if (!mlog_open(mtr, 11 + 2 + 2 + REC_NODE_PTR_SIZE, log_ptr)) {
+    return;
+  }
+
+  log_ptr = mlog_write_initial_log_record_fast(field, MLOG_ZIP_WRITE_NODE_PTR,
+                                               log_ptr, mtr);
+  mach_write_to_2(log_ptr, page_offset(field));
+  log_ptr += 2;
+  mach_write_to_2(log_ptr, storage - page_zip->data);
+  log_ptr += 2;
+  memcpy(log_ptr, field, REC_NODE_PTR_SIZE);
+  log_ptr += REC_NODE_PTR_SIZE;
+  mlog_close(mtr, log_ptr);
+#endif /* !UNIV_HOTBACKUP */
 }
 
-/** Write the trx_id and roll_ptr of a record on a B-tree leaf node page. */
-void page_zip_write_trx_id_and_roll_ptr(
-    page_zip_des_t *page_zip, /*!< in/out: compressed page */
-    byte *rec,                /*!< in/out: record */
-    const ulint *offsets,     /*!< in: rec_get_offsets(rec, index) */
-    ulint trx_id_col,         /*!< in: column number of TRX_ID in rec */
-    trx_id_t trx_id,          /*!< in: transaction identifier */
-    roll_ptr_t roll_ptr)      /*!< in: roll_ptr */
-{
+/** Write the trx_id and roll_ptr of a record on a B-tree leaf node page.
+@param[in,out] page_zip Compressed page
+@param[in,out] rec Record
+@param[in] offsets Rec_get_offsets(rec, index)
+@param[in] trx_id_col Column number of trx_id in rec
+@param[in] trx_id Transaction identifier
+@param[in] roll_ptr Roll_ptr */
+void page_zip_write_trx_id_and_roll_ptr(page_zip_des_t *page_zip, byte *rec,
+                                        const ulint *offsets, ulint trx_id_col,
+                                        trx_id_t trx_id, roll_ptr_t roll_ptr) {
   byte *field;
   byte *storage;
 #ifdef UNIV_DEBUG
@@ -2107,7 +2113,7 @@ void page_zip_write_trx_id_and_roll_ptr(
   ut_ad(page_simple_validate_new(page));
   ut_ad(page_zip_simple_validate(page_zip));
   ut_ad(page_zip_get_size(page_zip) > PAGE_DATA + page_zip_dir_size(page_zip));
-  ut_ad(rec_offs_validate(rec, NULL, offsets));
+  ut_ad(rec_offs_validate(rec, nullptr, offsets));
   ut_ad(rec_offs_comp(offsets));
 
   ut_ad(page_zip->m_start >= PAGE_DATA);
@@ -2121,10 +2127,7 @@ void page_zip_write_trx_id_and_roll_ptr(
       page_zip_dir_start(page_zip) -
       (rec_get_heap_no_new(rec) - 1) * (DATA_TRX_ID_LEN + DATA_ROLL_PTR_LEN);
 
-#if DATA_TRX_ID + 1 != DATA_ROLL_PTR
-#error "DATA_TRX_ID + 1 != DATA_ROLL_PTR"
-#endif
-  field = rec_get_nth_field(rec, offsets, trx_id_col, &len);
+  field = const_cast<byte *>(rec_get_nth_field(rec, offsets, trx_id_col, &len));
   ut_ad(len == DATA_TRX_ID_LEN);
   ut_ad(field + DATA_TRX_ID_LEN ==
         rec_get_nth_field(rec, offsets, trx_id_col + 1, &len));
@@ -2132,13 +2135,7 @@ void page_zip_write_trx_id_and_roll_ptr(
 #if defined UNIV_DEBUG || defined UNIV_ZIP_DEBUG
   ut_a(!memcmp(storage, field, DATA_TRX_ID_LEN + DATA_ROLL_PTR_LEN));
 #endif /* UNIV_DEBUG || UNIV_ZIP_DEBUG */
-#if DATA_TRX_ID_LEN != 6
-#error "DATA_TRX_ID_LEN != 6"
-#endif
   mach_write_to_6(field, trx_id);
-#if DATA_ROLL_PTR_LEN != 7
-#error "DATA_ROLL_PTR_LEN != 7"
-#endif
   mach_write_to_7(field + DATA_TRX_ID_LEN, roll_ptr);
   memcpy(storage, field, DATA_TRX_ID_LEN + DATA_ROLL_PTR_LEN);
 
@@ -2243,17 +2240,17 @@ void page_zip_rec_set_deleted(
     *slot &= ~(PAGE_ZIP_DIR_SLOT_DEL >> 8);
   }
 #ifdef UNIV_ZIP_DEBUG
-  ut_a(page_zip_validate(page_zip, page_align(rec), NULL));
+  ut_a(page_zip_validate(page_zip, page_align(rec), nullptr));
 #endif /* UNIV_ZIP_DEBUG */
 }
 
-/** Write the "owned" flag of a record on a compressed page.  The n_owned field
- must already have been written on the uncompressed page. */
-void page_zip_rec_set_owned(
-    page_zip_des_t *page_zip, /*!< in/out: compressed page */
-    const byte *rec,          /*!< in: record on the uncompressed page */
-    ulint flag)               /*!< in: the owned flag (nonzero=TRUE) */
-{
+/** Write the "owned" flag of a record on a compressed page. The n_owned field
+must already have been written on the uncompressed page.
+@param[in,out]  page_zip  Compressed page
+@param[in]      rec       Record on the uncompressed page
+@param[in]      flag      The owned flag (nonzero=true) */
+void page_zip_rec_set_owned(page_zip_des_t *page_zip, const byte *rec,
+                            ulint flag) {
   byte *slot = page_zip_dir_find(page_zip, page_offset(rec));
   ut_a(slot);
   UNIV_MEM_ASSERT_RW(page_zip->data, page_zip_get_size(page_zip));
@@ -2264,14 +2261,13 @@ void page_zip_rec_set_owned(
   }
 }
 
-/** Insert a record to the dense page directory. */
-void page_zip_dir_insert(
-    page_zip_des_t *page_zip, /*!< in/out: compressed page */
-    const byte *prev_rec,     /*!< in: record after which to insert */
-    const byte *free_rec,     /*!< in: record from which rec was
-                             allocated, or NULL */
-    byte *rec)                /*!< in: record to insert */
-{
+/** Insert a record to the dense page directory.
+@param[in,out] page_zip Compressed page
+@param[in] prev_rec Record after which to insert
+@param[in] free_rec Record from which rec was allocated, or null
+@param[in] rec Record to insert */
+void page_zip_dir_insert(page_zip_des_t *page_zip, const byte *prev_rec,
+                         const byte *free_rec, byte *rec) {
   ulint n_dense;
   byte *slot_rec;
   byte *slot_free;
@@ -2333,7 +2329,8 @@ void page_zip_dir_insert(
   mach_write_to_2(slot_rec - PAGE_ZIP_DIR_SLOT_SIZE, page_offset(rec));
 }
 
-/** Shift the dense page directory when a record is deleted.
+/** Shift the dense page directory and the array of BLOB pointers when a record
+is deleted.
 @param[in,out]	page_zip	compressed page
 @param[in]	rec		deleted record
 @param[in]	index		index of rec
@@ -2421,12 +2418,10 @@ skip_blobs:
   page_zip_clear_rec(page_zip, rec, index, offsets);
 }
 
-/** Add a slot to the dense page directory. */
-void page_zip_dir_add_slot(
-    page_zip_des_t *page_zip, /*!< in/out: compressed page */
-    bool is_clustered)        /*!< in: nonzero for clustered index,
-                              zero for others */
-{
+/** Add a slot to the dense page directory.
+@param[in,out]  page_zip      Compressed page
+@param[in]      is_clustered  Nonzero for clustered index, zero for others */
+void page_zip_dir_add_slot(page_zip_des_t *page_zip, bool is_clustered) {
   ulint n_dense;
   byte *dir;
   byte *stored;
@@ -2475,12 +2470,12 @@ byte *page_zip_parse_write_header(
   ulint offset;
   ulint len;
 
-  ut_ad(ptr != NULL);
-  ut_ad(end_ptr != NULL);
+  ut_ad(ptr != nullptr);
+  ut_ad(end_ptr != nullptr);
   ut_ad(!page == !page_zip);
 
   if (UNIV_UNLIKELY(end_ptr < ptr + (1 + 1))) {
-    return (NULL);
+    return (nullptr);
   }
 
   offset = (ulint)*ptr++;
@@ -2490,11 +2485,11 @@ byte *page_zip_parse_write_header(
   corrupt:
     recv_sys->found_corrupt_log = TRUE;
 
-    return (NULL);
+    return (nullptr);
   }
 
   if (end_ptr < ptr + len) {
-    return (NULL);
+    return (nullptr);
   }
 
   if (page) {
@@ -2502,14 +2497,14 @@ byte *page_zip_parse_write_header(
       goto corrupt;
     }
 #ifdef UNIV_ZIP_DEBUG
-    ut_a(page_zip_validate(page_zip, page, NULL));
+    ut_a(page_zip_validate(page_zip, page, nullptr));
 #endif /* UNIV_ZIP_DEBUG */
 
     memcpy(page + offset, ptr, len);
     memcpy(page_zip->data + offset, ptr, len);
 
 #ifdef UNIV_ZIP_DEBUG
-    ut_a(page_zip_validate(page_zip, page, NULL));
+    ut_a(page_zip_validate(page_zip, page, nullptr));
 #endif /* UNIV_ZIP_DEBUG */
   }
 
@@ -2524,7 +2519,6 @@ void page_zip_write_header_log(
     ulint length,     /*!< in: length of the data */
     mtr_t *mtr)       /*!< in: mini-transaction */
 {
-  byte *log_ptr = mlog_open(mtr, 11 + 1 + 1);
   ulint offset = page_offset(data);
 
   ut_ad(offset < PAGE_DATA);
@@ -2534,8 +2528,9 @@ void page_zip_write_header_log(
 
   ut_ad(length < 256);
 
+  byte *log_ptr = nullptr;
   /* If no logging is requested, we may return now */
-  if (UNIV_UNLIKELY(!log_ptr)) {
+  if (!mlog_open(mtr, 11 + 1 + 1, log_ptr)) {
     return;
   }
 
@@ -2618,7 +2613,7 @@ ibool page_zip_reorganize(
   if (!index->is_clustered() && page_is_leaf(temp_page)) {
     /* Copy max trx id to recreated page */
     trx_id_t max_trx_id = page_get_max_trx_id(temp_page);
-    page_set_max_trx_id(block, NULL, max_trx_id, NULL);
+    page_set_max_trx_id(block, nullptr, max_trx_id, nullptr);
     ut_ad(max_trx_id != 0);
   }
 
@@ -2737,12 +2732,12 @@ byte *page_zip_parse_compress(
   ulint size;
   ulint trailer_size;
 
-  ut_ad(ptr != NULL);
-  ut_ad(end_ptr != NULL);
+  ut_ad(ptr != nullptr);
+  ut_ad(end_ptr != nullptr);
   ut_ad(!page == !page_zip);
 
   if (UNIV_UNLIKELY(ptr + (2 + 2) > end_ptr)) {
-    return (NULL);
+    return (nullptr);
   }
 
   size = mach_read_from_2(ptr);
@@ -2751,7 +2746,7 @@ byte *page_zip_parse_compress(
   ptr += 2;
 
   if (UNIV_UNLIKELY(ptr + 8 + size + trailer_size > end_ptr)) {
-    return (NULL);
+    return (nullptr);
   }
 
   if (page) {
@@ -2759,7 +2754,7 @@ byte *page_zip_parse_compress(
     corrupt:
       recv_sys->found_corrupt_log = TRUE;
 
-      return (NULL);
+      return (nullptr);
     }
 
     memcpy(page_zip->data + FIL_PAGE_PREV, ptr, 4);

@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -32,14 +32,17 @@
 
 #include "my_dbug.h"
 #include "my_inttypes.h"
+#include "my_murmur3.h"
 #include "my_sys.h"
 #include "mysql/components/services/log_shared.h"
 #include "mysqld_error.h"
 #include "sql/dd/cache/dictionary_client.h"  // dd::cache::Dictionary_client
 #include "sql/dd/dd_table.h"                 // dd::table_storage_engine
+#include "sql/dd/properties.h"               // dd::Properties
 #include "sql/dd/types/abstract_table.h"     // dd::Abstract_table
 #include "sql/dd/types/table.h"              // dd::Table
 #include "sql/dd_sql_view.h"                 // View_metadata_updater
+#include "sql/derror.h"                      // ER_THD
 #include "sql/handler.h"
 #include "sql/log.h"          // query_logger
 #include "sql/mysqld.h"       // lower_case_table_names
@@ -63,11 +66,81 @@ class Schema;
 typedef std::set<handlerton *> post_ddl_htons_t;
 
 static TABLE_LIST *rename_tables(
-    THD *thd, TABLE_LIST *table_list, bool skip_error, bool *int_commit_done,
+    THD *thd, TABLE_LIST *table_list, bool *int_commit_done,
     post_ddl_htons_t *post_ddl_htons,
     Foreign_key_parents_invalidator *fk_invalidator);
 
 static TABLE_LIST *reverse_table_list(TABLE_LIST *table_list);
+
+namespace {
+struct table_list_hash {
+  size_t operator()(const TABLE_LIST *table) const {
+    return static_cast<size_t>(murmur3_32(table->mdl_request.key.ptr(),
+                                          table->mdl_request.key.length(), 0));
+  }
+};
+
+struct table_list_equal {
+  bool operator()(const TABLE_LIST *a, const TABLE_LIST *b) const {
+    return a->mdl_request.key.is_equal(&b->mdl_request.key);
+  }
+};
+}  // namespace
+
+/**
+  Check if connection owns SNRW metadata lock on table or view.
+  Report apropriate error if not.
+
+  @note Unlike find_table_for_mdl_upgrade() this call can handle views.
+*/
+
+static bool check_if_owns_upgradable_mdl(THD *thd, const char *db,
+                                         const char *table_name) {
+  if (thd->mdl_context.owns_equal_or_stronger_lock(
+          MDL_key::TABLE, db, table_name, MDL_SHARED_NO_READ_WRITE))
+    return false;  // Success.
+
+  if (thd->mdl_context.owns_equal_or_stronger_lock(
+          MDL_key::TABLE, db, table_name, MDL_SHARED_READ_ONLY))
+    my_error(ER_TABLE_NOT_LOCKED_FOR_WRITE, MYF(0), table_name);
+  else
+    my_error(ER_TABLE_NOT_LOCKED, MYF(0), table_name);
+  return true;  // Failure.
+}
+
+/**
+  Find metadata lock request for table's schema in the set of schema
+  requests and set duration of corresponding lock to explicit.
+
+  @note We assume that there are no duplicate schemata in schema_reqs
+        array.
+*/
+
+static void find_and_set_explicit_duration_for_schema_mdl(
+    THD *thd, TABLE_LIST *table,
+    Prealloced_array<MDL_request *, 1> *schema_reqs) {
+  auto same_db = [table](const MDL_request *mdl_request) {
+    return table->db_length == mdl_request->key.db_name_length() &&
+           memcmp(table->db, mdl_request->key.db_name(), table->db_length) == 0;
+  };
+
+  auto sch_req =
+      std::find_if(schema_reqs->begin(), schema_reqs->end(), same_db);
+
+  if (sch_req != schema_reqs->end()) {
+    thd->mdl_context.set_lock_duration((*sch_req)->ticket, MDL_EXPLICIT);
+    /*
+      Remove found request by replacing it with the last one.
+
+      This is necessary to avoid setting duration for the same schema ticket
+      twice and also to speed up further calls to this function.
+    */
+    *sch_req = schema_reqs->back();
+    schema_reqs->pop_back();
+  } else {
+    // We must have handled this schema already.
+  }
+}
 
 /**
   Rename tables from the list.
@@ -80,18 +153,8 @@ static TABLE_LIST *reverse_table_list(TABLE_LIST *table_list);
 */
 
 bool mysql_rename_tables(THD *thd, TABLE_LIST *table_list) {
-  TABLE_LIST *ren_table = 0;
-  DBUG_ENTER("mysql_rename_tables");
-
-  /*
-    Avoid problems with a rename on a table that we have locked or
-    if the user is trying to to do this in a transcation context
-  */
-
-  if (thd->locked_tables_mode || thd->in_active_multi_stmt_transaction()) {
-    my_error(ER_LOCK_OR_ACTIVE_TRANSACTION, MYF(0));
-    DBUG_RETURN(1);
-  }
+  TABLE_LIST *ren_table = nullptr;
+  DBUG_TRACE;
 
   mysql_ha_rm_tables(thd, table_list);
 
@@ -105,7 +168,7 @@ bool mysql_rename_tables(THD *thd, TABLE_LIST *table_list) {
   if (query_logger.is_log_table_enabled(QUERY_LOG_GENERAL) ||
       query_logger.is_log_table_enabled(QUERY_LOG_SLOW)) {
     int to_table;
-    const char *rename_log_table[2] = {NULL, NULL};
+    const char *rename_log_table[2] = {nullptr, nullptr};
 
     /*
       Rules for rename of a log table:
@@ -131,7 +194,7 @@ bool mysql_rename_tables(THD *thd, TABLE_LIST *table_list) {
         log_table_rename--;
         if (rename_log_table[log_table_rename]) {
           if (to_table)
-            rename_log_table[log_table_rename] = NULL;
+            rename_log_table[log_table_rename] = nullptr;
           else {
             /*
               Two renames of "log_table TO" w/o rename "TO log_table" in
@@ -139,7 +202,7 @@ bool mysql_rename_tables(THD *thd, TABLE_LIST *table_list) {
             */
             my_error(ER_CANT_RENAME_LOG_TABLE, MYF(0), ren_table->table_name,
                      ren_table->table_name);
-            DBUG_RETURN(true);
+            return true;
           }
         } else {
           if (to_table) {
@@ -149,7 +212,7 @@ bool mysql_rename_tables(THD *thd, TABLE_LIST *table_list) {
             */
             my_error(ER_CANT_RENAME_LOG_TABLE, MYF(0), ren_table->table_name,
                      ren_table->table_name);
-            DBUG_RETURN(true);
+            return true;
           } else {
             /* save the name of the log table to report an error */
             rename_log_table[log_table_rename] = ren_table->table_name;
@@ -164,40 +227,104 @@ bool mysql_rename_tables(THD *thd, TABLE_LIST *table_list) {
       else
         my_error(ER_CANT_RENAME_LOG_TABLE, MYF(0), rename_log_table[1],
                  rename_log_table[1]);
-      DBUG_RETURN(true);
+      return true;
     }
   }
 
-  if (lock_table_names(thd, table_list, 0, thd->variables.lock_wait_timeout,
-                       0) ||
+  /*
+    Array in which pointers to MDL requests for acquired schema locks are
+    stored. Each schema can be present in this array only once.
+  */
+  Prealloced_array<MDL_request *, 1> schema_reqs(PSI_INSTRUMENT_ME);
+
+  if (thd->locked_tables_mode) {
+    /*
+      LOCK TABLES case.
+
+      Check that tables to be renamed are locked for WRITE. Take into
+      account that name of table to be renamed might be result of some
+      previous step in multi-step RENAME TABLES.
+
+      In theory, we could disregard whether they locked or not and just try
+      to acquire exclusive metadata locks on them, but this is too deadlock
+      prone.
+
+      Most probably, there is no tables which correspond to target table
+      names, so similar check doesn't make sense for them.
+
+      In theory, we can reduce chance of MDL deadlocks by also checking at
+      this stage that all child and parent tables for FKs in which tables
+      to be renamed participate are locked for WRITE (as we will have to
+      acquire to exclusive MDLs on these tables later).
+      But this is, probably, too severe restriction which will make
+      RENAMES TABLES under LOCK TABLES hard to use in 3rd-party online
+      ALTER TABLE tools.
+    */
+    malloc_unordered_set<TABLE_LIST *, table_list_hash, table_list_equal>
+        new_names(PSI_INSTRUMENT_ME);
+
+    TABLE_LIST *new_table;
+    for (ren_table = table_list; ren_table; ren_table = new_table->next_local) {
+      new_table = ren_table->next_local;
+
+      auto new_name_it = new_names.find(ren_table);
+      if (new_name_it == new_names.end()) {
+        if (check_if_owns_upgradable_mdl(thd, ren_table->db,
+                                         ren_table->table_name))
+          return true;
+      } else {
+        new_names.erase(new_name_it);
+      }
+      new_names.insert(new_table);
+    }
+
+    /*
+      Now proceed to acquiring exclusive metadata locks on both source and
+      target table names as well as necessary schema, global and backup locks.
+      Since we already have SNRW locks on source table names, we, in fact, are
+      upgrading locks for them.
+    */
+  }
+
+  if (lock_table_names(thd, table_list, nullptr,
+                       thd->variables.lock_wait_timeout, 0, &schema_reqs) ||
       lock_trigger_names(thd, table_list))
-    DBUG_RETURN(true);
+    return true;
 
   const dd::Table *table_def = nullptr;
-  TABLE_LIST *table;
-  for (table = table_list; table && table->next_local;
+  for (TABLE_LIST *table = table_list; table && table->next_local;
        table = table->next_local) {
     if (thd->dd_client()->acquire(table->db, table->table_name, &table_def)) {
       return true;
     }
     if (table_def && table_def->hidden() == dd::Abstract_table::HT_HIDDEN_SE) {
       my_error(ER_NO_SUCH_TABLE, MYF(0), table->db, table->table_name);
-      DBUG_RETURN(true);
+      return true;
     }
   }
 
-  for (ren_table = table_list; ren_table; ren_table = ren_table->next_local)
-    tdc_remove_table(thd, TDC_RT_REMOVE_ALL, ren_table->db,
-                     ren_table->table_name, false);
+  for (ren_table = table_list; ren_table; ren_table = ren_table->next_local) {
+    if (thd->locked_tables_mode)
+      close_all_tables_for_name(thd, ren_table->db, ren_table->table_name,
+                                false);
+    else
+      tdc_remove_table(thd, TDC_RT_REMOVE_ALL, ren_table->db,
+                       ren_table->table_name, false);
+  }
   bool error = false;
   bool int_commit_done = false;
+  /*
+    Indicates whether we managed fully revert non-atomic RENAME TABLES
+    after the failure.
+  */
+  bool int_commit_full_revert = false;
   std::set<handlerton *> post_ddl_htons;
   Foreign_key_parents_invalidator fk_invalidator;
   /*
     An exclusive lock on table names is satisfactory to ensure
     no other thread accesses this table.
   */
-  if ((ren_table = rename_tables(thd, table_list, 0, &int_commit_done,
+  if ((ren_table = rename_tables(thd, table_list, &int_commit_done,
                                  &post_ddl_htons, &fk_invalidator))) {
     /* Rename didn't succeed;  rename back the tables in reverse order */
     TABLE_LIST *table;
@@ -211,9 +338,21 @@ bool mysql_rename_tables(THD *thd, TABLE_LIST *table_list) {
            table = table->next_local->next_local)
         ;
       table = table->next_local->next_local;  // Skip error table
-      /* Revert to old names */
-      rename_tables(thd, table, 1, &int_commit_done, &post_ddl_htons,
-                    &fk_invalidator);
+
+      /*
+        Revert to old names. In 5.7 we have ignored most of errors occurring
+        in the process. However, this looks like a risky idea -- by ignoring
+        errors we are likely to end up in some awkward state and not going to
+        restore status quo ante.
+
+        So starting from 8.0 we chose to abort reversal on the first failure.
+        We will still end up in some awkward case in this case but at least
+        no additional damage will be done. Note that since InnoDB tables are
+        new default and this engine supports atomic DDL, non-atomic RENAME
+        TABLES, which this code deals with, is not the main use case anyway.
+      */
+      int_commit_full_revert = !rename_tables(thd, table, &int_commit_done,
+                                              &post_ddl_htons, &fk_invalidator);
 
       /* Revert the table list (for prepared statements) */
       table_list = reverse_table_list(table_list);
@@ -269,9 +408,99 @@ bool mysql_rename_tables(THD *thd, TABLE_LIST *table_list) {
 
   for (handlerton *hton : post_ddl_htons) hton->post_ddl(thd);
 
+  if (thd->locked_tables_mode) {
+    if (!error) {
+      /*
+        Adjust locked tables list and reopen tables under new names.
+        Also calculate sets of metadata locks to release (on old table
+        names) and to keep until UNLOCK TABLES (on new table names).
+
+        In addition to keeping locks on tables we also do the same for
+        schemas in order to keep set of metadata locks consistent with
+        one acquired by LOCK TABLES. We don't release locks on old table
+        schemas as it is non-trivial to figure out which locks can be
+        released.
+
+        Tablespaces do not need special handling though, as metadata locks
+        on them are acquired at LOCK TABLES time and are unaffected by
+        RENAME TABLES.
+      */
+      malloc_unordered_set<TABLE_LIST *, table_list_hash, table_list_equal>
+          to_release(PSI_INSTRUMENT_ME), to_keep(PSI_INSTRUMENT_ME);
+      TABLE_LIST *new_table;
+      for (ren_table = table_list; ren_table;
+           ren_table = new_table->next_local) {
+        new_table = ren_table->next_local;
+        thd->locked_tables_list.rename_locked_table(
+            ren_table, new_table->db, new_table->table_name,
+            new_table->mdl_request.ticket);
+        to_release.insert(ren_table);
+        to_keep.erase(ren_table);
+        to_keep.insert(new_table);
+        to_release.erase(new_table);
+      }
+
+      error = thd->locked_tables_list.reopen_tables(thd);
+
+      for (TABLE_LIST *t : to_release) {
+        // Also releases locks with EXPLICIT duration for the same name.
+        thd->mdl_context.release_all_locks_for_name(t->mdl_request.ticket);
+      }
+
+      for (TABLE_LIST *t : to_keep) {
+        thd->mdl_context.set_lock_duration(t->mdl_request.ticket, MDL_EXPLICIT);
+        t->mdl_request.ticket->downgrade_lock(MDL_SHARED_NO_READ_WRITE);
+        find_and_set_explicit_duration_for_schema_mdl(thd, t, &schema_reqs);
+      }
+    } else if (!int_commit_done || int_commit_full_revert) {
+      /*
+        Error happened but all (actually not quite all, see below) changes
+        were reverted. We just need to reopen tables.
+
+        Since changes were reverted no additional metadata locks need to
+        be kept after statement end. All additional locks acquired by
+        this statement will be released automatically at its end, since
+        they have transactional duration.
+
+        In case of non-atomic RENAME TABLE previously orphan foreign keys
+        which got new parents will keep these parents after reversal, but
+        this is not important in this context.
+      */
+      thd->locked_tables_list.reopen_tables(thd);
+    } else {
+      /*
+        Error happened and we failed to revert all changes. We simply close
+        all tables involved.
+      */
+      thd->locked_tables_list.unlink_all_closed_tables(thd, nullptr, 0);
+      /*
+        We need to keep metadata locks on both old and new table names
+        to avoid breaking foreign key invariants for LOCK TABLES.
+        So we set duration of locks on new names to explicit and downgrade
+        them from X to SNRW metadata locks. Also keep locks for new schemas.
+
+        Prune list of duplicates first as setting explicit duration for the
+        same MDL ticket twice is disallowed.
+      */
+      malloc_unordered_set<TABLE_LIST *, table_list_hash, table_list_equal>
+          to_keep(PSI_INSTRUMENT_ME);
+      TABLE_LIST *new_table;
+      for (ren_table = table_list; ren_table;
+           ren_table = new_table->next_local) {
+        new_table = ren_table->next_local;
+        to_keep.insert(new_table);
+      }
+      for (TABLE_LIST *t : to_keep) {
+        thd->mdl_context.set_lock_duration(t->mdl_request.ticket, MDL_EXPLICIT);
+        t->mdl_request.ticket->downgrade_lock(MDL_SHARED_NO_READ_WRITE);
+        find_and_set_explicit_duration_for_schema_mdl(thd, t, &schema_reqs);
+      }
+    }
+  }
+
   if (!error) my_ok(thd);
 
-  DBUG_RETURN(error);
+  return error;
 }
 
 /*
@@ -285,7 +514,7 @@ bool mysql_rename_tables(THD *thd, TABLE_LIST *table_list) {
     pointer to new (reversed) list
 */
 static TABLE_LIST *reverse_table_list(TABLE_LIST *table_list) {
-  TABLE_LIST *prev = 0;
+  TABLE_LIST *prev = nullptr;
 
   while (table_list) {
     TABLE_LIST *next = table_list->next_local;
@@ -305,7 +534,6 @@ static TABLE_LIST *reverse_table_list(TABLE_LIST *table_list) {
                                     table to be moved to.
   @param[in]      new_table_name    The new table/view name.
   @param[in]      new_table_alias   The new table/view alias.
-  @param[in]      skip_error        Whether to skip errors.
   @param[in,out]  int_commit_done   Whether intermediate commits
                                     were done.
   @param[in,out]  post_ddl_htons    Set of SEs supporting atomic DDL
@@ -322,13 +550,13 @@ static TABLE_LIST *reverse_table_list(TABLE_LIST *table_list) {
 
 static bool do_rename(THD *thd, TABLE_LIST *ren_table, const char *new_db,
                       const char *new_table_name, const char *new_table_alias,
-                      bool skip_error, bool *int_commit_done,
+                      bool *int_commit_done,
                       std::set<handlerton *> *post_ddl_htons,
                       Foreign_key_parents_invalidator *fk_invalidator) {
   const char *new_alias = new_table_name;
   const char *old_alias = ren_table->table_name;
 
-  DBUG_ENTER("do_rename");
+  DBUG_TRACE;
 
   if (lower_case_table_names == 2) {
     old_alias = ren_table->alias;
@@ -347,44 +575,43 @@ static bool do_rename(THD *thd, TABLE_LIST *ren_table, const char *new_db,
       thd->dd_client()->acquire(new_db, new_alias, &to_table) ||
       thd->dd_client()->acquire_for_modification(
           ren_table->db, ren_table->table_name, &from_at))
-    DBUG_RETURN(true);  // This error cannot be skipped
+    return true;
 
   if (to_table != nullptr) {
     my_error(ER_TABLE_EXISTS_ERROR, MYF(0), new_alias);
-    DBUG_RETURN(true);  // This error cannot be skipped
+    return true;
   }
 
   if (from_schema == nullptr) {
     my_error(ER_BAD_DB_ERROR, MYF(0), ren_table->db);
-    DBUG_RETURN(!skip_error);
+    return true;
   }
 
   if (to_schema == nullptr) {
     my_error(ER_BAD_DB_ERROR, MYF(0), new_db);
-    DBUG_RETURN(!skip_error);
+    return true;
   }
 
   if (from_at == nullptr) {
     my_error(ER_NO_SUCH_TABLE, MYF(0), ren_table->db, old_alias);
-    DBUG_RETURN(!skip_error);
+    return true;
   }
 
   // So here we know the source table exists and the target table does
   // not exist. Next is to act based on the table type.
   switch (from_at->type()) {
     case dd::enum_table_type::BASE_TABLE: {
-      handlerton *hton = NULL;
+      handlerton *hton = nullptr;
       dd::Table *from_table = dynamic_cast<dd::Table *>(from_at);
       // If the engine is not found, my_error() has already been called
-      if (dd::table_storage_engine(thd, from_table, &hton))
-        DBUG_RETURN(!skip_error);
+      if (dd::table_storage_engine(thd, from_table, &hton)) return true;
 
       if ((hton->flags & HTON_SUPPORTS_ATOMIC_DDL) && (hton->post_ddl))
         post_ddl_htons->insert(hton);
 
       if (check_table_triggers_are_not_in_the_same_schema(ren_table->db,
                                                           *from_table, new_db))
-        DBUG_RETURN(!skip_error);
+        return true;
 
       // The below code assumes that only SE capable of atomic DDL support FK.
       DBUG_ASSERT(!(hton->flags & HTON_SUPPORTS_FOREIGN_KEYS) ||
@@ -398,6 +625,42 @@ static bool do_rename(THD *thd, TABLE_LIST *ren_table, const char *new_db,
         invariant.
       */
       DBUG_ASSERT(!(*int_commit_done) || fk_invalidator->is_empty());
+
+      // Find if table uses general tablespace and is it encrypted.
+      bool is_general_tablespace = false;
+      bool is_table_encrypted = false;
+      dd::Encrypt_result new_er =
+          dd::is_tablespace_encrypted(thd, *from_table, &is_general_tablespace);
+      if (new_er.error) {
+        return true;
+      }
+      is_table_encrypted = new_er.value;
+      if (!is_general_tablespace &&
+          from_table->options().exists("encrypt_type")) {
+        dd::String_type et;
+        (void)from_table->options().get("encrypt_type", &et);
+        DBUG_ASSERT(et.empty() == false);
+        is_table_encrypted = is_encrypted(et);
+      }
+
+      /*
+        Check if we are allowed to move the table, if destination schema
+        is changed and its default encryption differs from tables
+        encryption type.
+      */
+      if (from_schema->id() != to_schema->id() &&
+          to_schema->default_encryption() != is_table_encrypted) {
+        if (opt_table_encryption_privilege_check) {
+          if (check_table_encryption_admin_access(thd)) {
+            my_error(ER_CANNOT_SET_TABLE_ENCRYPTION, MYF(0));
+            return true;
+          }
+        } else if (to_schema->default_encryption() && !is_table_encrypted) {
+          push_warning(thd, Sql_condition::SL_WARNING,
+                       WARN_UNENCRYPTED_TABLE_IN_ENCRYPTED_DB,
+                       ER_THD(thd, WARN_UNENCRYPTED_TABLE_IN_ENCRYPTED_DB));
+        }
+      }
 
       /*
         Obtain exclusive metadata lock on all tables being referenced by the
@@ -419,11 +682,41 @@ static bool do_rename(THD *thd, TABLE_LIST *ren_table, const char *new_db,
       */
       if (hton->flags & HTON_SUPPORTS_FOREIGN_KEYS) {
         /*
-          RENAME TABLES is prohibited under LOCK TABLES. So we don't need to
-          handle LOCK TABLES case here by disallowing situations in which
-          table being renamed will become parent for some orphan child tables.
+          If we are under LOCK TABLES check that all previously orphan tables
+          which reference new table  name through foreign keys are locked for
+          write. Otherwise this ALTER will leave after itself parent table
+          locked for WRITE without child tables locked for WRITE. This will
+          break FK LOCK TABLES invariants if some of previously orphan FKs
+          have referential actions which update child table.
+
+          Note that doing this check at earlier phase is possible but seems
+          to be tricky since determining orphans can be non-trivial task in
+          case of multi-step RENAME TABLES statement.
         */
-        DBUG_ASSERT(thd->locked_tables_mode != LTM_LOCK_TABLES);
+        if (thd->locked_tables_mode == LTM_LOCK_TABLES ||
+            thd->locked_tables_mode == LTM_PRELOCKED_UNDER_LOCK_TABLES) {
+          MDL_request_list orphans_mdl_requests;
+          if (collect_fk_children(thd, new_db, new_alias, hton, MDL_EXCLUSIVE,
+                                  &orphans_mdl_requests)) {
+            // See explanation for clearing foreign key invalidator below.
+            fk_invalidator->clear();
+            return true;
+          }
+
+          MDL_request_list::Iterator it(orphans_mdl_requests);
+          MDL_request *mdl_request;
+
+          while ((mdl_request = it++) != nullptr) {
+            if (mdl_request->key.mdl_namespace() != MDL_key::TABLE) continue;
+
+            if (check_if_owns_upgradable_mdl(thd, mdl_request->key.db_name(),
+                                             mdl_request->key.name())) {
+              // See explanation for clearing foreign key invalidator below.
+              fk_invalidator->clear();
+              return true;
+            }
+          }
+        }
 
         if (collect_and_lock_fk_tables_for_rename_table(
                 thd, ren_table->db, old_alias, from_table, new_db, new_alias,
@@ -439,9 +732,13 @@ static bool do_rename(THD *thd, TABLE_LIST *ren_table, const char *new_db,
             happen. So it is safe to clear invalidator.
           */
           fk_invalidator->clear();
-          DBUG_RETURN(!skip_error);
+          return true;
         }
       }
+
+      if (lock_check_constraint_names_for_rename(thd, ren_table->db, old_alias,
+                                                 from_table, new_db, new_alias))
+        return true;
 
       /*
         We commit changes to data-dictionary immediately after renaming
@@ -457,8 +754,6 @@ static bool do_rename(THD *thd, TABLE_LIST *ren_table, const char *new_db,
         update the cached FK parent information upon next acquisition.
 
         If renaming fails, my_error() has already been called
-
-        QQ: Think about (!skip_error)
       */
       if (mysql_rename_table(
               thd, hton, ren_table->db, old_alias, ren_table->db, old_alias,
@@ -472,7 +767,7 @@ static bool do_rename(THD *thd, TABLE_LIST *ren_table, const char *new_db,
           the above changes we need to clean-up them before returning.
         */
         if (*int_commit_done && (hton->flags & HTON_SUPPORTS_ATOMIC_DDL)) {
-          Disable_gtid_state_update_guard disabler(thd);
+          Implicit_substatement_state_guard substatement_guard(thd);
           trans_rollback_stmt(thd);
           // Full rollback in case we have THD::transaction_rollback_request.
           trans_rollback(thd);
@@ -482,7 +777,7 @@ static bool do_rename(THD *thd, TABLE_LIST *ren_table, const char *new_db,
           */
           fk_invalidator->clear();
         }
-        DBUG_RETURN(!skip_error);
+        return true;
       }
 
       /*
@@ -490,7 +785,7 @@ static bool do_rename(THD *thd, TABLE_LIST *ren_table, const char *new_db,
         rename and changes to FK we need to do it now.
       */
       if (*int_commit_done && (hton->flags & HTON_SUPPORTS_ATOMIC_DDL)) {
-        Disable_gtid_state_update_guard disabler(thd);
+        Implicit_substatement_state_guard substatement_guard(thd);
 
         if (trans_commit_stmt(thd) || trans_commit(thd)) {
           /*
@@ -498,7 +793,7 @@ static bool do_rename(THD *thd, TABLE_LIST *ren_table, const char *new_db,
             step of non-atomic RENAME TABLE.
           */
           fk_invalidator->clear();
-          DBUG_RETURN(!skip_error);
+          return true;
         }
       }
 
@@ -530,11 +825,11 @@ static bool do_rename(THD *thd, TABLE_LIST *ren_table, const char *new_db,
       // Changing the schema of a view is not allowed.
       if (strcmp(ren_table->db, new_db)) {
         my_error(ER_FORBID_SCHEMA_CHANGE, MYF(0), ren_table->db, new_db);
-        DBUG_RETURN(!skip_error);
+        return true;
       }
 
       /* Rename view in the data-dictionary. */
-      Disable_gtid_state_update_guard disabler(thd);
+      Implicit_substatement_state_guard substatement_guard(thd);
 
       // Set schema id and view name.
       from_at->set_name(new_alias);
@@ -546,12 +841,11 @@ static bool do_rename(THD *thd, TABLE_LIST *ren_table, const char *new_db,
           // Full rollback in case we have THD::transaction_rollback_request.
           trans_rollback(thd);
         }
-        DBUG_RETURN(!skip_error);
+        return true;
       }
 
       if (*int_commit_done) {
-        if (trans_commit_stmt(thd) || trans_commit(thd))
-          DBUG_RETURN(!skip_error);
+        if (trans_commit_stmt(thd) || trans_commit(thd)) return true;
       }
 
       sp_cache_invalidate();
@@ -565,7 +859,7 @@ static bool do_rename(THD *thd, TABLE_LIST *ren_table, const char *new_db,
   thd->add_to_binlog_accessed_dbs(ren_table->db);
   thd->add_to_binlog_accessed_dbs(new_db);
 
-  DBUG_RETURN(false);
+  return false;
 }
 /*
   Rename all tables in list;
@@ -578,7 +872,6 @@ static bool do_rename(THD *thd, TABLE_LIST *ren_table, const char *new_db,
 
   @param[in]      thd               Thread handle.
   @param[in]      table_list        List of tables to rename.
-  @param[in]      skip_error        Whether to skip errors.
   @param[in,out]  int_commit_done   Whether intermediate commits
                                     were done.
   @param[in,out]  post_ddl_htons    Set of SEs supporting atomic DDL
@@ -600,21 +893,21 @@ static bool do_rename(THD *thd, TABLE_LIST *ren_table, const char *new_db,
 */
 
 static TABLE_LIST *rename_tables(
-    THD *thd, TABLE_LIST *table_list, bool skip_error, bool *int_commit_done,
+    THD *thd, TABLE_LIST *table_list, bool *int_commit_done,
     post_ddl_htons_t *post_ddl_htons,
     Foreign_key_parents_invalidator *fk_invalidator)
 
 {
   TABLE_LIST *ren_table, *new_table;
 
-  DBUG_ENTER("rename_tables");
+  DBUG_TRACE;
 
   for (ren_table = table_list; ren_table; ren_table = new_table->next_local) {
     new_table = ren_table->next_local;
     if (do_rename(thd, ren_table, new_table->db, new_table->table_name,
-                  new_table->alias, skip_error, int_commit_done, post_ddl_htons,
+                  new_table->alias, int_commit_done, post_ddl_htons,
                   fk_invalidator))
-      DBUG_RETURN(ren_table);
+      return ren_table;
   }
-  DBUG_RETURN(0);
+  return nullptr;
 }

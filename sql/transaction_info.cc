@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2013, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -29,7 +29,6 @@
 #include "sql/derror.h"            // ER_THD
 #include "sql/mysqld.h"            // global_system_variables
 #include "sql/psi_memory_key.h"    // key_memory_thd_transactions
-#include "sql/sql_class.h"         // THD_STAGE_INFO
 #include "sql/sql_error.h"         // Sql_condition
 #include "sql/system_variables.h"  // System_variables
 #include "sql/thr_malloc.h"
@@ -41,12 +40,13 @@ struct CHANGED_TABLE_LIST {
 };
 
 Transaction_ctx::Transaction_ctx()
-    : m_savepoints(NULL),
+    : m_savepoints(nullptr),
       m_xid_state(),
       last_committed(0),
       sequence_number(0),
       m_rpl_transaction_ctx(),
-      m_transaction_write_set_ctx() {
+      m_transaction_write_set_ctx(),
+      trans_begin_hook_invoked(false) {
   memset(&m_scope_info, 0, sizeof(m_scope_info));
   memset(&m_flags, 0, sizeof(m_flags));
   init_sql_alloc(key_memory_thd_transactions, &m_mem_root,

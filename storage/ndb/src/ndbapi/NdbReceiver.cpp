@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -517,13 +517,19 @@ Uint32 packed_rowsize(const NdbRecord *result_record,
   Uint32 bitPos = 0;
   const Uint8 *pos = NULL;
 
+  bool pk_is_known = false;
   if (likely(result_record != NULL))
   {
     for (Uint32 i= 0; i<result_record->noOfColumns; i++)
     {
       const NdbRecord::Attr *col= &result_record->columns[i];
+      const bool is_pk= (col->flags & NdbRecord::IsKey);
       const Uint32 attrId= col->attrId;
 
+      if (is_pk)
+      {
+        pk_is_known = true;
+      }
       /* Skip column if result_mask says so and we don't need
        * to read it 
        */
@@ -556,7 +562,12 @@ Uint32 packed_rowsize(const NdbRecord *result_record,
   // variable size bitmask the 'packed' columns and their null bits.
   if (sizeInWords > 0)
   {
-    const Uint32 attrCount= result_record->columns[result_record->noOfColumns -1].attrId+1;
+    Uint32 attrCount= result_record->columns[result_record->noOfColumns -1].attrId+1;
+    if (! pk_is_known)
+    {
+      // Hidden key column is still present in bitmask
+      attrCount++;
+    }
     const Uint32 sigBitmaskWords= ((attrCount+nullCount+31)>>5);
     sizeInWords += (1+sigBitmaskWords);   //AttrHeader + bitMask
   }
@@ -1005,14 +1016,14 @@ NdbReceiver::unpackNdbRecord(const NdbRecord *rec,
 #define rpn_next_index(bm_index) ((bm_index) & 0xFFFF)
 #define rpn_zero_bitPos(bm_index) \
 { \
-  register Uint64 tmp_bitPos_next_index = bm_index; \
+  Uint64 tmp_bitPos_next_index = bm_index; \
   tmp_bitPos_next_index <<= 16; \
   tmp_bitPos_next_index >>= 16; \
   bm_index = tmp_bitPos_next_index; \
 }
 #define rpn_set_bitPos(bm_index, bitPos) \
 { \
-  register Uint64 tmp_bitPos_next_index = bm_index; \
+  Uint64 tmp_bitPos_next_index = bm_index; \
   tmp_bitPos_next_index <<= 16; \
   tmp_bitPos_next_index >>= 16; \
   tmp_bitPos_next_index += (Uint64(bitPos) << 48); \
@@ -1020,8 +1031,8 @@ NdbReceiver::unpackNdbRecord(const NdbRecord *rec,
 }
 #define rpn_set_next_index(bm_index, val_next_index) \
 { \
-  register Uint64 tmp_2_bitPos_next_index = Uint64(val_next_index); \
-  register Uint64 tmp_1_bitPos_next_index = bm_index; \
+  Uint64 tmp_2_bitPos_next_index = Uint64(val_next_index); \
+  Uint64 tmp_1_bitPos_next_index = bm_index; \
   tmp_1_bitPos_next_index >>= 16; \
   tmp_1_bitPos_next_index <<= 16; \
   tmp_2_bitPos_next_index &= 0xFFFF; \
@@ -1037,7 +1048,7 @@ NdbReceiver::unpackNdbRecord(const NdbRecord *rec,
   */
 
   assert(bmlen <= 0x07FF);
-  register const Uint8 *src = (Uint8*)(aDataPtr + bmlen);
+  const Uint8 *src = (Uint8*)(aDataPtr + bmlen);
   Uint32 noOfCols = rec->noOfColumns;
   const NdbRecord::Attr* max_col = &rec->columns[noOfCols - 1];
 
@@ -1052,7 +1063,7 @@ NdbReceiver::unpackNdbRecord(const NdbRecord *rec,
    * bmlen initialised
    * bmSize is always bmlen / 32
    */
-  register Uint64 bitPos_next_index =
+  Uint64 bitPos_next_index =
     rpn_pack_bitPos_next_index(0, bmlen, rec->m_attrId_indexes[0]);
 
   /**
@@ -1062,7 +1073,7 @@ NdbReceiver::unpackNdbRecord(const NdbRecord *rec,
    * attrId set to 0
    * maxAttrId initialised
    */
-  for (register Uint64 i_attrId = rpn_pack_attrId(0, 0, maxAttrId) ;
+  for (Uint64 i_attrId = rpn_pack_attrId(0, 0, maxAttrId) ;
        (rpn_bit_index(i_attrId) < rpn_bmSize(bitPos_next_index)) &&
         (rpn_attrId(i_attrId) <= rpn_maxAttrId(i_attrId));
         i_attrId += (rpn_inc_attrId() + rpn_inc_bit_index()))
@@ -1423,7 +1434,10 @@ NdbReceiver::execTRANSID_AI(const Uint32* aDataPtr, Uint32 aLength)
   if (m_recv_buffer != NULL)
   {
     Uint32 *row_recv = m_recv_buffer->allocRow(aLength);
-    memcpy(row_recv, aDataPtr, aLength*sizeof(Uint32));
+    if (likely(aLength > 0))
+    {
+      memcpy(row_recv, aDataPtr, aLength*sizeof(Uint32));
+    }
   }
   else
   {

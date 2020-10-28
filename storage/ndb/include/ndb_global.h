@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2004, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2004, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -31,7 +31,6 @@
 #include <stdio.h>
 #include "my_dbug.h"
 #include "my_inttypes.h"
-#include "my_systime.h"
 #include <mysql/service_mysql_alloc.h>
 #ifdef HAVE_UNISTD_H
 #include <unistd.h>
@@ -81,6 +80,7 @@
 
 #ifdef _WIN32
 #define DIR_SEPARATOR "\\"
+#include <my_systime.h>
 #else
 #define DIR_SEPARATOR "/"
 #endif
@@ -131,9 +131,6 @@
 #endif
 #endif
 
-#include "m_ctype.h"
-#include <ctype.h>
-
 #ifdef HAVE_STDARG_H
 #include <stdarg.h>
 #endif
@@ -162,10 +159,6 @@
 
 #ifdef HAVE_SYS_MMAN_H
 #include <sys/mman.h>
-#endif
-
-#ifndef HAVE_STRDUP
-extern char * strdup(const char *s);
 #endif
 
 static const char table_name_separator =  '/';
@@ -218,6 +211,7 @@ extern "C" {
 #endif
 
 #define NDB_O_DIRECT_WRITE_ALIGNMENT 512
+#define NDB_O_DIRECT_WRITE_BLOCKSIZE 4096
 
 #ifndef STATIC_ASSERT
 #if defined VM_TRACE
@@ -270,15 +264,6 @@ extern "C" {
 #endif
 
 /**
- *  MY_ATTRIBUTE((noreturn)) was introduce in gcc 2.5
- */
-#ifdef __GNUC__
-#define ATTRIBUTE_NORETURN MY_ATTRIBUTE((noreturn))
-#else
-#define ATTRIBUTE_NORETURN
-#endif
-
-/**
  *  MY_ATTRIBUTE((noinline)) was introduce in gcc 3.1
  */
 #ifdef __GNUC__
@@ -313,9 +298,11 @@ extern "C" {
  */
 typedef int(*RequirePrinter)(const char *fmt, ...)
   ATTRIBUTE_FORMAT(printf, 1, 2);
-void require_failed(int exitcode, RequirePrinter p,
-                    const char* expr, const char* file, int line)
-                    ATTRIBUTE_NORETURN;
+[[noreturn]] void require_failed(int exitcode,
+                                 RequirePrinter p,
+                                 const char* expr,
+                                 const char* file,
+                                 int line);
 int ndbout_printer(const char * fmt, ...)
   ATTRIBUTE_FORMAT(printf, 1, 2);
 /*
@@ -396,7 +383,7 @@ SegmentedSectionPtrPOD::assign(struct SegmentedSectionPtr& src)
 #ifdef __cplusplus
 struct GenericSectionIterator
 {
-  virtual ~GenericSectionIterator() {};
+  virtual ~GenericSectionIterator() {}
   virtual void reset()=0;
   virtual const Uint32* getNextWords(Uint32& sz)=0;
 };

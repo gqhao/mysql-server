@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -43,15 +43,18 @@ class CPCDAPISession : public SocketServer::Session {
   Vector<int> m_temporaryProcesses;
 
   void printProperty(Properties *prop, const char *key);
+  void printLongString(const char *key, const char *value);
 
  public:
   CPCDAPISession(NDB_SOCKET_TYPE, class CPCD &);
   CPCDAPISession(FILE *f, CPCD &cpcd);
-  ~CPCDAPISession();
+  ~CPCDAPISession() override;
 
-  virtual void runSession();
-  virtual void stopSession();
+  void runSession() override;
+  void stopSession() override;
   void loadFile();
+
+  uintptr_t getSessionid() const { return reinterpret_cast<uintptr_t>(this); }
 
   void defineProcess(Parser_t::Context &ctx, const class Properties &args);
   void undefineProcess(Parser_t::Context &ctx, const class Properties &args);
@@ -71,7 +74,7 @@ class CPCDAPIService : public SocketServer::Service {
  public:
   CPCDAPIService(class CPCD &cpcd) : m_cpcd(cpcd) {}
 
-  CPCDAPISession *newSession(NDB_SOCKET_TYPE theSock) {
+  CPCDAPISession *newSession(NDB_SOCKET_TYPE theSock) override {
     return new CPCDAPISession(theSock, m_cpcd);
   }
 };

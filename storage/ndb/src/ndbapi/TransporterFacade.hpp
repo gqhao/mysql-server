@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -48,6 +48,7 @@ class trp_client;
 extern "C" {
   void* runSendRequest_C(void*);
   void* runReceiveResponse_C(void*);
+  void* runWakeupThread_C(void*);
 }
 
 class TransporterFacade :
@@ -62,7 +63,7 @@ public:
   STATIC_CONST( MAX_NO_THREADS = 4711 );
   STATIC_CONST( MAX_LOCKED_CLIENTS = 256 );
   TransporterFacade(GlobalDictCache *cache);
-  virtual ~TransporterFacade();
+  ~TransporterFacade() override;
 
   int start_instance(NodeId, const ndb_mgm_configuration*);
   void stop_instance();
@@ -95,6 +96,11 @@ public:
 
   // Only sends to nodes which are alive
 private:
+   template<typename SectionPtr>
+   void handle_message_too_big(NodeId,
+                              const NdbApiSignal*,
+                              const SectionPtr[],
+                              Uint32) const;
   int sendSignal(trp_client*, const NdbApiSignal *, NodeId nodeId);
   int sendSignal(trp_client*, const NdbApiSignal*, NodeId,
                  const LinearSectionPtr ptr[3], Uint32 secs);
@@ -115,7 +121,7 @@ public:
    * These are functions used by ndb_mgmd
    */
   void ext_set_max_api_reg_req_interval(Uint32 ms);
-  struct in_addr ext_get_connect_address(Uint32 nodeId);
+  struct in6_addr ext_get_connect_address(Uint32 nodeId);
   bool ext_isConnected(NodeId aNodeId);
   void ext_doConnect(int aNodeId);
 
@@ -126,6 +132,7 @@ private:
 
 public:
   Uint32 getMinDbNodeVersion() const;
+  Uint32 getMinApiNodeVersion() const;
 
   // My own processor id
   NodeId ownId() const;
@@ -151,7 +158,7 @@ public:
   void lock_poll_mutex();
   void unlock_poll_mutex();
 
-  TransporterRegistry* get_registry() { return theTransporterRegistry;};
+  TransporterRegistry* get_registry() { return theTransporterRegistry;}
 
 /*
   When a thread has sent its signals and is ready to wait for reception
@@ -231,18 +238,18 @@ public:
   bool deliver_signal(SignalHeader * const header,
                       Uint8 prio,
                       Uint32 * const signalData,
-                      LinearSectionPtr ptr[3]);
+                      LinearSectionPtr ptr[3]) override;
   void handleMissingClnt(const SignalHeader * header,
                          const Uint32 * theData);
 
-  int checkJobBuffer();
-  void reportSendLen(NodeId nodeId, Uint32 count, Uint64 bytes);
-  void reportReceiveLen(NodeId nodeId, Uint32 count, Uint64 bytes);
-  void reportConnect(NodeId nodeId);
-  void reportDisconnect(NodeId nodeId, Uint32 errNo);
+  int checkJobBuffer() override;
+  void reportSendLen(NodeId nodeId, Uint32 count, Uint64 bytes) override;
+  void reportReceiveLen(NodeId nodeId, Uint32 count, Uint64 bytes) override;
+  void reportConnect(NodeId nodeId) override;
+  void reportDisconnect(NodeId nodeId, Uint32 errNo) override;
   void reportError(NodeId nodeId, TransporterError errorCode,
-                   const char *info = 0);
-  void transporter_recv_from(NodeId node);
+                   const char *info = 0) override;
+  void transporter_recv_from(NodeId node) override;
 
   /**
    * Wakeup
@@ -258,7 +265,7 @@ public:
   bool registerForWakeup(trp_client* dozer);
   bool unregisterForWakeup(trp_client* dozer);
   void requestWakeup();
-  void reportWakeup();
+  void reportWakeup() override;
 
 private:
 
@@ -318,17 +325,42 @@ private:
   // Declarations for the receive and send thread
   int  theStopReceive;
   int  theStopSend;
+  int  theStopWakeup;
   Uint32 sendThreadWaitMillisec;
 
   void threadMainSend(void);
   NdbThread* theSendThread;
   void threadMainReceive(void);
   NdbThread* theReceiveThread;
+
+#define MAX_NUM_WAKEUPS 128
+
+  bool transfer_responsibility(trp_client * const *arr,
+                               Uint32 cnt_woken,
+                               Uint32 cnt);
+  void wakeup_and_unlock_calls();
+  void init_cpu_usage(NDB_TICKS currTime);
+  void check_cpu_usage(NDB_TICKS currTime);
+  void calc_recv_thread_wakeup();
+  void remove_trp_client_from_wakeup_list(trp_client*);
+  void threadMainWakeup(void);
+  NdbThread* theWakeupThread;
+
+  NDB_TICKS m_last_cpu_usage_check;
+  Uint64 m_last_recv_thread_cpu_usage_in_micros;
+  Uint32 m_recv_thread_cpu_usage_in_percent;
+  Uint32 m_recv_thread_wakeup;
+  Uint32 m_wakeup_clients_cnt;
+  trp_client *m_wakeup_clients[MAX_NO_THREADS];
+  NdbMutex *m_wakeup_thread_mutex;
+  NdbCondition *m_wakeup_thread_cond;
+
   trp_client* recv_client;
   bool raise_thread_prio();
 
   friend void* runSendRequest_C(void*);
   friend void* runReceiveResponse_C(void*);
+  friend void* runWakeupThread_C(void*);
 
   bool do_connect_mgm(NodeId, const ndb_mgm_configuration*);
 
@@ -351,10 +383,10 @@ private:
       Uint32 m_next;
 
       Client()
-	: m_clnt(NULL), m_next(END_OF_LIST) {};
+	: m_clnt(NULL), m_next(END_OF_LIST) {}
 
       Client(trp_client* clnt, Uint32 next)
-	: m_clnt(clnt), m_next(next) {};
+	: m_clnt(clnt), m_next(next) {}
     };
     Vector<struct Client> m_clients;
 
@@ -444,11 +476,16 @@ public:
    * methods on all clients known by TF to handle theirs thread local
    * send buffers.
    */
-  void enable_send_buffer(NodeId node);
-  void disable_send_buffer(NodeId node);
+  void enable_send_buffer(NodeId nodeId, TrpId trp_id) override;
+  void disable_send_buffer(NodeId nodeId, TrpId trp_id) override;
 
-  Uint32 get_bytes_to_send_iovec(NodeId node, struct iovec *dst, Uint32 max);
-  Uint32 bytes_sent(NodeId node, Uint32 bytes);
+  Uint32 get_bytes_to_send_iovec(NodeId nodeId,
+                                 TrpId trp_id,
+                                 struct iovec *dst,
+                                 Uint32 max) override;
+  Uint32 bytes_sent(NodeId nodeId,
+                    TrpId trp_id,
+                    Uint32 bytes) override;
 
 #ifdef ERROR_INSERT
   void consume_sendbuffer(Uint32 bytes_remain);
@@ -537,6 +574,7 @@ private:
   {
     return m_send_buffers[node].m_current_send_buffer_size;
   }
+
   void wakeup_send_thread(void);
   NdbMutex * m_send_thread_mutex;
   NdbCondition * m_send_thread_cond;
@@ -616,6 +654,12 @@ unsigned Ndb_cluster_connection_impl::get_min_db_version() const
 }
 
 inline
+unsigned Ndb_cluster_connection_impl::get_min_api_version() const
+{
+  return m_transporter_facade->getMinApiNodeVersion();
+}
+
+inline
 bool
 TransporterFacade::get_node_alive(NodeId n) const {
   if (theClusterMgr)
@@ -637,6 +681,16 @@ TransporterFacade::getMinDbNodeVersion() const
 {
   if (theClusterMgr)
     return theClusterMgr->minDbVersion;
+  else
+    return 0;
+}
+
+inline
+Uint32
+TransporterFacade::getMinApiNodeVersion() const
+{
+  if (theClusterMgr)
+    return theClusterMgr->minApiVersion;
   else
     return 0;
 }
@@ -671,16 +725,16 @@ public :
     read= false;
   }
 
-  ~LinearSectionIterator()
-  {};
+  ~LinearSectionIterator() override
+  {}
   
-  void reset()
+  void reset() override
   {
     /* Reset iterator */
     read= false;
   }
 
-  const Uint32* getNextWords(Uint32& sz)
+  const Uint32* getNextWords(Uint32& sz) override
   {
     if (likely(!read))
     {
@@ -715,16 +769,16 @@ public :
     firstSignal= currentSignal= signal;
   }
 
-  ~SignalSectionIterator()
-  {};
+  ~SignalSectionIterator() override
+  {}
   
-  void reset()
+  void reset() override
   {
     /* Reset iterator */
     currentSignal= firstSignal;
   }
 
-  const Uint32* getNextWords(Uint32& sz);
+  const Uint32* getNextWords(Uint32& sz) override;
 };
 
 /*

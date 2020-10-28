@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -25,18 +25,21 @@
 // MySQL DB access module, for use by plugins and others
 // For the module that implements interactive DB functionality see mod_db
 
-#ifndef X_CLIENT_MYSQLXCLIENT_XPROTOCOL_H_
-#define X_CLIENT_MYSQLXCLIENT_XPROTOCOL_H_
+#ifndef PLUGIN_X_CLIENT_MYSQLXCLIENT_XPROTOCOL_H_
+#define PLUGIN_X_CLIENT_MYSQLXCLIENT_XPROTOCOL_H_
 
 #include <functional>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
+
+#include "mysqlxclient/xmessage.h"
 
 #include "mysqlxclient/xargument.h"
+#include "mysqlxclient/xcompression.h"
 #include "mysqlxclient/xconnection.h"
 #include "mysqlxclient/xerror.h"
-#include "mysqlxclient/xmessage.h"
 #include "mysqlxclient/xquery_result.h"
 
 #ifdef USE_MYSQLX_FULL_PROTO
@@ -47,6 +50,7 @@
 
 #define XCL_CLIENT_ID_NOT_VALID 0
 #define XCL_SESSION_ID_NOT_VALID 0
+#define XCL_HANDLER_ID_NOT_VALID -1
 
 namespace xcl {
 
@@ -378,6 +382,42 @@ class XProtocol {
                       const std::size_t length) = 0;
 
   /**
+    Serialize, compress and send protobuf message.
+
+    This method compresses 'message', and places it into 'payload'
+    field of `Compression` message. `Compression` message is serialized
+    and send to the wire.
+    Such construction is send using XConnection interface.
+
+    @param message_id   message identifier
+    @param message      to be serialized and sent
+
+    @return Error code with description
+      @retval != true     OK
+      @retval == true     I/O error or timeout error occurred
+  */
+  virtual XError send_compressed_frame(const Client_message_type_id message_id,
+                                       const Message &message) = 0;
+
+  /**
+    Serialize, compress and send multiple protobuf message of different type.
+
+    This method builds "Compression" message that encodes and compresses all
+    'messages' into "payload" field. Later on "Compression" message is
+    serialized and send to the wire. size. Such construction is send using
+    XConnection interface.
+
+    @param messages     messages to be serialized, compressed and sent
+
+    @return Error code with description
+      @retval != true     OK
+      @retval == true     I/O error or timeout error occurred
+  */
+  virtual XError send_compressed_multiple_frames(
+      const std::vector<std::pair<Client_message_type_id, const Message *>>
+          &messages) = 0;
+
+  /**
     Serialize and send protobuf message.
 
     @param m      message to be serialized and sent
@@ -564,6 +604,72 @@ class XProtocol {
   */
   virtual XError send(const Mysqlx::Connection::Close &m) = 0;
 
+  /**
+    Serialize and send protobuf message.
+
+    @param m      message to be serialized and sent
+
+    @return Error code with description
+      @retval != true     OK
+      @retval == true     I/O error occurred
+  */
+  virtual XError send(const Mysqlx::Cursor::Open &m) = 0;
+
+  /**
+    Serialize and send protobuf message.
+
+    @param m      message to be serialized and sent
+
+    @return Error code with description
+      @retval != true     OK
+      @retval == true     I/O error occurred
+  */
+  virtual XError send(const Mysqlx::Cursor::Close &m) = 0;
+
+  /**
+    Serialize and send protobuf message.
+
+    @param m      message to be serialized and sent
+
+    @return Error code with description
+      @retval != true     OK
+      @retval == true     I/O error occurred
+  */
+  virtual XError send(const Mysqlx::Cursor::Fetch &m) = 0;
+
+  /**
+    Serialize and send protobuf message.
+
+    @param m      message to be serialized and sent
+
+    @return Error code with description
+      @retval != true     OK
+      @retval == true     I/O error occurred
+  */
+  virtual XError send(const Mysqlx::Prepare::Prepare &m) = 0;
+
+  /**
+    Serialize and send protobuf message.
+
+    @param m      message to be serialized and sent
+
+    @return Error code with description
+      @retval != true     OK
+      @retval == true     I/O error occurred
+  */
+  virtual XError send(const Mysqlx::Prepare::Execute &m) = 0;
+
+  /**
+    Serialize and send protobuf message.
+
+    @param m      message to be serialized and sent
+
+    @return Error code with description
+      @retval != true     OK
+      @retval == true     I/O error occurred
+  */
+  virtual XError send(const Mysqlx::Prepare::Deallocate &m) = 0;
+
   /*
     Methods that execute different message flows
     with the server
@@ -585,14 +691,15 @@ class XProtocol {
 
     Create and return an object which already fetched metadata.
     If server returns an error or an I/O error occurred then
-    the result is "nullptr".
+    the function returns a valid object, the reason of doing so
+    is that before the error some warnings could be received.
+    User must have a possibility to investigate the warnings.
 
     @param[out] out_error  in case of error, the method is going to return error
                            code and description
 
     @return Object responsible for fetching "resultset/s" from the server
-      @retval != nullptr  OK
-      @retval == nullptr  error occurred
+      @retval != nullptr  always valid object
   */
   virtual std::unique_ptr<XQuery_result> recv_resultset(XError *out_error) = 0;
 
@@ -717,6 +824,51 @@ class XProtocol {
       const Mysqlx::Crud::Delete &msg, XError *out_error) = 0;
 
   /**
+    Send prepared stmt execute and expect resultset as response.
+
+    @param msg             "Execute" message to be serialized and sent
+    @param[out] out_error  in case of error, the method is going to return error
+                           code and description
+    @return Object responsible for fetching "resultset/s" from the server
+      @retval != nullptr  OK
+      @retval == nullptr  I/O error, timeout error, dispatch error
+                          or received "Mysqlx.Error" message
+  */
+  virtual std::unique_ptr<XQuery_result> execute_prep_stmt(
+      const Mysqlx::Prepare::Execute &msg, XError *out_error) = 0;
+
+  /**
+    Send cursor open and expect resultset as response.
+
+    @param msg             "Cursor::Open" message to be serialized and sent
+    @param[out] out_error  in case of error, the method is going to return error
+                           code and description
+    @return Object responsible for fetching "resultset/s" from the server
+      @retval != nullptr  OK
+      @retval == nullptr  I/O error, timeout error, dispatch error
+                          or received "Mysqlx.Error" message
+  */
+  virtual std::unique_ptr<XQuery_result> execute_cursor_open(
+      const Mysqlx::Cursor::Open &msg, XError *out_error) = 0;
+
+  /**
+    Send cursor fetch and expect resultset as response.
+
+    @param msg                 "Cursor::Fetch" message to be serialized and sent
+    @param cursor_open_result  result of a Cursor.Open operation which should
+                               contain metadata used by the fetch command
+    @param[out] out_error      in case of error, the method is going to return
+                               error code and description
+    @return Object responsible for fetching "resultset/s" from the server
+      @retval != nullptr  OK
+      @retval == nullptr  I/O error, timeout error, dispatch error
+                          or received "Mysqlx.Error" message
+  */
+  virtual std::unique_ptr<XQuery_result> execute_cursor_fetch(
+      const Mysqlx::Cursor::Fetch &msg,
+      std::unique_ptr<XQuery_result> cursor_open_result, XError *out_error) = 0;
+
+  /**
     Send "CapabilitiesGet" and expect Capabilities as response.
 
     @param[out] out_error  in case of error, the method is going to return error
@@ -762,8 +914,13 @@ class XProtocol {
                                       const std::string &pass,
                                       const std::string &schema,
                                       const std::string &method = "") = 0;
+
+  virtual void use_compression(const Compression_algorithm algo) = 0;
+
+  virtual void use_compression(const Compression_algorithm algo,
+                               const int32_t level) = 0;
 };
 
 }  // namespace xcl
 
-#endif  // X_CLIENT_MYSQLXCLIENT_XPROTOCOL_H_
+#endif  // PLUGIN_X_CLIENT_MYSQLXCLIENT_XPROTOCOL_H_

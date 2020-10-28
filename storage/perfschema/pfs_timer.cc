@@ -1,4 +1,4 @@
-/* Copyright (c) 2008, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2008, 2020, Oracle and/or its affiliates. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -108,15 +108,18 @@ void init_timers(void) {
   to_pico_data[TIMER_NAME_MILLISEC].m_v0 = millisec_v0;
   to_pico_data[TIMER_NAME_MILLISEC].m_factor = millisec_to_pico;
 
-  if (cycle_to_pico == 0)
+  if (cycle_to_pico == 0) {
     log_errlog(WARNING_LEVEL, ER_CYCLE_TIMER_IS_NOT_AVAILABLE);
+  }
 
 #ifdef HAVE_NANOSEC_TIMER
-  if (nanosec_to_pico == 0)
+  if (nanosec_to_pico == 0) {
     log_errlog(WARNING_LEVEL, ER_NANOSECOND_TIMER_IS_NOT_AVAILABLE);
+  }
 #else
-  if (microsec_to_pico == 0)
+  if (microsec_to_pico == 0) {
     log_errlog(WARNING_LEVEL, ER_MICROSECOND_TIMER_IS_NOT_AVAILABLE);
+  }
 #endif
 
   /* Initialize histograms bucket timers. */

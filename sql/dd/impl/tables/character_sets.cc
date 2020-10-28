@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -53,13 +53,20 @@ const Character_sets &Character_sets::instance() {
 
 ///////////////////////////////////////////////////////////////////////////
 
+const CHARSET_INFO *Character_sets::name_collation() {
+  return &my_charset_utf8_general_ci;
+}
+
+///////////////////////////////////////////////////////////////////////////
+
 Character_sets::Character_sets() {
   m_target_def.set_table_name("character_sets");
 
   m_target_def.add_field(FIELD_ID, "FIELD_ID",
                          "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT");
   m_target_def.add_field(FIELD_NAME, "FIELD_NAME",
-                         "name VARCHAR(64) NOT NULL COLLATE utf8_general_ci");
+                         "name VARCHAR(64) NOT NULL COLLATE " +
+                             String_type(name_collation()->name));
   m_target_def.add_field(FIELD_DEFAULT_COLLATION_ID,
                          "FIELD_DEFAULT_COLLATION_ID",
                          "default_collation_id BIGINT UNSIGNED NOT NULL");
@@ -72,9 +79,9 @@ Character_sets::Character_sets() {
 
   m_target_def.add_index(INDEX_PK_ID, "INDEX_PK_ID", "PRIMARY KEY(id)");
   m_target_def.add_index(INDEX_UK_NAME, "INDEX_UK_NAME", "UNIQUE KEY(name)");
-  m_target_def.add_index(INDEX_K_DEFAULT_COLLATION_ID,
-                         "INDEX_K_DEFAULT_COLLATION_ID",
-                         "KEY(default_collation_id)");
+  m_target_def.add_index(INDEX_UK_DEFAULT_COLLATION_ID,
+                         "INDEX_UK_DEFAULT_COLLATION_ID",
+                         "UNIQUE KEY(default_collation_id)");
 
   m_target_def.add_foreign_key(FK_DEFAULT_COLLATION_ID,
                                "FK_DEFAULT_COLLATION_ID",
@@ -89,6 +96,7 @@ Character_sets::Character_sets() {
 
 bool Character_sets::populate(THD *thd) const {
   // Obtain a list of the previously stored charsets.
+  cache::Dictionary_client::Auto_releaser releaser(thd->dd_client());
   std::vector<const Charset *> prev_cset;
   if (thd->dd_client()->fetch_global_components(&prev_cset)) return true;
 
@@ -138,10 +146,9 @@ bool Character_sets::populate(THD *thd) const {
 
   // The remaining ids in the prev_cset_ids set were not updated, and must
   // therefore be deleted from the DD since they are not supported anymore.
-  cache::Dictionary_client::Auto_releaser releaser(thd->dd_client());
   for (std::set<Object_id>::const_iterator del_it = prev_cset_ids.begin();
        del_it != prev_cset_ids.end(); ++del_it) {
-    const Charset *del_cset = NULL;
+    const Charset *del_cset = nullptr;
     if (thd->dd_client()->acquire(*del_it, &del_cset)) return true;
 
     DBUG_ASSERT(del_cset);
@@ -163,7 +170,7 @@ Charset *Character_sets::create_entity_object(const Raw_record &) const {
 
 bool Character_sets::update_object_key(Global_name_key *key,
                                        const String_type &charset_name) {
-  key->update(FIELD_NAME, charset_name);
+  key->update(FIELD_NAME, charset_name, name_collation());
   return false;
 }
 

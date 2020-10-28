@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2013, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -32,6 +32,7 @@
 #include <sys/types.h>
 
 #include "my_base.h"
+#include "my_hostname.h"  // HOSTNAME_LENGTH
 #include "mysql_com.h"
 #include "sql/rpl_info.h"
 #include "sql/sql_const.h"  // UUID_LENGTH
@@ -96,21 +97,21 @@ class table_replication_group_members : public PFS_engine_table {
     @param read_all         true if all columns are read.
   */
 
-  virtual int read_row_values(TABLE *table, unsigned char *buf, Field **fields,
-                              bool read_all);
+  int read_row_values(TABLE *table, unsigned char *buf, Field **fields,
+                      bool read_all) override;
 
   table_replication_group_members();
 
  public:
-  ~table_replication_group_members();
+  ~table_replication_group_members() override;
 
   /** Table share. */
   static PFS_engine_table_share m_share;
   static PFS_engine_table *create(PFS_engine_table_share *);
   static ha_rows get_row_count();
-  virtual int rnd_next();
-  virtual int rnd_pos(const void *pos);
-  virtual void reset_position(void);
+  int rnd_next() override;
+  int rnd_pos(const void *pos) override;
+  void reset_position(void) override;
 };
 
 /** @} */

@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2019, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -50,7 +50,6 @@ enum dberr_t {
   DB_DEADLOCK,
   DB_ROLLBACK,
   DB_DUPLICATE_KEY,
-  DB_QUE_THR_SUSPENDED,
   DB_MISSING_HISTORY, /*!< required history data has been
                       deleted due to lack of space in
                       rollback segment */
@@ -189,6 +188,7 @@ enum dberr_t {
   DB_ZIP_OVERFLOW,
   DB_RECORD_NOT_FOUND = 1500,
   DB_END_OF_INDEX,
+  DB_END_SAMPLE_READ,
   DB_NOT_FOUND, /*!< Generic error code for "Not found"
                 type of errors */
 

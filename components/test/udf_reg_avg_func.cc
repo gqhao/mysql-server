@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2.0,
@@ -61,13 +61,13 @@ bool avgcost_init(UDF_INIT *initid, UDF_ARGS *args, char *message) {
   if (args->arg_count != 2) {
     strcpy(message,
            "wrong number of arguments: AVGCOST() requires two arguments");
-    return 1;
+    return true;
   }
 
   if ((args->arg_type[0] != INT_RESULT) || (args->arg_type[1] != REAL_RESULT)) {
     strcpy(message,
            "wrong argument type: AVGCOST() requires an INT and a REAL");
-    return 1;
+    return true;
   }
 
   /*
@@ -76,20 +76,20 @@ bool avgcost_init(UDF_INIT *initid, UDF_ARGS *args, char *message) {
   /*args->arg_type[0]   = REAL_RESULT;
     args->arg_type[1]   = REAL_RESULT;*/
 
-  initid->maybe_null = 0;  /* The result may be null */
-  initid->decimals = 4;    /* We want 4 decimals in the result */
-  initid->max_length = 20; /* 6 digits + . + 10 decimals */
+  initid->maybe_null = false; /* The result may be null */
+  initid->decimals = 4;       /* We want 4 decimals in the result */
+  initid->max_length = 20;    /* 6 digits + . + 10 decimals */
 
   if (!(data = new (std::nothrow) avgcost_data)) {
     strcpy(message, "Couldn't allocate memory");
-    return 1;
+    return true;
   }
   data->totalquantity = 0;
   data->totalprice = 0.0;
 
   initid->ptr = (char *)data;
 
-  return 0;
+  return false;
 }
 
 void avgcost_deinit(UDF_INIT *initid) {
@@ -100,14 +100,15 @@ void avgcost_deinit(UDF_INIT *initid) {
 
 /* This is needed to get things to work in MySQL 4.1.1 and above */
 
-void avgcost_clear(UDF_INIT *initid, char *, char *) {
+void avgcost_clear(UDF_INIT *initid, unsigned char *, unsigned char *) {
   struct avgcost_data *data = (struct avgcost_data *)initid->ptr;
   data->totalprice = 0.0;
   data->totalquantity = 0;
   data->count = 0;
 }
 
-void avgcost_add(UDF_INIT *initid, UDF_ARGS *args, char *, char *) {
+void avgcost_add(UDF_INIT *initid, UDF_ARGS *args, unsigned char *,
+                 unsigned char *) {
   if (args->args[0] && args->args[1]) {
     struct avgcost_data *data = (struct avgcost_data *)initid->ptr;
     long long quantity = *((long long *)args->args[0]);
@@ -143,7 +144,8 @@ void avgcost_add(UDF_INIT *initid, UDF_ARGS *args, char *, char *) {
   }
 }
 
-double avgcost(UDF_INIT *initid, UDF_ARGS *, char *is_null, char *) {
+double avgcost(UDF_INIT *initid, UDF_ARGS *, unsigned char *is_null,
+               unsigned char *) {
   struct avgcost_data *data = (struct avgcost_data *)initid->ptr;
   if (!data->count || !data->totalquantity) {
     *is_null = 1;
@@ -159,9 +161,8 @@ double avgcost(UDF_INIT *initid, UDF_ARGS *, char *is_null, char *) {
 static mysql_service_status_t init() {
   bool ret_avgcost = false;
   ret_avgcost = mysql_service_udf_registration_aggregate->udf_register(
-      "avgcost", REAL_RESULT, (Udf_func_any)avgcost,
-      (Udf_func_init)avgcost_init, (Udf_func_deinit)avgcost_deinit,
-      (Udf_func_add)avgcost_add, (Udf_func_clear)avgcost_clear);
+      "avgcost", REAL_RESULT, (Udf_func_any)avgcost, avgcost_init,
+      avgcost_deinit, avgcost_add, avgcost_clear);
   return ret_avgcost;
 }
 

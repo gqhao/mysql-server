@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -23,22 +23,21 @@
 #ifndef TASK_NET_H
 #define TASK_NET_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-#include "plugin/group_replication/libmysqlgcs/src/bindings/xcom/xcom/result.h"
+#include "xcom/result.h"
+#include "xcom/xcom_common.h"
 
 result xcom_checked_socket(int domain, int type, int protocol);
 struct addrinfo *xcom_caching_getaddrinfo(char const *server);
 int checked_getaddrinfo(const char *nodename, const char *servname,
                         const struct addrinfo *hints, struct addrinfo **res);
 
+int checked_getaddrinfo_port(const char *nodename, xcom_port port,
+                             const struct addrinfo *hints,
+                             struct addrinfo **res);
+
+void deinit_network_cache();
+
 int init_net();
 int deinit_net();
-
-#ifdef __cplusplus
-}
-#endif
 
 #endif

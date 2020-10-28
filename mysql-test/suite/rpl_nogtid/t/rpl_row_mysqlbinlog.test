@@ -9,6 +9,12 @@
 # Include Section
 # Make sure that we have row based bin log
 -- source include/have_binlog_format_row.inc
+
+# make sure that we do not have compression enabled, otherwise
+# the event size and binary log files generated for this test
+# to work will not be created
+--source include/not_binlog_transaction_compression_on.inc
+
 -- source include/master-slave.inc
 
 # Setup Section
@@ -19,7 +25,7 @@ select "---Setup Section  --" as "";
 
 set timestamp=1000000000;
 
---disable_warnings ONCE
+--disable_warnings ER_BAD_TABLE_ERROR ONCE
 DROP TABLE IF EXISTS t1,t2,t3;
 
 connection master;
@@ -259,6 +265,8 @@ select "--- Test 5 LOAD DATA --" as "";
 
 # Bug#7853 (mysqlbinlog does not accept input from stdin)
 
+--let $mysqlbinlog_allow_error= 1
+
 --disable_query_log ONCE
 select "--- Test 6 reading stdin --" as "";
 let $MYSQLD_DATADIR= `select @@datadir;`;
@@ -270,6 +278,8 @@ select "--- Test 7 reading stdin w/position --" as "";
 --replace_result $MYSQL_TEST_DIR MYSQL_TEST_DIR
 --let $mysqlbinlog_parameters= --short-form --start-position=$position --stop-position=$stop_position - < $MYSQLD_DATADIR/master-bin.000001
 --source include/mysqlbinlog.inc
+
+--let $mysqlbinlog_allow_error= 0
        
 # Bug#16217 (mysql client did not know how not switch its internal charset)
 --disable_query_log ONCE
@@ -327,7 +337,6 @@ connection master;
 # BUG#17654 also test mysqlbinlog to ensure it can read the binlog from a remote server 
 # and ensure that the results are the same as if read from a file (the same file).
 
---disable_warnings ONCE
 DROP TABLE IF EXISTS t1;
 
 CREATE TABLE t1 (a INT NOT NULL KEY, b INT);

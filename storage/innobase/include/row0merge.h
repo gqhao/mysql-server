@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2005, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2005, 2020, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -99,11 +99,12 @@ struct merge_file_t {
 
 /** Index field definition */
 struct index_field_t {
-  ulint col_no;      /*!< column offset */
-  ulint prefix_len;  /*!< column prefix length, or 0
-                     if indexing the whole column */
-  bool is_v_col;     /*!< whether this is a virtual column */
-  bool is_ascending; /*!< true=ASC, false=DESC */
+  ulint col_no;        /*!< column offset */
+  ulint prefix_len;    /*!< column prefix length, or 0
+                       if indexing the whole column */
+  bool is_v_col;       /*!< whether this is a virtual column */
+  bool is_multi_value; /*!< whether it has multi-value */
+  bool is_ascending;   /*!< true=ASC, false=DESC */
 };
 
 /** Definition of an index being created */
@@ -134,10 +135,11 @@ struct row_merge_dup_t {
   ulint n_dup;          /*!< number of duplicates */
 };
 
-/** Report a duplicate key. */
-void row_merge_dup_report(
-    row_merge_dup_t *dup,   /*!< in/out: for reporting duplicates */
-    const dfield_t *entry); /*!< in: duplicate index entry */
+/** Report a duplicate key.
+@param[in,out] dup For reporting duplicates
+@param[in] entry Duplicate index entry */
+void row_merge_dup_report(row_merge_dup_t *dup, const dfield_t *entry);
+
 /** Sets an exclusive lock on a table, for the duration of creating indexes.
  @return error code or DB_SUCCESS */
 dberr_t row_merge_lock_table(trx_t *trx,          /*!< in/out: transaction */
@@ -246,11 +248,11 @@ dberr_t row_merge_build_indexes(
 void row_merge_buf_write(const row_merge_buf_t *buf, const merge_file_t *of,
                          row_merge_block_t *block);
 
-/** Sort a buffer. */
-void row_merge_buf_sort(
-    row_merge_buf_t *buf,  /*!< in/out: sort buffer */
-    row_merge_dup_t *dup); /*!< in/out: reporter of duplicates
-                           (NULL if non-unique index) */
+/** Sort a buffer.
+@param[in,out] buf Sort buffer
+@param[in,out] dup Reporter of duplicates (null if non-unique index) */
+void row_merge_buf_sort(row_merge_buf_t *buf, row_merge_dup_t *dup);
+
 /** Write a merge block to the file system.
  @return true if request was successful, false if fail */
 ibool row_merge_write(int fd,           /*!< in: file descriptor */
@@ -263,7 +265,7 @@ row_merge_buf_t *row_merge_buf_empty(
     row_merge_buf_t *buf) /*!< in,own: sort buffer */
     MY_ATTRIBUTE((warn_unused_result));
 
-/** Create a merge file int the given location.
+/** Create a merge file in the given location.
 @param[out]	merge_file	merge file structure
 @param[in]	path		location for creating temporary file
 @return file descriptor, or -1 on failure */
@@ -281,7 +283,7 @@ and then stage->inc() will be called for each record processed.
 @return DB_SUCCESS or error code */
 dberr_t row_merge_sort(trx_t *trx, const row_merge_dup_t *dup,
                        merge_file_t *file, row_merge_block_t *block, int *tmpfd,
-                       ut_stage_alter_t *stage = NULL);
+                       ut_stage_alter_t *stage = nullptr);
 
 /** Allocate a sort buffer.
  @return own: sort buffer */

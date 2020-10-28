@@ -130,87 +130,31 @@ WHERE sq2_alias1.col_varchar_nokey <= alias1.col_varchar_key
 ))	{
   "steps": [
     {
-      "join_preparation": {
-        "select#": 1,
-        "steps": [
-          {
-            "join_preparation": {
-              "select#": 2,
-              "steps": [
-                {
-                  "join_preparation": {
-                    "select#": 3,
-                    "steps": [
-                      {
-                        "expanded_query": "/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)"
-                      }
-                    ] /* steps */
-                  } /* join_preparation */
-                },
-                {
-                  "join_preparation": {
-                    "select#": 4,
-                    "steps": [
-                      {
-                        "expanded_query": "/* select#4 */ select `sq2_alias1`.`col_varchar_nokey` AS `sq2_field1` from `t3` `sq2_alias1` where ((`sq2_alias1`.`col_varchar_nokey` <= `alias1`.`col_varchar_key`) and (<cache>(`alias2`.`col_varchar_key`) = `sq2_alias1`.`col_varchar_nokey`))"
-                      },
-                      {
-                        "transformation": {
-                          "select#": 4,
-                          "from": "IN (SELECT)",
-                          "to": "semijoin",
-                          "chosen": false
-                        } /* transformation */
-                      }
-                    ] /* steps */
-                  } /* join_preparation */
-                },
-                {
-                  "expanded_query": "/* select#2 */ select (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)) AS `field1`,`alias1`.`col_varchar_nokey` AS `field2` from `t2` `alias1` join `t2` `alias2` join `t2` `alias3` where (<in_optimizer>(`alias2`.`col_varchar_key`,<exists>(/* select#4 */ select `sq2_alias1`.`col_varchar_nokey` AS `sq2_field1` from `t3` `sq2_alias1` where ((`sq2_alias1`.`col_varchar_nokey` <= `alias1`.`col_varchar_key`) and (<cache>(`alias2`.`col_varchar_key`) = `sq2_alias1`.`col_varchar_nokey`)))) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field1`) = (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))) or isnull((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)))), true) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field2`) = `alias1`.`col_varchar_nokey`) or isnull(`alias1`.`col_varchar_nokey`)), true) and (`alias3`.`col_varchar_key` = `alias2`.`col_varchar_key`) and (`alias3`.`col_varchar_nokey` = `alias2`.`col_varchar_key`)) having (<if>(outer_field_is_not_null, <is_not_null_test>((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))), true) and <if>(outer_field_is_not_null, <is_not_null_test>(`alias1`.`col_varchar_nokey`), true))"
-                },
-                {
-                  "transformation": {
-                    "select#": 2,
-                    "from": "IN (SELECT)",
-                    "to": "semijoin",
-                    "chosen": false
-                  } /* transformation */
-                }
-              ] /* steps */
-            } /* join_preparation */
-          },
-          {
-            "expanded_query": "/* select#1 */ select `where_subselect_19379`.`field1` AS `field1`,`where_subselect_19379`.`field2` AS `field2` from `where_subselect_19379` where (not(<in_optimizer>((`where_subselect_19379`.`field1`,`where_subselect_19379`.`field2`),<exists>(/* select#2 */ select (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)) AS `field1`,`alias1`.`col_varchar_nokey` AS `field2` from `t2` `alias1` join `t2` `alias2` join `t2` `alias3` where (<in_optimizer>(`alias2`.`col_varchar_key`,<exists>(/* select#4 */ select `sq2_alias1`.`col_varchar_nokey` AS `sq2_field1` from `t3` `sq2_alias1` where ((`sq2_alias1`.`col_varchar_nokey` <= `alias1`.`col_varchar_key`) and (<cache>(`alias2`.`col_varchar_key`) = `sq2_alias1`.`col_varchar_nokey`)))) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field1`) = (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))) or isnull((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)))), true) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field2`) = `alias1`.`col_varchar_nokey`) or isnull(`alias1`.`col_varchar_nokey`)), true) and (`alias3`.`col_varchar_key` = `alias2`.`col_varchar_key`) and (`alias3`.`col_varchar_nokey` = `alias2`.`col_varchar_key`)) having (<if>(outer_field_is_not_null, <is_not_null_test>((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))), true) and <if>(outer_field_is_not_null, <is_not_null_test>(`alias1`.`col_varchar_nokey`), true))))))"
-          }
-        ] /* steps */
-      } /* join_preparation */
-    },
-    {
       "join_optimization": {
         "select#": 1,
         "steps": [
           {
             "condition_processing": {
               "condition": "WHERE",
-              "original_condition": "(not(<in_optimizer>((`where_subselect_19379`.`field1`,`where_subselect_19379`.`field2`),<exists>(/* select#2 */ select (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)) AS `field1`,`alias1`.`col_varchar_nokey` AS `field2` from `t2` `alias1` join `t2` `alias2` join `t2` `alias3` where (<in_optimizer>(`alias2`.`col_varchar_key`,<exists>(/* select#4 */ select `sq2_alias1`.`col_varchar_nokey` AS `sq2_field1` from `t3` `sq2_alias1` where ((`sq2_alias1`.`col_varchar_nokey` <= `alias1`.`col_varchar_key`) and (<cache>(`alias2`.`col_varchar_key`) = `sq2_alias1`.`col_varchar_nokey`)))) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field1`) = (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))) or isnull((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)))), true) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field2`) = `alias1`.`col_varchar_nokey`) or isnull(`alias1`.`col_varchar_nokey`)), true) and (`alias3`.`col_varchar_key` = `alias2`.`col_varchar_key`) and (`alias3`.`col_varchar_nokey` = `alias2`.`col_varchar_key`)) having (<if>(outer_field_is_not_null, <is_not_null_test>((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))), true) and <if>(outer_field_is_not_null, <is_not_null_test>(`alias1`.`col_varchar_nokey`), true))))))",
+              "original_condition": "<in_optimizer>((`where_subselect_19379`.`field1`,`where_subselect_19379`.`field2`),<exists>(/* select#2 */ select (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)) AS `field1`,`alias1`.`col_varchar_nokey` AS `field2` from `t2` `alias1` join `t2` `alias2` join `t2` `alias3` where (<in_optimizer>(`alias2`.`col_varchar_key`,<exists>(/* select#4 */ select `sq2_alias1`.`col_varchar_nokey` AS `sq2_field1` from `t3` `sq2_alias1` where ((`sq2_alias1`.`col_varchar_nokey` <= `alias1`.`col_varchar_key`) and (<cache>(`alias2`.`col_varchar_key`) = `sq2_alias1`.`col_varchar_nokey`)))) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field1`) = (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))) or ((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)) is null)), true) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field2`) = `alias1`.`col_varchar_nokey`) or (`alias1`.`col_varchar_nokey` is null)), true) and (`alias3`.`col_varchar_key` = `alias2`.`col_varchar_key`) and (`alias3`.`col_varchar_nokey` = `alias2`.`col_varchar_key`)) having (<if>(outer_field_is_not_null, <is_not_null_test>((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))), true) and <if>(outer_field_is_not_null, <is_not_null_test>(`alias1`.`col_varchar_nokey`), true))) is false)",
               "steps": [
                 {
                   "transformation": "equality_propagation",
                   "subselect_evaluation": [
                   ] /* subselect_evaluation */,
-                  "resulting_condition": "(not(<in_optimizer>((`where_subselect_19379`.`field1`,`where_subselect_19379`.`field2`),<exists>(/* select#2 */ select (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)) AS `field1`,`alias1`.`col_varchar_nokey` AS `field2` from `t2` `alias1` join `t2` `alias2` join `t2` `alias3` where (<in_optimizer>(`alias2`.`col_varchar_key`,<exists>(/* select#4 */ select `sq2_alias1`.`col_varchar_nokey` AS `sq2_field1` from `t3` `sq2_alias1` where ((`sq2_alias1`.`col_varchar_nokey` <= `alias1`.`col_varchar_key`) and (<cache>(`alias2`.`col_varchar_key`) = `sq2_alias1`.`col_varchar_nokey`)))) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field1`) = (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))) or isnull((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)))), true) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field2`) = `alias1`.`col_varchar_nokey`) or isnull(`alias1`.`col_varchar_nokey`)), true) and (`alias3`.`col_varchar_key` = `alias2`.`col_varchar_key`) and (`alias3`.`col_varchar_nokey` = `alias2`.`col_varchar_key`)) having (<if>(outer_field_is_not_null, <is_not_null_test>((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))), true) and <if>(outer_field_is_not_null, <is_not_null_test>(`alias1`.`col_varchar_nokey`), true))))))"
+                  "resulting_condition": "<in_optimizer>((`where_subselect_19379`.`field1`,`where_subselect_19379`.`field2`),<exists>(/* select#2 */ select (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)) AS `field1`,`alias1`.`col_varchar_nokey` AS `field2` from `t2` `alias1` join `t2` `alias2` join `t2` `alias3` where (<in_optimizer>(`alias2`.`col_varchar_key`,<exists>(/* select#4 */ select `sq2_alias1`.`col_varchar_nokey` AS `sq2_field1` from `t3` `sq2_alias1` where ((`sq2_alias1`.`col_varchar_nokey` <= `alias1`.`col_varchar_key`) and (<cache>(`alias2`.`col_varchar_key`) = `sq2_alias1`.`col_varchar_nokey`)))) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field1`) = (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))) or ((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)) is null)), true) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field2`) = `alias1`.`col_varchar_nokey`) or (`alias1`.`col_varchar_nokey` is null)), true) and (`alias3`.`col_varchar_key` = `alias2`.`col_varchar_key`) and (`alias3`.`col_varchar_nokey` = `alias2`.`col_varchar_key`)) having (<if>(outer_field_is_not_null, <is_not_null_test>((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))), true) and <if>(outer_field_is_not_null, <is_not_null_test>(`alias1`.`col_varchar_nokey`), true))) is false)"
                 },
                 {
                   "transformation": "constant_propagation",
                   "subselect_evaluation": [
                   ] /* subselect_evaluation */,
-                  "resulting_condition": "(not(<in_optimizer>((`where_subselect_19379`.`field1`,`where_subselect_19379`.`field2`),<exists>(/* select#2 */ select (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)) AS `field1`,`alias1`.`col_varchar_nokey` AS `field2` from `t2` `alias1` join `t2` `alias2` join `t2` `alias3` where (<in_optimizer>(`alias2`.`col_varchar_key`,<exists>(/* select#4 */ select `sq2_alias1`.`col_varchar_nokey` AS `sq2_field1` from `t3` `sq2_alias1` where ((`sq2_alias1`.`col_varchar_nokey` <= `alias1`.`col_varchar_key`) and (<cache>(`alias2`.`col_varchar_key`) = `sq2_alias1`.`col_varchar_nokey`)))) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field1`) = (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))) or isnull((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)))), true) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field2`) = `alias1`.`col_varchar_nokey`) or isnull(`alias1`.`col_varchar_nokey`)), true) and (`alias3`.`col_varchar_key` = `alias2`.`col_varchar_key`) and (`alias3`.`col_varchar_nokey` = `alias2`.`col_varchar_key`)) having (<if>(outer_field_is_not_null, <is_not_null_test>((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))), true) and <if>(outer_field_is_not_null, <is_not_null_test>(`alias1`.`col_varchar_nokey`), true))))))"
+                  "resulting_condition": "<in_optimizer>((`where_subselect_19379`.`field1`,`where_subselect_19379`.`field2`),<exists>(/* select#2 */ select (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)) AS `field1`,`alias1`.`col_varchar_nokey` AS `field2` from `t2` `alias1` join `t2` `alias2` join `t2` `alias3` where (<in_optimizer>(`alias2`.`col_varchar_key`,<exists>(/* select#4 */ select `sq2_alias1`.`col_varchar_nokey` AS `sq2_field1` from `t3` `sq2_alias1` where ((`sq2_alias1`.`col_varchar_nokey` <= `alias1`.`col_varchar_key`) and (<cache>(`alias2`.`col_varchar_key`) = `sq2_alias1`.`col_varchar_nokey`)))) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field1`) = (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))) or ((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)) is null)), true) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field2`) = `alias1`.`col_varchar_nokey`) or (`alias1`.`col_varchar_nokey` is null)), true) and (`alias3`.`col_varchar_key` = `alias2`.`col_varchar_key`) and (`alias3`.`col_varchar_nokey` = `alias2`.`col_varchar_key`)) having (<if>(outer_field_is_not_null, <is_not_null_test>((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))), true) and <if>(outer_field_is_not_null, <is_not_null_test>(`alias1`.`col_varchar_nokey`), true))) is false)"
                 },
                 {
                   "transformation": "trivial_condition_removal",
                   "subselect_evaluation": [
                   ] /* subselect_evaluation */,
-                  "resulting_condition": "(not(<in_optimizer>((`where_subselect_19379`.`field1`,`where_subselect_19379`.`field2`),<exists>(/* select#2 */ select (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)) AS `field1`,`alias1`.`col_varchar_nokey` AS `field2` from `t2` `alias1` join `t2` `alias2` join `t2` `alias3` where (<in_optimizer>(`alias2`.`col_varchar_key`,<exists>(/* select#4 */ select `sq2_alias1`.`col_varchar_nokey` AS `sq2_field1` from `t3` `sq2_alias1` where ((`sq2_alias1`.`col_varchar_nokey` <= `alias1`.`col_varchar_key`) and (<cache>(`alias2`.`col_varchar_key`) = `sq2_alias1`.`col_varchar_nokey`)))) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field1`) = (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))) or isnull((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)))), true) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field2`) = `alias1`.`col_varchar_nokey`) or isnull(`alias1`.`col_varchar_nokey`)), true) and (`alias3`.`col_varchar_key` = `alias2`.`col_varchar_key`) and (`alias3`.`col_varchar_nokey` = `alias2`.`col_varchar_key`)) having (<if>(outer_field_is_not_null, <is_not_null_test>((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))), true) and <if>(outer_field_is_not_null, <is_not_null_test>(`alias1`.`col_varchar_nokey`), true))))))"
+                  "resulting_condition": "<in_optimizer>((`where_subselect_19379`.`field1`,`where_subselect_19379`.`field2`),<exists>(/* select#2 */ select (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)) AS `field1`,`alias1`.`col_varchar_nokey` AS `field2` from `t2` `alias1` join `t2` `alias2` join `t2` `alias3` where (<in_optimizer>(`alias2`.`col_varchar_key`,<exists>(/* select#4 */ select `sq2_alias1`.`col_varchar_nokey` AS `sq2_field1` from `t3` `sq2_alias1` where ((`sq2_alias1`.`col_varchar_nokey` <= `alias1`.`col_varchar_key`) and (<cache>(`alias2`.`col_varchar_key`) = `sq2_alias1`.`col_varchar_nokey`)))) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field1`) = (/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))) or ((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`)) is null)), true) and <if>(outer_field_is_not_null, ((<cache>(`where_subselect_19379`.`field2`) = `alias1`.`col_varchar_nokey`) or (`alias1`.`col_varchar_nokey` is null)), true) and (`alias3`.`col_varchar_key` = `alias2`.`col_varchar_key`) and (`alias3`.`col_varchar_nokey` = `alias2`.`col_varchar_key`)) having (<if>(outer_field_is_not_null, <is_not_null_test>((/* select#3 */ select sum(`t4`.`pk`) AS `sq1_field1` from `t4` join `t1` `sq1_alias2` where (`sq1_alias2`.`col_varchar_key` = `t4`.`col_varchar_key`))), true) and <if>(outer_field_is_not_null, <is_not_null_test>(`alias1`.`col_varchar_nokey`), true))) is false)"
                 }
               ] /* steps */
             } /* condition_processing */
@@ -271,6 +215,8 @@ col_varchar_key varchar(1) DEFAULT NULL,
 KEY col_int_key (col_int_key),
 KEY col_varchar_key (col_varchar_key,col_int_key)
 ) ENGINE=MyISAM;
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 INSERT INTO t1 VALUES (8,'g');
 CREATE TABLE t2 (
 col_int_key int(11) DEFAULT NULL,
@@ -278,6 +224,8 @@ col_varchar_key varchar(1) DEFAULT NULL,
 KEY col_int_key (col_int_key),
 KEY col_varchar_key (col_varchar_key,col_int_key)
 ) ENGINE=MyISAM;
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 INSERT INTO t2 VALUES (7,'x');
 CREATE TABLE where_subselect_19033  
 SELECT
@@ -307,44 +255,6 @@ WHERE field1 IN
 FROM t1
 )	{
   "steps": [
-    {
-      "join_preparation": {
-        "select#": 1,
-        "steps": [
-          {
-            "join_preparation": {
-              "select#": 2,
-              "steps": [
-                {
-                  "join_preparation": {
-                    "select#": 3,
-                    "steps": [
-                      {
-                        "expanded_query": "/* select#3 */ select `t2`.`col_int_key` from `t2`"
-                      }
-                    ] /* steps */
-                  } /* join_preparation */
-                },
-                {
-                  "expanded_query": "/* select#2 */ select (/* select#3 */ select `t2`.`col_int_key` from `t2`) from `t1` where (<cache>(`where_subselect_19033`.`field1`) = (/* select#3 */ select `t2`.`col_int_key` from `t2`))"
-                },
-                {
-                  "transformation": {
-                    "select#": 2,
-                    "from": "IN (SELECT)",
-                    "to": "semijoin",
-                    "chosen": false
-                  } /* transformation */
-                }
-              ] /* steps */
-            } /* join_preparation */
-          },
-          {
-            "expanded_query": "/* select#1 */ select `where_subselect_19033`.`field1` AS `field1` from `where_subselect_19033` where <in_optimizer>(`where_subselect_19033`.`field1`,<exists>(/* select#2 */ select (/* select#3 */ select `t2`.`col_int_key` from `t2`) from `t1` where (<cache>(`where_subselect_19033`.`field1`) = (/* select#3 */ select `t2`.`col_int_key` from `t2`))))"
-          }
-        ] /* steps */
-      } /* join_preparation */
-    },
     {
       "join_optimization": {
         "select#": 1,
@@ -575,27 +485,6 @@ FROM t1
       "join_execution": {
         "select#": 1,
         "steps": [
-          {
-            "subselect_execution": {
-              "select#": 2,
-              "steps": [
-                {
-                  "join_execution": {
-                    "select#": 2,
-                    "steps": [
-                      {
-                        "subselect_execution": {
-                          "select#": 3,
-                          "steps": [
-                          ] /* steps */
-                        } /* subselect_execution */
-                      }
-                    ] /* steps */
-                  } /* join_execution */
-                }
-              ] /* steps */
-            } /* subselect_execution */
-          }
         ] /* steps */
       } /* join_execution */
     }
@@ -611,6 +500,8 @@ col_int_key int(11) DEFAULT NULL,
 col_varchar_key varchar(1) DEFAULT NULL,
 col_varchar_nokey varchar(1) DEFAULT NULL
 );
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 CREATE TABLE t2 (
 pk int(11) NOT NULL AUTO_INCREMENT,
 col_int_key int(11) DEFAULT NULL,
@@ -618,12 +509,17 @@ col_varchar_key varchar(1) DEFAULT NULL,
 col_varchar_nokey varchar(1) DEFAULT NULL,
 PRIMARY KEY (pk)
 );
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 INSERT INTO t2 VALUES (1,4,'v','v'),(20,5,'r','r');
 CREATE TABLE t3 (
 col_int_key int(11) DEFAULT NULL,
 col_varchar_key varchar(1) DEFAULT NULL,
 col_varchar_nokey varchar(1) DEFAULT NULL
 );
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 INSERT INTO t3 VALUES (NULL,'j','j'),(8,'c','c');
 CREATE TABLE where_updatedelete_20769 select  count(  alias2 . col_varchar_key ) as field1
 from (
@@ -729,54 +625,6 @@ ON table2 .col_int_key = table1 .col_int_key
 )	{
   "steps": [
     {
-      "join_preparation": {
-        "select#": 1,
-        "steps": [
-          {
-            "join_preparation": {
-              "select#": 2,
-              "steps": [
-                {
-                  "expanded_query": "/* select#2 */ select count(`t1`.`col_int_key`) from `t1`"
-                }
-              ] /* steps */
-            } /* join_preparation */
-          },
-          {
-            "join_preparation": {
-              "select#": 3,
-              "steps": [
-                {
-                  "join_preparation": {
-                    "select#": 4,
-                    "steps": [
-                      {
-                        "expanded_query": "/* select#4 */ select count(`t1`.`col_int_key`) from `t1`"
-                      }
-                    ] /* steps */
-                  } /* join_preparation */
-                },
-                {
-                  "expanded_query": "/* select#3 */ select `table2`.`col_int_key` AS `field1`,(/* select#4 */ select count(`t1`.`col_int_key`) from `t1`) from `t1` `table1` join `t1` `table2` where ((<cache>(`where_subselect_20070`.`field1`) = `table2`.`col_int_key`) and (<cache>((/* select#2 */ select count(`t1`.`col_int_key`) from `t1`)) = (/* select#4 */ select count(`t1`.`col_int_key`) from `t1`)) and (`table2`.`col_int_key` = `table1`.`col_int_key`))"
-                },
-                {
-                  "transformation": {
-                    "select#": 3,
-                    "from": "IN (SELECT)",
-                    "to": "semijoin",
-                    "chosen": false
-                  } /* transformation */
-                }
-              ] /* steps */
-            } /* join_preparation */
-          },
-          {
-            "expanded_query": "/* select#1 */ select `where_subselect_20070`.`field1` AS `field1`,`where_subselect_20070`.`( SELECT COUNT( col_int_key )\nFROM t1\n)` AS `( SELECT COUNT( col_int_key )\nFROM t1\n)` from `where_subselect_20070` where <in_optimizer>((`where_subselect_20070`.`field1`,(/* select#2 */ select count(`t1`.`col_int_key`) from `t1`)),<exists>(/* select#3 */ select `table2`.`col_int_key` AS `field1`,(/* select#4 */ select count(`t1`.`col_int_key`) from `t1`) from `t1` `table1` join `t1` `table2` where ((<cache>(`where_subselect_20070`.`field1`) = `table2`.`col_int_key`) and (<cache>((/* select#2 */ select count(`t1`.`col_int_key`) from `t1`)) = (/* select#4 */ select count(`t1`.`col_int_key`) from `t1`)) and (`table2`.`col_int_key` = `table1`.`col_int_key`))))"
-          }
-        ] /* steps */
-      } /* join_preparation */
-    },
-    {
       "join_optimization": {
         "select#": 1,
         "steps": [
@@ -874,6 +722,15 @@ ON table2 .col_int_key = table1 .col_int_key
             } /* attaching_conditions_to_tables */
           },
           {
+            "finalizing_table_conditions": [
+              {
+                "table": "`where_subselect_20070`",
+                "original_table_condition": "<in_optimizer>((`where_subselect_20070`.`field1`,(/* select#2 */ select count(`t1`.`col_int_key`) from `t1`)),<exists>(/* select#3 */ select `table2`.`col_int_key` AS `field1`,(/* select#4 */ select count(`t1`.`col_int_key`) from `t1`) from `t1` `table1` join `t1` `table2` where ((<cache>(`where_subselect_20070`.`field1`) = `table2`.`col_int_key`) and (<cache>((/* select#2 */ select count(`t1`.`col_int_key`) from `t1`)) = (/* select#4 */ select count(`t1`.`col_int_key`) from `t1`)) and (`table2`.`col_int_key` = `table1`.`col_int_key`))))",
+                "final_table_condition   ": "<in_optimizer>((`where_subselect_20070`.`field1`,(/* select#2 */ select count(`t1`.`col_int_key`) from `t1`)),<exists>(/* select#3 */ select `table2`.`col_int_key` AS `field1`,(/* select#4 */ select count(`t1`.`col_int_key`) from `t1`) from `t1` `table1` join `t1` `table2` where ((<cache>(`where_subselect_20070`.`field1`) = `table2`.`col_int_key`) and (<cache>((/* select#2 */ select count(`t1`.`col_int_key`) from `t1`)) = (/* select#4 */ select count(`t1`.`col_int_key`) from `t1`)) and (`table2`.`col_int_key` = `table1`.`col_int_key`))))"
+              }
+            ] /* finalizing_table_conditions */
+          },
+          {
             "refine_plan": [
               {
                 "table": "`where_subselect_20070`"
@@ -941,7 +798,7 @@ ON table2 .col_int_key = table1 .col_int_key
                 "table": "`t1` `table1`",
                 "field": "col_int_key",
                 "equals": "<cache>(`where_subselect_20070`.`field1`)",
-                "null_rejecting": false
+                "null_rejecting": true
               },
               {
                 "table": "`t1` `table1`",
@@ -953,7 +810,7 @@ ON table2 .col_int_key = table1 .col_int_key
                 "table": "`t1` `table2`",
                 "field": "col_int_key",
                 "equals": "<cache>(`where_subselect_20070`.`field1`)",
-                "null_rejecting": false
+                "null_rejecting": true
               },
               {
                 "table": "`t1` `table2`",
@@ -1115,7 +972,7 @@ ON table2 .col_int_key = table1 .col_int_key
               "attached_conditions_summary": [
                 {
                   "table": "`t1` `table1`",
-                  "attached": "(<cache>((/* select#2 */ select count(`t1`.`col_int_key`) from `t1`)) = (/* select#4 */ select count(`t1`.`col_int_key`) from `t1`))"
+                  "attached": "((<cache>(`where_subselect_20070`.`field1`) = `table1`.`col_int_key`) and (<cache>((/* select#2 */ select count(`t1`.`col_int_key`) from `t1`)) = (/* select#4 */ select count(`t1`.`col_int_key`) from `t1`)))"
                 },
                 {
                   "table": "`t1` `table2`",
@@ -1123,6 +980,20 @@ ON table2 .col_int_key = table1 .col_int_key
                 }
               ] /* attached_conditions_summary */
             } /* attaching_conditions_to_tables */
+          },
+          {
+            "finalizing_table_conditions": [
+              {
+                "table": "`t1` `table1`",
+                "original_table_condition": "((<cache>(`where_subselect_20070`.`field1`) = `table1`.`col_int_key`) and (<cache>((/* select#2 */ select count(`t1`.`col_int_key`) from `t1`)) = (/* select#4 */ select count(`t1`.`col_int_key`) from `t1`)))",
+                "final_table_condition   ": "(<cache>((/* select#2 */ select count(`t1`.`col_int_key`) from `t1`)) = (/* select#4 */ select count(`t1`.`col_int_key`) from `t1`))"
+              },
+              {
+                "table": "`t1` `table2`",
+                "original_table_condition": "(`table2`.`col_int_key` = `table1`.`col_int_key`)",
+                "final_table_condition   ": "(`table2`.`col_int_key` = `table1`.`col_int_key`)"
+              }
+            ] /* finalizing_table_conditions */
           },
           {
             "refine_plan": [
@@ -1205,6 +1076,10 @@ ON table2 .col_int_key = table1 .col_int_key
             } /* optimizing_distinct_group_by_order_by */
           },
           {
+            "finalizing_table_conditions": [
+            ] /* finalizing_table_conditions */
+          },
+          {
             "refine_plan": [
               {
                 "table": "`t1`"
@@ -1254,9 +1129,6 @@ ON table2 .col_int_key = table1 .col_int_key
                   "considered_access_paths": [
                     {
                       "rows_to_scan": 4,
-                      "filtering_effect": [
-                      ] /* filtering_effect */,
-                      "final_filtering_effect": 1,
                       "access_type": "scan",
                       "resulting_rows": 4,
                       "cost": 0.9017,
@@ -1287,6 +1159,10 @@ ON table2 .col_int_key = table1 .col_int_key
           {
             "optimizing_distinct_group_by_order_by": {
             } /* optimizing_distinct_group_by_order_by */
+          },
+          {
+            "finalizing_table_conditions": [
+            ] /* finalizing_table_conditions */
           },
           {
             "refine_plan": [
@@ -1551,26 +1427,6 @@ SELECT 1 FROM t1 WHERE 1 LIKE
 (SELECT a FROM t1 WHERE a = 1 ORDER BY c)	{
   "steps": [
     {
-      "join_preparation": {
-        "select#": 1,
-        "steps": [
-          {
-            "join_preparation": {
-              "select#": 2,
-              "steps": [
-                {
-                  "expanded_query": "/* select#2 */ select `t1`.`a` from `t1` where (`t1`.`a` = 1)"
-                }
-              ] /* steps */
-            } /* join_preparation */
-          },
-          {
-            "expanded_query": "/* select#1 */ select 1 AS `1` from `t1` where (1 like (/* select#2 */ select `t1`.`a` from `t1` where (`t1`.`a` = 1)))"
-          }
-        ] /* steps */
-      } /* join_preparation */
-    },
-    {
       "join_optimization": {
         "select#": 1,
         "steps": [
@@ -1643,13 +1499,13 @@ SELECT 1 FROM t1 WHERE 1 LIKE
                                       "table": "`t1`",
                                       "field": "a",
                                       "equals": "1",
-                                      "null_rejecting": false
+                                      "null_rejecting": true
                                     },
                                     {
                                       "table": "`t1`",
                                       "field": "a",
                                       "equals": "1",
-                                      "null_rejecting": false
+                                      "null_rejecting": true
                                     }
                                   ] /* ref_optimizer_key_uses */
                                 },
@@ -1680,7 +1536,7 @@ SELECT 1 FROM t1 WHERE 1 LIKE
                                           }
                                         ] /* potential_range_indexes */,
                                         "best_covering_index_scan": {
-                                          "index": "a",
+                                          "index": "a_2",
                                           "cost": 0.35,
                                           "chosen": true
                                         } /* best_covering_index_scan */,
@@ -1690,6 +1546,20 @@ SELECT 1 FROM t1 WHERE 1 LIKE
                                           "chosen": false,
                                           "cause": "not_group_by_or_distinct"
                                         } /* group_index_range */,
+                                        "skip_scan_range": {
+                                          "potential_skip_scan_indexes": [
+                                            {
+                                              "index": "a",
+                                              "usable": false,
+                                              "cause": "query_references_nonkey_column"
+                                            },
+                                            {
+                                              "index": "a_2",
+                                              "usable": false,
+                                              "cause": "no_range_predicate"
+                                            }
+                                          ] /* potential_skip_scan_indexes */
+                                        } /* skip_scan_range */,
                                         "analyzing_range_alternatives": {
                                           "range_scan_alternatives": [
                                             {
@@ -1700,9 +1570,9 @@ SELECT 1 FROM t1 WHERE 1 LIKE
                                               "index_dives_for_eq_ranges": true,
                                               "rowid_ordered": true,
                                               "using_mrr": false,
-                                              "index_only": true,
+                                              "index_only": false,
                                               "rows": 1,
-                                              "cost": 0.36,
+                                              "cost": 0.61,
                                               "chosen": false,
                                               "cause": "cost"
                                             },
@@ -1774,10 +1644,19 @@ SELECT 1 FROM t1 WHERE 1 LIKE
                                     "attached_conditions_summary": [
                                       {
                                         "table": "`t1`",
-                                        "attached": null
+                                        "attached": "(`t1`.`a` = 1)"
                                       }
                                     ] /* attached_conditions_summary */
                                   } /* attaching_conditions_to_tables */
+                                },
+                                {
+                                  "finalizing_table_conditions": [
+                                    {
+                                      "table": "`t1`",
+                                      "original_table_condition": "(`t1`.`a` = 1)",
+                                      "final_table_condition   ": null
+                                    }
+                                  ] /* finalizing_table_conditions */
                                 },
                                 {
                                   "refine_plan": [
@@ -2004,11 +1883,15 @@ a TINYTEXT NOT NULL,
 b TINYINT(3) UNSIGNED NOT NULL,
 PRIMARY KEY (a(32),b)
 ) ENGINE=MyISAM, CHARSET utf8mb4;
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 CREATE TABLE t2 (
 a TINYTEXT NOT NULL,
 b TINYINT(3) UNSIGNED NOT NULL,
 PRIMARY KEY (a(32),b)
 ) ENGINE=INNODB, CHARSET utf8mb4;
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 INSERT INTO t1 VALUES ('a',1),('a',2);
 INSERT INTO t2 VALUES ('a',1),('a',2),('a',3),('b',1),('c',1),('c',4),('e',2);
 ANALYZE TABLE t1;
@@ -2147,6 +2030,8 @@ EXPLAIN SELECT c1, c2 FROM t1 ORDER BY c1 DESC LIMIT 1	{
           {
             "reconsidering_access_paths_for_index_ordering": {
               "clause": "ORDER BY",
+              "steps": [
+              ] /* steps */,
               "index_order_summary": {
                 "table": "`t1`",
                 "index_provides_order": true,
@@ -2156,6 +2041,10 @@ EXPLAIN SELECT c1, c2 FROM t1 ORDER BY c1 DESC LIMIT 1	{
                 "access_type": "index"
               } /* index_order_summary */
             } /* reconsidering_access_paths_for_index_ordering */
+          },
+          {
+            "finalizing_table_conditions": [
+            ] /* finalizing_table_conditions */
           },
           {
             "refine_plan": [
@@ -2181,3 +2070,33 @@ EXPLAIN SELECT c1, c2 FROM t1 ORDER BY c1 DESC LIMIT 1	{
   ] /* steps */
 }	0	0
 DROP TABLE t1;
+# Bug#29016383 - fil_report_invalid_page_access
+CREATE TABLE t1 (
+pk INTEGER PRIMARY KEY,
+a INTEGER,
+b VARCHAR(20)
+);
+CREATE TABLE t2 (
+pk INTEGER PRIMARY KEY,
+c VARCHAR(20),
+KEY (c)
+);
+INSERT INTO t2 VALUES
+(1,'koeiwsgpmfyvvuqvtjnc'),
+(2,'pmfyvvuqvtjncdsvq'),
+(3,'mfyv'),
+(4,NULL);
+SET end_markers_in_json=off;
+SELECT alias1.*
+FROM t2 AS alias1, t2 AS alias2
+WHERE alias2.c IN (
+WITH qn AS (SELECT b FROM t1 WHERE a = alias1.pk)
+SELECT * FROM qn);
+pk	c
+# Prove that the predicate from the WHERE clause of the CTE
+# is decorrelated:
+SELECT json_extract(trace,'$**.decorrelated_predicates')
+FROM information_schema.optimizer_trace;
+json_extract(trace,'$**.decorrelated_predicates')
+NULL
+DROP TABLE t1, t2;

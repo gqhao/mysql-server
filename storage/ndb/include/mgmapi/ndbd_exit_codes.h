@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -121,6 +121,7 @@ typedef ndbd_exit_classification_enum ndbd_exit_classification;
 /* NDBCNTR 6100-> */
 #define NDBD_EXIT_RESTART_TIMEOUT             6100
 #define NDBD_EXIT_RESTART_DURING_SHUTDOWN     6101
+#define NDBD_EXIT_UPGRADE_INITIAL_REQUIRED    6102
 
 /* TC  6200-> */
 /* DIH 6300-> */
@@ -159,6 +160,7 @@ typedef ndbd_exit_classification_enum ndbd_exit_classification;
 #define NDBD_EXIT_AFS_NO_MORE_RESOURCES     2814
 #define NDBD_EXIT_AFS_NO_SUCH_FILE          2815
 #define NDBD_EXIT_AFS_READ_UNDERFLOW        2816
+#define NDBD_EXIT_AFS_ZLIB_INIT_FAIL        2817
 
 #define NDBD_EXIT_INVALID_LCP_FILE          2352
 #define NDBD_EXIT_INSUFFICENT_NODES         2353

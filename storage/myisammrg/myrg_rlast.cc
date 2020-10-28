@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -23,6 +23,7 @@
 #include <stddef.h>
 
 #include "my_inttypes.h"
+#include "my_thread_local.h"
 #include "storage/myisammrg/myrg_def.h"
 
 /* Read last row with the same key as the previous read. */
@@ -35,7 +36,7 @@ int myrg_rlast(MYRG_INFO *info, uchar *buf, int inx) {
   if (_myrg_init_queue(info, inx, HA_READ_KEY_OR_PREV)) return my_errno();
 
   for (table = info->open_tables; table < info->end_table; table++) {
-    if ((err = mi_rlast(table->table, NULL, inx))) {
+    if ((err = mi_rlast(table->table, nullptr, inx))) {
       if (err == HA_ERR_END_OF_FILE) continue;
       return err;
     }

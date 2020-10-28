@@ -48,6 +48,45 @@ handle_ok
 	[end] message: Records: 12  Duplicates: 0  Warnings: 0
 <<<<<<<<<<<<>>>>>>>>>>>>>>>
 ------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[CREATE PROCEDURE proc_set_out_params(   OUT v_str_1 CHAR(32),    OUT v_dbl_1 DOUBLE(4, 2),    OUT v_dec_1 DECIMAL(6, 3),    OUT v_int_1 INT)BEGIN    SET v_str_1 = 'test_1';    SET v_dbl_1 = 12.34;    SET v_dec_1 = 567.891;    SET v_int_1 = 2345; END]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  1
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[CREATE PROCEDURE verify_user_variables_are_null(v_str_1 CHAR(32),    v_dbl_1 DOUBLE(4, 2),    v_dec_1 DECIMAL(6, 3),    v_int_1 INT)BEGIN DECLARE unexpected CONDITION FOR SQLSTATE '45000';  IF v_str_1 is not null THEN    SIGNAL unexpected;  ELSEIF v_dbl_1 is not null THEN    SIGNAL unexpected;  ELSEIF v_dec_1 is not null THEN    SIGNAL unexpected;  ELSEIF v_int_1 is not null THEN    SIGNAL unexpected;  END IF;END]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  1
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[CREATE PROCEDURE verify_user_variables_are_set(v_str_1 CHAR(32),    v_dbl_1 DOUBLE(4, 2),    v_dec_1 DECIMAL(6, 3),    v_int_1 INT)BEGIN DECLARE unexpected CONDITION FOR SQLSTATE '45000';  IF v_str_1 != 'test_1' THEN    SIGNAL unexpected;  ELSEIF v_dbl_1 != 12.34 THEN    SIGNAL unexpected;  ELSEIF v_dec_1 != 567.891 THEN    SIGNAL unexpected;  ELSEIF v_int_1 != 2345 THEN    SIGNAL unexpected;  END IF;END]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  1
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
 ##################################################################
 test COM_STMT_EXECUTE and FETCH AFTER CLOSE
 ##################################################################
@@ -136,22 +175,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -324,22 +363,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -475,22 +514,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -671,22 +710,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -852,22 +891,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -1038,22 +1077,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -1275,22 +1314,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -1510,22 +1549,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -2655,22 +2694,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] length: 4294967292
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
+		[meta][field] type: LONG_BLOB (251)
 
 
 	[meta][charset result] number: 33
@@ -2759,22 +2798,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] length: 4294967292
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
+		[meta][field] type: LONG_BLOB (251)
 
 
 	[meta][charset result] number: 33
@@ -2862,7 +2901,7 @@ handle_ok
 <<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
 	[end] server status: 2
 	[end] server status: AUTOCOMMIT 
-	[end] warning count:  0
+	[end] warning count:  1
 	[end] affected rows:  0
 	[end] last insert id: 0
 	[end] message: 
@@ -2875,7 +2914,7 @@ handle_ok
 <<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
 	[end] server status: 2
 	[end] server status: AUTOCOMMIT 
-	[end] warning count:  0
+	[end] warning count:  1
 	[end] affected rows:  0
 	[end] last insert id: 0
 	[end] message: 
@@ -2914,7 +2953,7 @@ handle_ok
 <<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
 	[end] server status: 2
 	[end] server status: AUTOCOMMIT 
-	[end] warning count:  0
+	[end] warning count:  2
 	[end] affected rows:  0
 	[end] last insert id: 0
 	[end] message: 
@@ -3007,10 +3046,21 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -3018,10 +3068,54 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -3029,88 +3123,33 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -3276,10 +3315,21 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -3287,10 +3337,54 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -3298,88 +3392,33 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -3635,10 +3674,21 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -3646,10 +3696,54 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -3657,88 +3751,33 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -4101,10 +4140,21 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -4112,10 +4162,54 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -4123,88 +4217,33 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -4507,6 +4546,504 @@ CLOSE PS
 [CS_TEXT_REPRESENTATION]
 COM_STMT_CLOSE: stmt_id [6]
 ------------------------------------------------------------------
+##################################################################
+Test COM_STMT_EXECUTE with wrong data type
+##################################################################
+CREATE PREPARED STATEMENT
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_PREPARE: query[SELECT CONCAT(9< ?)]
+handle_start_column_metadata
+handle_end_column_metadata
+handle_start_row
+handle_end_row
+handle_start_column_metadata
+handle_end_column_metadata
+handle_start_column_metadata
+handle_end_column_metadata
+------------------------------------------------------------------
+EXECUTE PREPARED STATEMENT WITH PARAMETERS AND CURSOR
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_EXECUTE: stmt_id [7]
+handle_start_column_metadata
+handle_end_column_metadata
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: stmt_id
+		[meta][field] org col name: 
+		[meta][field] length: 96
+		[meta][field] charsetnr: 33
+		[meta][field] flags: 1 (NOT_NULL )
+		[meta][field] decimals: 31
+		[meta][field] type: VARCHAR (15)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: column_no
+		[meta][field] org col name: 
+		[meta][field] length: 96
+		[meta][field] charsetnr: 33
+		[meta][field] flags: 1 (NOT_NULL )
+		[meta][field] decimals: 31
+		[meta][field] type: VARCHAR (15)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: param_no
+		[meta][field] org col name: 
+		[meta][field] length: 96
+		[meta][field] charsetnr: 33
+		[meta][field] flags: 1 (NOT_NULL )
+		[meta][field] decimals: 31
+		[meta][field] type: VARCHAR (15)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: warning_no
+		[meta][field] org col name: 
+		[meta][field] length: 96
+		[meta][field] charsetnr: 33
+		[meta][field] flags: 1 (NOT_NULL )
+		[meta][field] decimals: 31
+		[meta][field] type: VARCHAR (15)
+
+
+	[meta][charset result] number: 33
+	[meta][charset result] name: utf8
+	[meta][charset result] collation: utf8_general_ci
+	[meta][charset result] sort order: 
+
+	[meta] current col: 0
+		[data][.stmt_id][  1][7]
+	[meta] current col: 1
+		[data][.column_no][  1][1]
+	[meta] current col: 2
+		[data][.param_no][  1][1]
+	[meta] current col: 3
+		[data][.warning_no][  1][0]
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+
+	[meta][charset result] number: 33
+	[meta][charset result] name: utf8
+	[meta][charset result] collation: utf8_general_ci
+	[meta][charset result] sort order: 
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: CONCAT(9< ?)
+		[meta][field] org col name: 
+		[meta][field] length: 3
+		[meta][field] charsetnr: 33
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
+		[meta][field] type: VARCHAR (15)
+
+
+	[meta][charset result] number: 33
+	[meta][charset result] name: utf8
+	[meta][charset result] collation: utf8_general_ci
+	[meta][charset result] sort order: 
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: CONCAT(9< ?)
+		[meta][field] org col name: CONCAT(9< ?)
+		[meta][field] length: 3
+		[meta][field] charsetnr: 33
+		[meta][field] flags: 0
+		[meta][field] decimals: 0
+		[meta][field] type: VARCHAR (15)
+
+
+	[meta][charset result] number: 33
+	[meta][charset result] name: utf8
+	[meta][charset result] collation: utf8_general_ci
+	[meta][charset result] sort order: 
+
+	[end] server status: 66
+	[end] server status: AUTOCOMMIT CURSOR_EXISTS 
+	[end] warning count:  1
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+CLOSE PS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_CLOSE: stmt_id [7]
+------------------------------------------------------------------
+##################################################################
+Test COM_STMT_EXECUTE with out-params as placeholders
+##################################################################
+RESET VARIABLES THAT ARE GOING TO BE USED FOR OUT-PARAMS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[SET @my_v1=null, @my_v2=null, @my_v3=null, @my_v4=null]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_PREPARE: query[CALL proc_set_out_params(?, ?, ?, ?)]
+handle_start_column_metadata
+handle_end_column_metadata
+handle_start_row
+handle_end_row
+handle_start_column_metadata
+handle_end_column_metadata
+------------------------------------------------------------------
+EXECUTE PREPARED STATEMENT WITH PARAMETERS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_EXECUTE: stmt_id [8]
+handle_start_column_metadata
+handle_end_column_metadata
+handle_start_row
+handle_end_row
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_str_1
+		[meta][field] org col name: v_str_1
+		[meta][field] length: 128
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 0
+		[meta][field] type: STRING (254)
+
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_dbl_1
+		[meta][field] org col name: v_dbl_1
+		[meta][field] length: 4
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 0
+		[meta][field] decimals: 2
+		[meta][field] type: DOUBLE (5)
+
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_dec_1
+		[meta][field] org col name: v_dec_1
+		[meta][field] length: 8
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 0
+		[meta][field] decimals: 3
+		[meta][field] type: NEWDECIMAL (246)
+
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_int_1
+		[meta][field] org col name: v_int_1
+		[meta][field] length: 11
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 0
+		[meta][field] decimals: 0
+		[meta][field] type: LONG (3)
+
+
+	[meta][charset result] number: 33
+	[meta][charset result] name: utf8
+	[meta][charset result] collation: utf8_general_ci
+	[meta][charset result] sort order: 
+
+	[meta] current col: 0
+		[data][proc_set_out_params.v_str_1][  6][test_1]
+	[meta] current col: 1
+		[data][proc_set_out_params.v_dbl_1][  5][12.34]
+	[meta] current col: 2
+		[data][proc_set_out_params.v_dec_1][  7][567.891]
+	[meta] current col: 3
+		[data][proc_set_out_params.v_int_1][  4][2345]
+
+	[end] server status: 4106
+	[end] server status: AUTOCOMMIT MORE_RESULTS_EXISTS PS_OUT_PARAMS 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_str_1
+		[meta][field] org col name: v_str_1
+		[meta][field] length: 128
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 0
+		[meta][field] type: STRING (254)
+
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_dbl_1
+		[meta][field] org col name: v_dbl_1
+		[meta][field] length: 4
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 0
+		[meta][field] decimals: 2
+		[meta][field] type: DOUBLE (5)
+
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_dec_1
+		[meta][field] org col name: v_dec_1
+		[meta][field] length: 8
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 0
+		[meta][field] decimals: 3
+		[meta][field] type: NEWDECIMAL (246)
+
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_int_1
+		[meta][field] org col name: v_int_1
+		[meta][field] length: 11
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 0
+		[meta][field] decimals: 0
+		[meta][field] type: LONG (3)
+
+
+	[meta][charset result] number: 33
+	[meta][charset result] name: utf8
+	[meta][charset result] collation: utf8_general_ci
+	[meta][charset result] sort order: 
+
+	[meta] current col: 0
+		[data][proc_set_out_params.v_str_1][  6][test_1]
+	[meta] current col: 1
+		[data][proc_set_out_params.v_dbl_1][  5][12.34]
+	[meta] current col: 2
+		[data][proc_set_out_params.v_dec_1][  7][567.891]
+	[meta] current col: 3
+		[data][proc_set_out_params.v_int_1][  4][2345]
+
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+VERIFY THAT VARIABLES ARE STILL NULL AND OUT PRAMETERS WERE TRANSFERED IN METADATA
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[CALL verify_user_variables_are_null(@my_v1, @my_v2, @my_v3, @my_v4)]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+CLOSE PS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_CLOSE: stmt_id [8]
+------------------------------------------------------------------
+##################################################################
+Test COM_STMT_EXECUTE with out-params as variables
+##################################################################
+RESET VARIABLES THAT ARE GOING TO BE USED FOR OUT-PARAMS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[SET @my_v1=null, @my_v2=null, @my_v3=null, @my_v4=null]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_PREPARE: query[CALL proc_set_out_params(@my_v1, @my_v2, @my_v3, @my_v4)]
+handle_start_column_metadata
+handle_end_column_metadata
+handle_start_row
+handle_end_row
+------------------------------------------------------------------
+EXECUTE PREPARED STATEMENT WITHOUT PARAMETERS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_EXECUTE: stmt_id [9]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+VERIFY THAT VARIABLES ARE SET AND OUT PRAMETERS WERE NOT TRANSFERED IN METADATA
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[CALL verify_user_variables_are_set(@my_v1, @my_v2, @my_v3, @my_v4)]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+CLOSE PS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_CLOSE: stmt_id [9]
+------------------------------------------------------------------
+##################################################################
+Test COM_QUERY with out-params as placeholders
+##################################################################
+RESET VARIABLES THAT ARE GOING TO BE USED FOR OUT-PARAMS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[SET @my_v1=null, @my_v2=null, @my_v3=null, @my_v4=null]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[PREPARE stmt FROM 'CALL proc_set_out_params(?, ?, ?, ?)']
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: Statement prepared
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+EXECUTE PREPARED STATEMENT WITHOUT PARAMETERS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[EXECUTE stmt USING @my_v1, @my_v2, @my_v3, @my_v4]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+VERIFY THAT VARIABLES ARE SET AND OUT PRAMETERS WERE NOT TRANSFERED IN METADATA
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[CALL verify_user_variables_are_set(@my_v1, @my_v2, @my_v3, @my_v4)]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+CLOSE PS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[DEALLOCATE PREPARE stmt;]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+##################################################################
+Test COM_STMT_EXECUTE with wrong parameters
+##################################################################
+CREATE PREPARED STATEMENT
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_PREPARE: query[SELECT * from t1 where a = ?]
+handle_start_column_metadata
+handle_end_column_metadata
+handle_start_row
+handle_end_row
+handle_start_column_metadata
+handle_end_column_metadata
+handle_start_column_metadata
+handle_end_column_metadata
+------------------------------------------------------------------
+EXECUTE THE PS WITH INVALID PARAMETER TYPE
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_EXECUTE: stmt_id [11]
+handle_error
+[1210][HY000][Incorrect arguments to mysqld_stmt_execute]
+------------------------------------------------------------------
+EXECUTE THE PS WITH BOOL PARAMETER TYPE
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_EXECUTE: stmt_id [11]
+handle_error
+[1210][HY000][Incorrect arguments to mysqld_stmt_execute]
+------------------------------------------------------------------
 ------------------------------------------------------------------
 [CS_TEXT_REPRESENTATION]
 COM_QUERY: query[DROP TABLE IF EXISTS t1]
@@ -4575,6 +5112,45 @@ handle_ok
 ------------------------------------------------------------------
 [CS_TEXT_REPRESENTATION]
 COM_QUERY: query[DROP PROCEDURE IF EXISTS p1]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[DROP PROCEDURE IF EXISTS proc_set_out_params]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[DROP PROCEDURE IF EXISTS verify_user_variables_are_null]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[DROP PROCEDURE IF EXISTS verify_user_variables_are_set]
 handle_ok
 <<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
 	[end] server status: 2
@@ -4632,6 +5208,45 @@ handle_ok
 	[end] message: Records: 12  Duplicates: 0  Warnings: 0
 <<<<<<<<<<<<>>>>>>>>>>>>>>>
 ------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[CREATE PROCEDURE proc_set_out_params(   OUT v_str_1 CHAR(32),    OUT v_dbl_1 DOUBLE(4, 2),    OUT v_dec_1 DECIMAL(6, 3),    OUT v_int_1 INT)BEGIN    SET v_str_1 = 'test_1';    SET v_dbl_1 = 12.34;    SET v_dec_1 = 567.891;    SET v_int_1 = 2345; END]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  1
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[CREATE PROCEDURE verify_user_variables_are_null(v_str_1 CHAR(32),    v_dbl_1 DOUBLE(4, 2),    v_dec_1 DECIMAL(6, 3),    v_int_1 INT)BEGIN DECLARE unexpected CONDITION FOR SQLSTATE '45000';  IF v_str_1 is not null THEN    SIGNAL unexpected;  ELSEIF v_dbl_1 is not null THEN    SIGNAL unexpected;  ELSEIF v_dec_1 is not null THEN    SIGNAL unexpected;  ELSEIF v_int_1 is not null THEN    SIGNAL unexpected;  END IF;END]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  1
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[CREATE PROCEDURE verify_user_variables_are_set(v_str_1 CHAR(32),    v_dbl_1 DOUBLE(4, 2),    v_dec_1 DECIMAL(6, 3),    v_int_1 INT)BEGIN DECLARE unexpected CONDITION FOR SQLSTATE '45000';  IF v_str_1 != 'test_1' THEN    SIGNAL unexpected;  ELSEIF v_dbl_1 != 12.34 THEN    SIGNAL unexpected;  ELSEIF v_dec_1 != 567.891 THEN    SIGNAL unexpected;  ELSEIF v_int_1 != 2345 THEN    SIGNAL unexpected;  END IF;END]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  1
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
 ##################################################################
 test COM_STMT_EXECUTE and FETCH AFTER CLOSE
 ##################################################################
@@ -4720,22 +5335,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -4908,22 +5523,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -5059,22 +5674,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -5255,22 +5870,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -5436,22 +6051,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -5622,22 +6237,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -5859,22 +6474,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -6094,22 +6709,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -7239,22 +7854,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] length: 4294967292
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
+		[meta][field] type: LONG_BLOB (251)
 
 
 	[meta][charset result] number: 33
@@ -7343,22 +7958,22 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] length: 4294967292
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
+		[meta][field] type: LONG_BLOB (251)
 
 
 	[meta][charset result] number: 33
@@ -7446,7 +8061,7 @@ handle_ok
 <<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
 	[end] server status: 2
 	[end] server status: AUTOCOMMIT 
-	[end] warning count:  0
+	[end] warning count:  1
 	[end] affected rows:  0
 	[end] last insert id: 0
 	[end] message: 
@@ -7459,7 +8074,7 @@ handle_ok
 <<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
 	[end] server status: 2
 	[end] server status: AUTOCOMMIT 
-	[end] warning count:  0
+	[end] warning count:  1
 	[end] affected rows:  0
 	[end] last insert id: 0
 	[end] message: 
@@ -7498,7 +8113,7 @@ handle_ok
 <<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
 	[end] server status: 2
 	[end] server status: AUTOCOMMIT 
-	[end] warning count:  0
+	[end] warning count:  2
 	[end] affected rows:  0
 	[end] last insert id: 0
 	[end] message: 
@@ -7591,10 +8206,21 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -7602,10 +8228,54 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -7613,88 +8283,33 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -7860,10 +8475,21 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -7871,10 +8497,54 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -7882,88 +8552,33 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -8219,10 +8834,21 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -8230,10 +8856,54 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -8241,88 +8911,33 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -8685,10 +9300,21 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -8696,10 +9322,54 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 65532
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
 		[meta][field] type: VARCHAR (15)
 
 		[meta][field] db name: 
@@ -8707,88 +9377,33 @@ handle_ok
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 23
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 31
+		[meta][field] type: DOUBLE (5)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 67
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] decimals: 30
+		[meta][field] type: NEWDECIMAL (246)
 
 		[meta][field] db name: 
 		[meta][field] table name: 
 		[meta][field] org table name: 
 		[meta][field] col name: ?
 		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
 		[meta][field] flags: 128 (BINARY )
 		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
-
-		[meta][field] db name: 
-		[meta][field] table name: 
-		[meta][field] org table name: 
-		[meta][field] col name: ?
-		[meta][field] org col name: 
-		[meta][field] length: 0
-		[meta][field] charsetnr: 63
-		[meta][field] flags: 128 (BINARY )
-		[meta][field] decimals: 0
-		[meta][field] type: VARCHAR (15)
+		[meta][field] type: LONGLONG (8)
 
 
 	[meta][charset result] number: 33
@@ -9091,6 +9706,504 @@ CLOSE PS
 [CS_TEXT_REPRESENTATION]
 COM_STMT_CLOSE: stmt_id [6]
 ------------------------------------------------------------------
+##################################################################
+Test COM_STMT_EXECUTE with wrong data type
+##################################################################
+CREATE PREPARED STATEMENT
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_PREPARE: query[SELECT CONCAT(9< ?)]
+handle_start_column_metadata
+handle_end_column_metadata
+handle_start_row
+handle_end_row
+handle_start_column_metadata
+handle_end_column_metadata
+handle_start_column_metadata
+handle_end_column_metadata
+------------------------------------------------------------------
+EXECUTE PREPARED STATEMENT WITH PARAMETERS AND CURSOR
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_EXECUTE: stmt_id [7]
+handle_start_column_metadata
+handle_end_column_metadata
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: stmt_id
+		[meta][field] org col name: 
+		[meta][field] length: 96
+		[meta][field] charsetnr: 33
+		[meta][field] flags: 1 (NOT_NULL )
+		[meta][field] decimals: 31
+		[meta][field] type: VARCHAR (15)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: column_no
+		[meta][field] org col name: 
+		[meta][field] length: 96
+		[meta][field] charsetnr: 33
+		[meta][field] flags: 1 (NOT_NULL )
+		[meta][field] decimals: 31
+		[meta][field] type: VARCHAR (15)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: param_no
+		[meta][field] org col name: 
+		[meta][field] length: 96
+		[meta][field] charsetnr: 33
+		[meta][field] flags: 1 (NOT_NULL )
+		[meta][field] decimals: 31
+		[meta][field] type: VARCHAR (15)
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: warning_no
+		[meta][field] org col name: 
+		[meta][field] length: 96
+		[meta][field] charsetnr: 33
+		[meta][field] flags: 1 (NOT_NULL )
+		[meta][field] decimals: 31
+		[meta][field] type: VARCHAR (15)
+
+
+	[meta][charset result] number: 33
+	[meta][charset result] name: utf8
+	[meta][charset result] collation: utf8_general_ci
+	[meta][charset result] sort order: 
+
+	[meta] current col: 0
+		[data][.stmt_id][  1][7]
+	[meta] current col: 1
+		[data][.column_no][  1][1]
+	[meta] current col: 2
+		[data][.param_no][  1][1]
+	[meta] current col: 3
+		[data][.warning_no][  1][0]
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: ?
+		[meta][field] org col name: 
+		[meta][field] length: 21
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 128 (BINARY )
+		[meta][field] decimals: 0
+		[meta][field] type: LONGLONG (8)
+
+
+	[meta][charset result] number: 33
+	[meta][charset result] name: utf8
+	[meta][charset result] collation: utf8_general_ci
+	[meta][charset result] sort order: 
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: CONCAT(9< ?)
+		[meta][field] org col name: 
+		[meta][field] length: 3
+		[meta][field] charsetnr: 33
+		[meta][field] flags: 0
+		[meta][field] decimals: 31
+		[meta][field] type: VARCHAR (15)
+
+
+	[meta][charset result] number: 33
+	[meta][charset result] name: utf8
+	[meta][charset result] collation: utf8_general_ci
+	[meta][charset result] sort order: 
+
+		[meta][field] db name: 
+		[meta][field] table name: 
+		[meta][field] org table name: 
+		[meta][field] col name: CONCAT(9< ?)
+		[meta][field] org col name: CONCAT(9< ?)
+		[meta][field] length: 3
+		[meta][field] charsetnr: 33
+		[meta][field] flags: 0
+		[meta][field] decimals: 0
+		[meta][field] type: VARCHAR (15)
+
+
+	[meta][charset result] number: 33
+	[meta][charset result] name: utf8
+	[meta][charset result] collation: utf8_general_ci
+	[meta][charset result] sort order: 
+
+	[end] server status: 66
+	[end] server status: AUTOCOMMIT CURSOR_EXISTS 
+	[end] warning count:  1
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+CLOSE PS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_CLOSE: stmt_id [7]
+------------------------------------------------------------------
+##################################################################
+Test COM_STMT_EXECUTE with out-params as placeholders
+##################################################################
+RESET VARIABLES THAT ARE GOING TO BE USED FOR OUT-PARAMS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[SET @my_v1=null, @my_v2=null, @my_v3=null, @my_v4=null]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_PREPARE: query[CALL proc_set_out_params(?, ?, ?, ?)]
+handle_start_column_metadata
+handle_end_column_metadata
+handle_start_row
+handle_end_row
+handle_start_column_metadata
+handle_end_column_metadata
+------------------------------------------------------------------
+EXECUTE PREPARED STATEMENT WITH PARAMETERS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_EXECUTE: stmt_id [8]
+handle_start_column_metadata
+handle_end_column_metadata
+handle_start_row
+handle_end_row
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_str_1
+		[meta][field] org col name: v_str_1
+		[meta][field] length: 128
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 0
+		[meta][field] type: STRING (254)
+
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_dbl_1
+		[meta][field] org col name: v_dbl_1
+		[meta][field] length: 4
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 0
+		[meta][field] decimals: 2
+		[meta][field] type: DOUBLE (5)
+
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_dec_1
+		[meta][field] org col name: v_dec_1
+		[meta][field] length: 8
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 0
+		[meta][field] decimals: 3
+		[meta][field] type: NEWDECIMAL (246)
+
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_int_1
+		[meta][field] org col name: v_int_1
+		[meta][field] length: 11
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 0
+		[meta][field] decimals: 0
+		[meta][field] type: LONG (3)
+
+
+	[meta][charset result] number: 33
+	[meta][charset result] name: utf8
+	[meta][charset result] collation: utf8_general_ci
+	[meta][charset result] sort order: 
+
+	[meta] current col: 0
+		[data][proc_set_out_params.v_str_1][  6][test_1]
+	[meta] current col: 1
+		[data][proc_set_out_params.v_dbl_1][  5][12.34]
+	[meta] current col: 2
+		[data][proc_set_out_params.v_dec_1][  7][567.891]
+	[meta] current col: 3
+		[data][proc_set_out_params.v_int_1][  4][2345]
+
+	[end] server status: 4106
+	[end] server status: AUTOCOMMIT MORE_RESULTS_EXISTS PS_OUT_PARAMS 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_str_1
+		[meta][field] org col name: v_str_1
+		[meta][field] length: 128
+		[meta][field] charsetnr: 255
+		[meta][field] flags: 0
+		[meta][field] decimals: 0
+		[meta][field] type: STRING (254)
+
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_dbl_1
+		[meta][field] org col name: v_dbl_1
+		[meta][field] length: 4
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 0
+		[meta][field] decimals: 2
+		[meta][field] type: DOUBLE (5)
+
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_dec_1
+		[meta][field] org col name: v_dec_1
+		[meta][field] length: 8
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 0
+		[meta][field] decimals: 3
+		[meta][field] type: NEWDECIMAL (246)
+
+		[meta][field] db name: test
+		[meta][field] table name: proc_set_out_params
+		[meta][field] org table name: proc_set_out_params
+		[meta][field] col name: v_int_1
+		[meta][field] org col name: v_int_1
+		[meta][field] length: 11
+		[meta][field] charsetnr: 8
+		[meta][field] flags: 0
+		[meta][field] decimals: 0
+		[meta][field] type: LONG (3)
+
+
+	[meta][charset result] number: 33
+	[meta][charset result] name: utf8
+	[meta][charset result] collation: utf8_general_ci
+	[meta][charset result] sort order: 
+
+	[meta] current col: 0
+		[data][proc_set_out_params.v_str_1][  6][test_1]
+	[meta] current col: 1
+		[data][proc_set_out_params.v_dbl_1][  5][12.34]
+	[meta] current col: 2
+		[data][proc_set_out_params.v_dec_1][  7][567.891]
+	[meta] current col: 3
+		[data][proc_set_out_params.v_int_1][  4][2345]
+
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+VERIFY THAT VARIABLES ARE STILL NULL AND OUT PRAMETERS WERE TRANSFERED IN METADATA
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[CALL verify_user_variables_are_null(@my_v1, @my_v2, @my_v3, @my_v4)]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+CLOSE PS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_CLOSE: stmt_id [8]
+------------------------------------------------------------------
+##################################################################
+Test COM_STMT_EXECUTE with out-params as variables
+##################################################################
+RESET VARIABLES THAT ARE GOING TO BE USED FOR OUT-PARAMS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[SET @my_v1=null, @my_v2=null, @my_v3=null, @my_v4=null]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_PREPARE: query[CALL proc_set_out_params(@my_v1, @my_v2, @my_v3, @my_v4)]
+handle_start_column_metadata
+handle_end_column_metadata
+handle_start_row
+handle_end_row
+------------------------------------------------------------------
+EXECUTE PREPARED STATEMENT WITHOUT PARAMETERS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_EXECUTE: stmt_id [9]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+VERIFY THAT VARIABLES ARE SET AND OUT PRAMETERS WERE NOT TRANSFERED IN METADATA
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[CALL verify_user_variables_are_set(@my_v1, @my_v2, @my_v3, @my_v4)]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+CLOSE PS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_CLOSE: stmt_id [9]
+------------------------------------------------------------------
+##################################################################
+Test COM_QUERY with out-params as placeholders
+##################################################################
+RESET VARIABLES THAT ARE GOING TO BE USED FOR OUT-PARAMS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[SET @my_v1=null, @my_v2=null, @my_v3=null, @my_v4=null]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[PREPARE stmt FROM 'CALL proc_set_out_params(?, ?, ?, ?)']
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: Statement prepared
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+EXECUTE PREPARED STATEMENT WITHOUT PARAMETERS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[EXECUTE stmt USING @my_v1, @my_v2, @my_v3, @my_v4]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+VERIFY THAT VARIABLES ARE SET AND OUT PRAMETERS WERE NOT TRANSFERED IN METADATA
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[CALL verify_user_variables_are_set(@my_v1, @my_v2, @my_v3, @my_v4)]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+CLOSE PS
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[DEALLOCATE PREPARE stmt;]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+##################################################################
+Test COM_STMT_EXECUTE with wrong parameters
+##################################################################
+CREATE PREPARED STATEMENT
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_PREPARE: query[SELECT * from t1 where a = ?]
+handle_start_column_metadata
+handle_end_column_metadata
+handle_start_row
+handle_end_row
+handle_start_column_metadata
+handle_end_column_metadata
+handle_start_column_metadata
+handle_end_column_metadata
+------------------------------------------------------------------
+EXECUTE THE PS WITH INVALID PARAMETER TYPE
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_EXECUTE: stmt_id [11]
+handle_error
+[1210][HY000][Incorrect arguments to mysqld_stmt_execute]
+------------------------------------------------------------------
+EXECUTE THE PS WITH BOOL PARAMETER TYPE
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_STMT_EXECUTE: stmt_id [11]
+handle_error
+[1210][HY000][Incorrect arguments to mysqld_stmt_execute]
+------------------------------------------------------------------
 ------------------------------------------------------------------
 [CS_TEXT_REPRESENTATION]
 COM_QUERY: query[DROP TABLE IF EXISTS t1]
@@ -9159,6 +10272,45 @@ handle_ok
 ------------------------------------------------------------------
 [CS_TEXT_REPRESENTATION]
 COM_QUERY: query[DROP PROCEDURE IF EXISTS p1]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[DROP PROCEDURE IF EXISTS proc_set_out_params]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[DROP PROCEDURE IF EXISTS verify_user_variables_are_null]
+handle_ok
+<<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
+	[end] server status: 2
+	[end] server status: AUTOCOMMIT 
+	[end] warning count:  0
+	[end] affected rows:  0
+	[end] last insert id: 0
+	[end] message: 
+<<<<<<<<<<<<>>>>>>>>>>>>>>>
+------------------------------------------------------------------
+------------------------------------------------------------------
+[CS_TEXT_REPRESENTATION]
+COM_QUERY: query[DROP PROCEDURE IF EXISTS verify_user_variables_are_set]
 handle_ok
 <<<<<<<<<<<< Current context >>>>>>>>>>>>>>>
 	[end] server status: 2

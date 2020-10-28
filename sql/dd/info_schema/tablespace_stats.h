@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -47,7 +47,8 @@ enum class enum_tablespace_stats_type {
   TS_VERSION,
   TS_ROW_FORMAT,
   TS_DATA_FREE,
-  TS_STATUS
+  TS_STATUS,
+  TS_EXTRA
 };
 
 /**
@@ -82,8 +83,6 @@ class Tablespace_statistics {
     @param tablespace_name  - Tablespace name.
     @param file_name        - File name.
     @param stats            - ha_tablespace_statistics.
-
-    @return void
   */
   void cache_stats(const String &tablespace_name, const String &file_name,
                    ha_tablespace_statistics &stats) {
@@ -120,8 +119,6 @@ class Tablespace_statistics {
 
     @param tablespace_name  - Tablespace name.
     @param file_name        - File name.
-
-    @return void
   */
   void mark_as_error_found(const String &tablespace_name,
                            const String &file_name) {
@@ -135,8 +132,6 @@ class Tablespace_statistics {
 
     @param      stype  Type of statistics requested.
     @param[out] result Value for stype.
-
-    @returns void
   */
   void get_stat(enum_tablespace_stats_type stype, ulonglong *result);
 
@@ -149,8 +144,6 @@ class Tablespace_statistics {
 
     @param tablespace_name    - Tablespace name.
     @param file_name          - File name.
-
-    @returns void.
   */
   void set_stat_cached(const String &tablespace_name, const String &file_name) {
     m_key = form_key(tablespace_name, file_name);

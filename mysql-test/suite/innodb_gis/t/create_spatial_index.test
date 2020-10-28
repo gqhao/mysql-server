@@ -1121,7 +1121,10 @@ DROP TABLE tab;
 # End of Testcase compress table with Auto_increment 
 
 # Test check constraint on spatial column
-CREATE TABLE tab(c1 POINT NOT NULL SRID 0,CONSTRAINT tab_const check(c1 > 0) ) ENGINE=InnoDB;
+CREATE TABLE tab(c1 POINT NOT NULL SRID 0,
+                 CONSTRAINT tab_const
+                 CHECK(ST_Equals(c1, ST_GeomFromText("POINT(0 0)") = FALSE))
+                ) ENGINE=InnoDB;
 
 CREATE SPATIAL INDEX idx1 ON tab(c1) ;
 
@@ -1139,7 +1142,7 @@ DROP table tab;
 # repro case for bug#20451454 - FAILING ASSERTION: LOW_MATCH
 # < DTUPLE_GET_N_FIELDS_CMP(TUPLE)
 create table `t1`(`a` geometry not null SRID 0,`b` linestring not null SRID 0,
-primary key (`b`(192),`a`(141)),spatial key (`b`)) engine=innodb;
+spatial key (`b`)) engine=innodb;
 insert into `t1` values(
  point(1,1),
  linestring(point(1,1),point(1,1))

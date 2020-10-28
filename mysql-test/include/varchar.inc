@@ -92,22 +92,22 @@ explain select * from t1 where v='a';
 #
 # GROUP BY
 # Note that we have a number of keys here that are equivalent under
-# PAD collations, e.g. "a" equals "a ", and there's no knowing which one
+# NO PAD collations, e.g. "a" equals "a ", and there's no knowing which one
 # we get when we just say GROUP BY <field>. Thus, we add TRIM() around it
 # to get a deterministic result.
 #
 
-select TRIM(v),count(*) from t1 group by TRIM(v) asc limit 10;
-select TRIM(v),count(t) from t1 group by TRIM(v) asc limit 10;
-select TRIM(v),count(c) from t1 group by TRIM(v) asc limit 10;
-select sql_big_result TRIM(v),count(t) from t1 group by TRIM(v) asc limit 10;
-select sql_big_result TRIM(v),count(c) from t1 group by TRIM(v) asc limit 10;
-select c,count(*) from t1 group by c asc limit 10;
-select c,count(t) from t1 group by c asc limit 10;
+select TRIM(v),count(*) from t1 group by TRIM(v) order by TRIM(v) limit 10;
+select TRIM(v),count(t) from t1 group by TRIM(v) order by TRIM(v) limit 10;
+select TRIM(v),count(c) from t1 group by TRIM(v) order by TRIM(v) limit 10;
+select sql_big_result TRIM(v),count(t) from t1 group by TRIM(v) order by TRIM(v) limit 10;
+select sql_big_result TRIM(v),count(c) from t1 group by TRIM(v) order by TRIM(v) limit 10;
+select c,count(*) from t1 group by c order by c limit 10;
+select c,count(t) from t1 group by c order by c limit 10;
 select sql_big_result c,count(t) from t1 group by c limit 10;
-select t,count(*) from t1 group by t asc limit 10;
-select t,count(t) from t1 group by t asc limit 10;
-select sql_big_result t,count(t) from t1 group by t asc limit 10;
+select TRIM(t),count(*) from t1 group by TRIM(t) order by TRIM(t) limit 10;
+select TRIM(t),count(t) from t1 group by TRIM(t) order by TRIM(t) limit 10;
+select sql_big_result TRIM(t),count(t) from t1 group by TRIM(t) order by TRIM(t) limit 10;
 
 #
 # Test varchar > 255 bytes
@@ -137,9 +137,9 @@ explain select * from t1 where v='a';
 # See above for TRIM rationale.
 #
 
-select v,count(*) from t1 group by v asc limit 10;
-select TRIM(v),count(t) from t1 group by v asc limit 10;
-select sql_big_result TRIM(v),count(t) from t1 group by v asc limit 10;
+select v,count(*) from t1 group by v order by v limit 10;
+select TRIM(v),count(t) from t1 group by v order by v limit 10;
+select sql_big_result TRIM(v),count(t) from t1 group by v order by v limit 10;
 
 #
 # Test varchar > 255 bytes, key < 255
@@ -169,9 +169,9 @@ explain select * from t1 where v='a';
 # See above for TRIM rationale.
 #
 
-select TRIM(v),count(*) from t1 group by v asc limit 10;
-select TRIM(v),count(t) from t1 group by v asc limit 10;
-select sql_big_result TRIM(v),count(t) from t1 group by v asc limit 10;
+select TRIM(v),count(*) from t1 group by v order by v limit 10;
+select TRIM(v),count(t) from t1 group by v order by v limit 10;
+select sql_big_result TRIM(v),count(t) from t1 group by v order by v limit 10;
 
 #
 # Test varchar > 512 (special case for GROUP BY becasue of
@@ -180,9 +180,9 @@ select sql_big_result TRIM(v),count(t) from t1 group by v asc limit 10;
 
 alter table t1 modify v varchar(600), drop key v, add key v (v);
 show create table t1;
-select TRIM(v),count(*) from t1 group by v asc limit 10;
-select TRIM(v),count(t) from t1 group by v asc limit 10;
-select sql_big_result TRIM(v),count(t) from t1 group by v asc limit 10;
+select TRIM(v),count(*) from t1 group by v order by v limit 10;
+select TRIM(v),count(t) from t1 group by v order by v limit 10;
+select sql_big_result TRIM(v),count(t) from t1 group by v order by v limit 10;
 
 drop table t1;
 

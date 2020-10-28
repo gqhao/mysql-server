@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -30,6 +30,7 @@
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/properties.hpp>
 #include <boost/pending/property.hpp>
+#include <list>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -40,6 +41,7 @@
 #include "map_helpers.h"
 #include "mf_wcomp.h"  // wild_many, wild_one, wild_prefix
 #include "my_alloc.h"
+#include "my_compiler.h"
 #include "my_inttypes.h"
 #include "my_sharedlib.h"
 #include "my_sys.h"
@@ -49,31 +51,39 @@
 #include "mysql_time.h"  // MYSQL_TIME
 #include "sql/auth/auth_common.h"
 #include "sql/auth/auth_internal.h"  // List_of_authid, Authid
-#include "sql/sql_connect.h"         // USER_RESOURCES
-#include "violite.h"                 // SSL_type
+#include "sql/auth/partial_revokes.h"
+#include "sql/malloc_allocator.h"
+#include "sql/psi_memory_key.h"
+#include "sql/sql_connect.h"  // USER_RESOURCES
+#include "violite.h"          // SSL_type
 
+/* Forward declarations */
 class Security_context;
 class String;
 class THD;
 struct TABLE;
 template <typename Element_type, size_t Prealloc>
 class Prealloced_array;
+class Acl_restrictions;
+enum class Lex_acl_attrib_udyn;
 
 /* Classes */
 
 class ACL_HOST_AND_IP {
-  char *hostname;
+  const char *hostname;
   size_t hostname_length;
   long ip, ip_mask;  // Used with masked ip:s
 
   const char *calc_ip(const char *ip_arg, long *val, char end);
 
  public:
-  const char *get_host() const { return hostname; }
+  ACL_HOST_AND_IP()
+      : hostname(nullptr), hostname_length(0), ip(0), ip_mask(0) {}
+  const char *get_host() const { return hostname ? hostname : ""; }
   size_t get_host_len() const { return hostname_length; }
 
   bool has_wildcard() {
-    return (strchr(hostname, wild_many) || strchr(hostname, wild_one) ||
+    return (strchr(get_host(), wild_many) || strchr(get_host(), wild_one) ||
             ip_mask);
   }
 
@@ -88,9 +98,16 @@ class ACL_HOST_AND_IP {
 
 class ACL_ACCESS {
  public:
+  ACL_ACCESS() : host(), sort(0), access(0) {}
   ACL_HOST_AND_IP host;
   ulong sort;
   ulong access;
+};
+
+class ACL_compare {
+ public:
+  bool operator()(const ACL_ACCESS &a, const ACL_ACCESS &b);
+  bool operator()(const ACL_ACCESS *a, const ACL_ACCESS *b);
 };
 
 /* ACL_HOST is used if no host is specified */
@@ -100,24 +117,39 @@ class ACL_HOST : public ACL_ACCESS {
   char *db;
 };
 
-class ACL_USER : public ACL_ACCESS {
+#define NUM_CREDENTIALS 2
+#define PRIMARY_CRED (NUM_CREDENTIALS - NUM_CREDENTIALS)
+#define SECOND_CRED (PRIMARY_CRED + 1)
+
+class Acl_credential {
  public:
-  USER_RESOURCES user_resource;
-  char *user;
+  Acl_credential() {
+    m_auth_string = {"", 0};
+    memset(m_salt, 0, SCRAMBLE_LENGTH + 1);
+    m_salt_len = 0;
+  }
+
+ public:
+  LEX_CSTRING m_auth_string;
   /**
     The salt variable is used as the password hash for
     native_password_authetication.
   */
-  uint8 salt[SCRAMBLE_LENGTH + 1];  // scrambled password in binary form
+  uint8 m_salt[SCRAMBLE_LENGTH + 1];  // scrambled password in binary form
   /**
     In the old protocol the salt_len indicated what type of autnetication
     protocol was used: 0 - no password, 4 - 3.20, 8 - 4.0,  20 - 4.1.1
   */
-  uint8 salt_len;
+  uint8 m_salt_len;
+};
+
+class ACL_USER : public ACL_ACCESS {
+ public:
+  USER_RESOURCES user_resource;
+  char *user;
   enum SSL_type ssl_type;
   const char *ssl_cipher, *x509_issuer, *x509_subject;
   LEX_CSTRING plugin;
-  LEX_STRING auth_string;
   bool password_expired;
   bool can_authenticate;
   MYSQL_TIME password_last_changed;
@@ -155,12 +187,66 @@ class ACL_USER : public ACL_ACCESS {
   */
   bool use_default_password_reuse_interval;
 
+  /**
+    The current password needed to be specified while changing it.
+  */
+  Lex_acl_attrib_udyn password_require_current;
+
+  /**
+    Additional credentials
+  */
+  Acl_credential credentials[NUM_CREDENTIALS];
+
   ACL_USER *copy(MEM_ROOT *root);
+  ACL_USER();
+
+  void set_user(MEM_ROOT *mem, const char *user_arg);
+  void set_host(MEM_ROOT *mem, const char *host_arg);
+  size_t get_username_length() const { return user ? strlen(user) : 0; }
+  class Password_locked_state {
+   public:
+    bool is_active() const {
+      return m_password_lock_time_days != 0 && m_failed_login_attempts != 0;
+    }
+    int get_password_lock_time_days() const {
+      return m_password_lock_time_days;
+    }
+    uint get_failed_login_attempts() const { return m_failed_login_attempts; }
+    void set_parameters(uint password_lock_time_days,
+                        uint failed_login_attempts);
+    bool update(THD *thd, bool successful_login, long *ret_days_remaining);
+    Password_locked_state()
+        : m_password_lock_time_days(0),
+          m_failed_login_attempts(0),
+          m_remaining_login_attempts(0),
+          m_daynr_locked(0) {}
+
+   protected:
+    /**
+      read from the user config. The number of days to keep the accont locked
+    */
+    int m_password_lock_time_days;
+    /**
+      read from the user config. The number of failed login attemps before the
+      account is locked
+    */
+    uint m_failed_login_attempts;
+    /**
+      The remaining login tries, valid ony if @ref m_failed_login_attempts and
+      @ref m_password_lock_time_days are non-zero
+    */
+    uint m_remaining_login_attempts;
+    /** The day the account is locked, 0 if not locked */
+    long m_daynr_locked;
+  } password_locked_state;
 };
 
 class ACL_DB : public ACL_ACCESS {
  public:
   char *user, *db;
+
+  void set_user(MEM_ROOT *mem, const char *user_arg);
+  void set_host(MEM_ROOT *mem, const char *host_arg);
 };
 
 class ACL_PROXY_USER : public ACL_ACCESS {
@@ -180,7 +266,7 @@ class ACL_PROXY_USER : public ACL_ACCESS {
   } old_acl_proxy_users;
 
  public:
-  ACL_PROXY_USER(){};
+  ACL_PROXY_USER() {}
 
   void init(const char *host_arg, const char *user_arg,
             const char *proxied_host_arg, const char *proxied_user_arg,
@@ -196,9 +282,8 @@ class ACL_PROXY_USER : public ACL_ACCESS {
   const char *get_user() { return user; }
   const char *get_proxied_user() { return proxied_user; }
   const char *get_proxied_host() { return proxied_host.get_host(); }
-  void set_user(MEM_ROOT *mem, const char *user_arg) {
-    user = user_arg && *user_arg ? strdup_root(mem, user_arg) : NULL;
-  }
+  void set_user(MEM_ROOT *mem, const char *user_arg);
+  void set_host(MEM_ROOT *mem, const char *host_arg);
 
   bool check_validity(bool check_no_resolve);
 
@@ -206,7 +291,7 @@ class ACL_PROXY_USER : public ACL_ACCESS {
                const char *proxied_user_arg, bool any_proxy_user);
 
   inline static bool auth_element_equals(const char *a, const char *b) {
-    return (a == b || (a != NULL && b != NULL && !strcmp(a, b)));
+    return (a == b || (a != nullptr && b != nullptr && !strcmp(a, b)));
   }
 
   bool pk_equals(ACL_PROXY_USER *grant);
@@ -253,14 +338,16 @@ class GRANT_COLUMN {
 class GRANT_NAME {
  public:
   ACL_HOST_AND_IP host;
-  char *db, *user, *tname;
+  char *db;
+  const char *user;
+  char *tname;
   ulong privs;
   ulong sort;
   std::string hash_key;
   GRANT_NAME(const char *h, const char *d, const char *u, const char *t,
              ulong p, bool is_routine);
   GRANT_NAME(TABLE *form, bool is_routine);
-  virtual ~GRANT_NAME(){};
+  virtual ~GRANT_NAME() {}
   virtual bool ok() { return privs != 0; }
   void set_user_details(const char *h, const char *d, const char *u,
                         const char *t, bool is_routine);
@@ -277,12 +364,41 @@ class GRANT_TABLE : public GRANT_NAME {
               ulong p, ulong c);
   explicit GRANT_TABLE(TABLE *form);
   bool init(TABLE *col_privs);
-  ~GRANT_TABLE();
-  bool ok() { return privs != 0 || cols != 0; }
+  ~GRANT_TABLE() override;
+  bool ok() override { return privs != 0 || cols != 0; }
 };
 
-/* Data Structures */
+/*
+ * A default/no-arg constructor is useful with containers-of-containers
+ * situations in which a two-allocator scoped_allocator_adapter is not enough.
+ * This custom allocator provides a Malloc_allocator with a no-arg constructor
+ * by hard-coding the key_memory_acl_cache constructor argument.
+ * This "solution" lacks beauty, yet is pragmatic.
+ */
+template <class T>
+class Acl_cache_allocator : public Malloc_allocator<T> {
+ public:
+  Acl_cache_allocator() : Malloc_allocator<T>(key_memory_acl_cache) {}
+  template <class U>
+  struct rebind {
+    typedef Acl_cache_allocator<U> other;
+  };
 
+  template <class U>
+  Acl_cache_allocator(
+      const Acl_cache_allocator<U> &other MY_ATTRIBUTE((unused)))
+      : Malloc_allocator<T>(key_memory_acl_cache) {}
+
+  template <class U>
+  Acl_cache_allocator &operator=(
+      const Acl_cache_allocator<U> &other MY_ATTRIBUTE((unused))) {}
+};
+typedef Acl_cache_allocator<ACL_USER *> Acl_user_ptr_allocator;
+typedef std::list<ACL_USER *, Acl_user_ptr_allocator> Acl_user_ptr_list;
+Acl_user_ptr_list *cached_acl_users_for_name(const char *name);
+void rebuild_cached_acl_users_for_name(void);
+
+/* Data Structures */
 extern MEM_ROOT global_acl_memory;
 extern MEM_ROOT memex;
 const size_t ACL_PREALLOC_SIZE = 10U;
@@ -299,7 +415,7 @@ extern std::unique_ptr<
 extern collation_unordered_map<std::string, ACL_USER *> *acl_check_hosts;
 extern bool allow_all_hosts;
 extern uint grant_version; /* Version of priv tables */
-
+extern std::unique_ptr<Acl_restrictions> acl_restrictions;
 // Search for a matching grant. Prefer exact grants before non-exact ones.
 
 extern MYSQL_PLUGIN_IMPORT CHARSET_INFO *files_charset_info;
@@ -380,10 +496,10 @@ typedef boost::property<boost::vertex_acl_user_t, ACL_USER,
 typedef boost::property<boost::edge_capacity_t, int> Role_edge_properties;
 
 /** A graph of all users/roles privilege inheritance */
-typedef boost::adjacency_list<boost::setS,       // OutEdges
-                              boost::vecS,       // Vertices
-                              boost::directedS,  // Directed graph
-                              Role_properties,   // Vertex props
+typedef boost::adjacency_list<boost::setS,            // OutEdges
+                              boost::vecS,            // Vertices
+                              boost::bidirectionalS,  // Directed graph
+                              Role_properties,        // Vertex props
                               Role_edge_properties>
     Granted_roles_graph;
 
@@ -398,11 +514,23 @@ typedef boost::graph_traits<Granted_roles_graph>::edge_descriptor
 /** The datatype of the map between authids and graph vertex descriptors */
 typedef std::unordered_map<std::string, Role_vertex_descriptor> Role_index_map;
 
+/** The type used for the number of edges incident to a vertex in the graph.
+ */
+using degree_s_t = boost::graph_traits<Granted_roles_graph>::degree_size_type;
+
+/** The type for the iterator returned by out_edges(). */
+using out_edge_itr_t =
+    boost::graph_traits<Granted_roles_graph>::out_edge_iterator;
+
+/** The type for the iterator returned by in_edges(). */
+using in_edge_itr_t =
+    boost::graph_traits<Granted_roles_graph>::in_edge_iterator;
+
 /** Container for global, schema, table/view and routine ACL maps */
 class Acl_map {
  public:
   Acl_map(Security_context *sctx, uint64 ver);
-  Acl_map(const Acl_map &map);
+  Acl_map(const Acl_map &map) = delete;
   Acl_map(const Acl_map &&map);
   ~Acl_map();
 
@@ -424,6 +552,7 @@ class Acl_map {
   SP_access_map *func_acls();
   Grant_acl_set *grant_acls();
   Dynamic_privileges *dynamic_privileges();
+  Restrictions &restrictions();
   uint64 version() { return m_version; }
   uint32 reference_count() { return m_reference_count.load(); }
 
@@ -438,6 +567,7 @@ class Acl_map {
   SP_access_map m_func_acls;
   Grant_acl_set m_with_admin_acls;
   Dynamic_privileges m_dynamic_privileges;
+  Restrictions m_restrictions;
 };
 
 typedef LF_HASH Acl_cache_internal;
@@ -461,21 +591,20 @@ class Acl_cache {
     Returns a pointer to an acl map to the caller and increase the reference
     count on the object, iff the object version is the same as the global
     graph version.
-    If no acl map exists which correspond ot the current authorization id of
+    If no acl map exists which correspond to the current authorization id of
     the security context, a new acl map is calculated, inserted into the cache
     and returned to the user.
     A new object will also be created if the role graph version counter is
     different than the acl map object's version.
 
-    @param uid
-    @return
+    @param uid user id
   */
   Acl_map *checkout_acl_map(Security_context *sctx, Auth_id_ref &uid,
                             List_of_auth_id_refs &active_roles);
   /**
     When the security context is done with the acl map it calls the cache
     to decrease the reference count on that object.
-    @param map
+    @param map acl map
   */
   void return_acl_map(Acl_map *map);
   /**
@@ -497,7 +626,6 @@ class Acl_cache {
 
     @param version The version of the new map
     @param sctx The associated security context
-    @return
   */
   Acl_map *create_acl_map(uint64 version, Security_context *sctx);
   /** Role graph version counter */
@@ -543,6 +671,36 @@ class Acl_cache_lock_guard {
   Acl_cache_lock_mode m_mode;
   /** Lock status */
   bool m_locked;
+};
+
+/**
+  Cache to store the Restrictions of every auth_id.
+  This cache is not thread safe.
+  Callers must acquire acl_cache_write_lock before to amend the cache.
+  Callers should acquire acl_cache_read_lock to probe the cache.
+
+  Acl_restrictions is not part of ACL_USER because as of now latter is POD
+  type class. We use copy-POD for ACL_USER that makes the explicit memory
+  management of its members hard.
+*/
+class Acl_restrictions {
+ public:
+  Acl_restrictions();
+
+  Acl_restrictions(const Acl_restrictions &) = delete;
+  Acl_restrictions(Acl_restrictions &&) = delete;
+  Acl_restrictions &operator=(const Acl_restrictions &) = delete;
+  Acl_restrictions &operator=(Acl_restrictions &&) = delete;
+
+  void remove_restrictions(const ACL_USER *acl_user);
+  void upsert_restrictions(const ACL_USER *acl_user,
+                           const Restrictions &restriction);
+
+  Restrictions find_restrictions(const ACL_USER *acl_user) const;
+  size_t size() const;
+
+ private:
+  malloc_unordered_map<std::string, Restrictions> m_restrictions_map;
 };
 
 #endif /* SQL_USER_CACHE_INCLUDED */

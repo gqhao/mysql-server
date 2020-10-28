@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -21,11 +21,13 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
 #include "sql/dd/impl/types/tablespace_impl.h"
+#include "sql/dd/impl/bootstrap/bootstrap_ctx.h"  // DD_bootstrap_ctx
 
 #include <algorithm>
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -85,42 +87,18 @@ namespace dd {
 class Sdi_rcontext;
 class Sdi_wcontext;
 
+static const std::set<String_type> default_valid_option_keys = {"encryption"};
+
 ///////////////////////////////////////////////////////////////////////////
 // Tablespace_impl implementation.
 ///////////////////////////////////////////////////////////////////////////
 
 Tablespace_impl::Tablespace_impl()
-    : m_options(new Properties_impl()),
-      m_se_private_data(new Properties_impl()),
+    : m_options(default_valid_option_keys),
+      m_se_private_data(),
       m_files() {} /* purecov: tested */
 
 Tablespace_impl::~Tablespace_impl() {}
-
-///////////////////////////////////////////////////////////////////////////
-
-bool Tablespace_impl::set_options_raw(const String_type &options_raw) {
-  Properties *properties = Properties_impl::parse_properties(options_raw);
-
-  if (!properties)
-    return true;  // Error status, current values has not changed.
-
-  m_options.reset(properties);
-  return false;
-}
-
-///////////////////////////////////////////////////////////////////////////
-
-bool Tablespace_impl::set_se_private_data_raw(
-    const String_type &se_private_data_raw) {
-  Properties *properties =
-      Properties_impl::parse_properties(se_private_data_raw);
-
-  if (!properties)
-    return true;  // Error status, current values has not changed.
-
-  m_se_private_data.reset(properties);
-  return false;
-}
 
 ///////////////////////////////////////////////////////////////////////////
 
@@ -180,13 +158,17 @@ bool Tablespace_impl::restore_attributes(const Raw_record &r) {
 
   m_comment = r.read_str(Tablespaces::FIELD_COMMENT);
 
-  m_options.reset(Properties_impl::parse_properties(
-      r.read_str(Tablespaces::FIELD_OPTIONS)));
+  set_options(r.read_str(Tablespaces::FIELD_OPTIONS));
 
-  m_se_private_data.reset(Properties_impl::parse_properties(
-      r.read_str(Tablespaces::FIELD_SE_PRIVATE_DATA)));
+  set_se_private_data(r.read_str(Tablespaces::FIELD_SE_PRIVATE_DATA));
 
   m_engine = r.read_str(Tablespaces::FIELD_ENGINE);
+
+  // m_engine_attributes and m_secondary_engine_attributes was added in 80021
+  if (!bootstrap::DD_bootstrap_ctx::instance().is_dd_upgrade_from_before(
+          bootstrap::DD_VERSION_80021)) {
+    m_engine_attribute = r.read_str(Tablespaces::FIELD_ENGINE_ATTRIBUTE, "");
+  }
 
   return false;
 }
@@ -194,18 +176,39 @@ bool Tablespace_impl::restore_attributes(const Raw_record &r) {
 ///////////////////////////////////////////////////////////////////////////
 
 bool Tablespace_impl::store_attributes(Raw_record *r) {
+#ifndef DBUG_OFF
+  if (my_strcasecmp(system_charset_info, "InnoDB", m_engine.c_str()) == 0) {
+    /* Innodb can request for space rename during upgrade when options are not
+    upgraded yet. */
+    DBUG_ASSERT(m_options.exists("encryption") ||
+                bootstrap::DD_bootstrap_ctx::instance().is_dd_upgrade());
+  } else {
+    DBUG_ASSERT(!m_options.exists("encryption"));
+  }
+#endif
+
+  // Store engine_attributes and secondary_engine_attributes only if
+  // we're not upgrading from before 80021
+  if (!bootstrap::DD_bootstrap_ctx::instance().is_dd_upgrade_from_before(
+          bootstrap::DD_VERSION_80021) &&
+      (r->store(Tablespaces::FIELD_ENGINE_ATTRIBUTE, m_engine_attribute,
+                m_engine_attribute.empty()))) {
+    return true;
+  }
+
   return store_id(r, Tablespaces::FIELD_ID) ||
          store_name(r, Tablespaces::FIELD_NAME) ||
          r->store(Tablespaces::FIELD_COMMENT, m_comment) ||
-         r->store(Tablespaces::FIELD_OPTIONS, *m_options) ||
-         r->store(Tablespaces::FIELD_SE_PRIVATE_DATA, *m_se_private_data) ||
+         r->store(Tablespaces::FIELD_OPTIONS, m_options) ||
+         r->store(Tablespaces::FIELD_SE_PRIVATE_DATA, m_se_private_data) ||
          r->store(Tablespaces::FIELD_ENGINE, m_engine);
 }
 
 ///////////////////////////////////////////////////////////////////////////
 
-static_assert(Tablespaces::FIELD_ENGINE == 5,
-              "Tablespaces definition has changed, review (de)ser memfuns!");
+static_assert(Tablespaces::NUMBER_OF_FIELDS == 7,
+              "Tablespaces definition has changed, check if serialize() and "
+              "deserialize() need to be updated!");
 void Tablespace_impl::serialize(Sdi_wcontext *wctx, Sdi_writer *w) const {
   w->StartObject();
   Entity_object_impl::serialize(wctx, w);
@@ -213,6 +216,7 @@ void Tablespace_impl::serialize(Sdi_wcontext *wctx, Sdi_writer *w) const {
   write_properties(w, m_options, STRING_WITH_LEN("options"));
   write_properties(w, m_se_private_data, STRING_WITH_LEN("se_private_data"));
   write(w, m_engine, STRING_WITH_LEN("engine"));
+  write(w, m_engine_attribute, STRING_WITH_LEN("engine_attribute"));
   serialize_each(wctx, w, m_files, STRING_WITH_LEN("files"));
   w->EndObject();
 }
@@ -225,7 +229,9 @@ bool Tablespace_impl::deserialize(Sdi_rcontext *rctx, const RJ_Value &val) {
   read_properties(&m_options, val, "options");
   read_properties(&m_se_private_data, val, "se_private_data");
   read(&m_engine, val, "engine");
-  deserialize_each(rctx, [this]() { return add_file(); }, val, "files");
+  read(&m_engine_attribute, val, "engine_attribute");
+  deserialize_each(
+      rctx, [this]() { return add_file(); }, val, "files");
   return false;
 }
 
@@ -276,9 +282,10 @@ void Tablespace_impl::debug_print(String_type &outb) const {
      << "id: {OID: " << id() << "}; "
      << "m_name: " << name() << "; "
      << "m_comment: " << m_comment << "; "
-     << "m_options " << m_options->raw_string() << "; "
-     << "m_se_private_data " << m_se_private_data->raw_string() << "; "
+     << "m_options " << m_options.raw_string() << "; "
+     << "m_se_private_data " << m_se_private_data.raw_string() << "; "
      << "m_engine: " << m_engine << "; "
+     << "m_engine_attribute: " << m_engine_attribute << "; "
      << "m_files: " << m_files.size() << " [ ";
 
   for (const Tablespace_file *f : files()) {
@@ -333,19 +340,15 @@ Tablespace_impl::Tablespace_impl(const Tablespace_impl &src)
     : Weak_object(src),
       Entity_object_impl(src),
       m_comment(src.m_comment),
-      m_options(Properties_impl::parse_properties(src.m_options->raw_string())),
-      m_se_private_data(Properties_impl::parse_properties(
-          src.m_se_private_data->raw_string())),
+      m_options(src.m_options),
+      m_se_private_data(src.m_se_private_data),
       m_engine(src.m_engine),
+      m_engine_attribute(src.m_engine_attribute),
       m_files() {
   m_files.deep_copy(src.m_files, this);
 }
 
 ///////////////////////////////////////////////////////////////////////////
-
-bool operator==(const dd::sdi_key &a, const dd::sdi_key &b) {
-  return a.id == b.id && a.type == b.type;
-}
 
 namespace {
 /* purecov: begin inspected */
@@ -423,7 +426,8 @@ bool fetch_tablespace_table_refs(THD *thd, const Tablespace &tso,
             return false;
           },
           trx.otx.get_table<Partition_index>(),
-          Parent_id_range_key{2, Index_partitions::FIELD_TABLESPACE_ID,
+          Parent_id_range_key{Index_partitions::INDEX_K_TABLESPACE_ID,
+                              Index_partitions::FIELD_TABLESPACE_ID,
                               tso.id()})) {
     return checked_return(true);
   }
@@ -438,7 +442,8 @@ bool fetch_tablespace_table_refs(THD *thd, const Tablespace &tso,
               return false;
             },
             trx.otx.get_table<Partition>(),
-            Parent_id_range_key{0, Table_partitions::FIELD_ID, partid})) {
+            Parent_id_range_key{Table_partitions::INDEX_PK_ID,
+                                Table_partitions::FIELD_ID, partid})) {
       return checked_return(true);
     }
   }
@@ -449,7 +454,8 @@ bool fetch_tablespace_table_refs(THD *thd, const Tablespace &tso,
             return false;
           },
           trx.otx.get_table<Partition>(),
-          Parent_id_range_key{5, Table_partitions::FIELD_TABLESPACE_ID,
+          Parent_id_range_key{Table_partitions::INDEX_K_TABLESPACE_ID,
+                              Table_partitions::FIELD_TABLESPACE_ID,
                               tso.id()})) {
     return checked_return(true);
   }
@@ -460,7 +466,8 @@ bool fetch_tablespace_table_refs(THD *thd, const Tablespace &tso,
             return false;
           },
           trx.otx.get_table<Index>(),
-          Parent_id_range_key{2, Indexes::FIELD_TABLESPACE_ID, tso.id()})) {
+          Parent_id_range_key{Indexes::INDEX_K_TABLESPACE_ID,
+                              Indexes::FIELD_TABLESPACE_ID, tso.id()})) {
     return checked_return(true);
   }
 
@@ -479,7 +486,7 @@ bool fetch_tablespace_table_refs(THD *thd, const Tablespace &tso,
               return false;
             },
             trx.otx.get_table<Abstract_table>(),
-            Parent_id_range_key{0, Tables::FIELD_ID, tid})) {
+            Parent_id_range_key{Tables::INDEX_PK_ID, Tables::FIELD_ID, tid})) {
       return checked_return(true);
     }
   }
@@ -493,7 +500,8 @@ bool fetch_tablespace_table_refs(THD *thd, const Tablespace &tso,
             return false;
           },
           trx.otx.get_table<Abstract_table>(),
-          Parent_id_range_key{5, Tables::FIELD_TABLESPACE_ID, tso.id()})) {
+          Parent_id_range_key{Tables::INDEX_K_TABLESPACE_ID,
+                              Tables::FIELD_TABLESPACE_ID, tso.id()})) {
     return checked_return(true);
   }
 
@@ -502,10 +510,17 @@ bool fetch_tablespace_table_refs(THD *thd, const Tablespace &tso,
     if (select_clos_where_key_matches(
             [&tref](Raw_record *r) {
               tref.m_schema_name = r->read_str(Schemata::FIELD_NAME);
+              tref.m_schema_encryption =
+                  static_cast<enum_encryption_type>(
+                      r->read_int(Schemata::FIELD_DEFAULT_ENCRYPTION)) ==
+                          enum_encryption_type::ET_YES
+                      ? true
+                      : false;
               return false;
             },
             trx.otx.get_table<Schema>(),
-            Parent_id_range_key{0, Schemata::FIELD_ID, tref.m_schema_id})) {
+            Parent_id_range_key{Schemata::INDEX_PK_ID, Schemata::FIELD_ID,
+                                tref.m_schema_id})) {
       return checked_return(true);
     }
   }
@@ -513,7 +528,8 @@ bool fetch_tablespace_table_refs(THD *thd, const Tablespace &tso,
   return false;
 }
 
-MDL_request *mdl_req(THD *thd, const Tablespace_table_ref &tref) {
+MDL_request *mdl_req(THD *thd, const Tablespace_table_ref &tref,
+                     enum enum_mdl_type mdl_type) {
   MDL_request *r = new (thd->mem_root) MDL_request;
 
   if (lower_case_table_names == 2) {
@@ -522,11 +538,27 @@ MDL_request *mdl_req(THD *thd, const Tablespace_table_ref &tref) {
     dd::String_type lc_name =
         casedn(Object_table_definition_impl::fs_name_collation(), tref.m_name);
     MDL_REQUEST_INIT(r, MDL_key::TABLE, lc_schema_name.c_str(), lc_name.c_str(),
-                     MDL_EXCLUSIVE, MDL_TRANSACTION);
+                     mdl_type, MDL_TRANSACTION);
   } else {
     MDL_REQUEST_INIT(r, MDL_key::TABLE, tref.m_schema_name.c_str(),
-                     tref.m_name.c_str(), MDL_EXCLUSIVE, MDL_TRANSACTION);
+                     tref.m_name.c_str(), mdl_type, MDL_TRANSACTION);
   }
   return r;
 }
+
+MDL_request *mdl_schema_req(THD *thd, const dd::String_type &schema_name) {
+  MDL_request *r = new (thd->mem_root) MDL_request;
+
+  if (lower_case_table_names == 2) {
+    dd::String_type lc_schema_name =
+        casedn(Object_table_definition_impl::fs_name_collation(), schema_name);
+    MDL_REQUEST_INIT(r, MDL_key::SCHEMA, lc_schema_name.c_str(), "",
+                     MDL_INTENTION_EXCLUSIVE, MDL_TRANSACTION);
+  } else {
+    MDL_REQUEST_INIT(r, MDL_key::SCHEMA, schema_name.c_str(), "",
+                     MDL_INTENTION_EXCLUSIVE, MDL_TRANSACTION);
+  }
+  return r;
+}
+
 }  // namespace dd

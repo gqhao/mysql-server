@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -28,7 +28,6 @@
 #include <cstddef>  // std::nullptr_t
 #include <memory>   // std::unique_ptr
 #include <new>
-#include <string>
 
 #include "my_dbug.h"
 #include "my_inttypes.h"
@@ -40,9 +39,10 @@
 #include "sql/dd/string_type.h"
 #include "sql/dd/types/spatial_reference_system.h"  // dd:Spatial_reference_system
 #include "sql/dd/types/weak_object.h"
-#include "sql/gis/srid.h"
-#include "sql/gis/srs/srs.h"  // gis::srs::Spatial_reference_...
-#include "sql/sql_time.h"     // gmt_time_to_local_time
+#include "sql/gis/geometries.h"  // gis::Coordinate_system
+#include "sql/gis/srid.h"        // srid_t
+#include "sql/gis/srs/srs.h"     // gis::srs::Spatial_reference_...
+#include "sql/sql_time.h"        // gmt_time_to_local_time
 
 class THD;
 
@@ -70,8 +70,6 @@ class Spatial_reference_system_impl : public Entity_object_impl,
         m_parsed_definition(),
         m_description() {}
 
-  virtual ~Spatial_reference_system_impl() {}
-
  private:
   Spatial_reference_system_impl(const Spatial_reference_system_impl &srs)
       : Weak_object(srs),
@@ -85,13 +83,13 @@ class Spatial_reference_system_impl : public Entity_object_impl,
         m_description(srs.m_description) {}
 
  public:
-  virtual const Object_table &object_table() const override;
+  const Object_table &object_table() const override;
 
-  virtual bool validate() const override;
+  bool validate() const override;
 
-  virtual bool store_attributes(Raw_record *r) override;
+  bool store_attributes(Raw_record *r) override;
 
-  virtual bool restore_attributes(const Raw_record &r) override;
+  bool restore_attributes(const Raw_record &r) override;
 
   void serialize(Sdi_wcontext *wctx, Sdi_writer *w) const;
 
@@ -109,22 +107,22 @@ class Spatial_reference_system_impl : public Entity_object_impl,
   // created
   /////////////////////////////////////////////////////////////////////////
 
-  virtual ulonglong created(bool convert_time) const override {
+  ulonglong created(bool convert_time) const override {
     return convert_time ? gmt_time_to_local_time(m_created) : m_created;
   }
 
-  virtual void set_created(ulonglong created) override { m_created = created; }
+  void set_created(ulonglong created) override { m_created = created; }
 
   /////////////////////////////////////////////////////////////////////////
   // last_altered
   /////////////////////////////////////////////////////////////////////////
 
-  virtual ulonglong last_altered(bool convert_time) const override {
+  ulonglong last_altered(bool convert_time) const override {
     return convert_time ? gmt_time_to_local_time(m_last_altered)
                         : m_last_altered;
   }
 
-  virtual void set_last_altered(ulonglong last_altered) override {
+  void set_last_altered(ulonglong last_altered) override {
     m_last_altered = last_altered;
   }
 
@@ -132,15 +130,15 @@ class Spatial_reference_system_impl : public Entity_object_impl,
   // organization
   /////////////////////////////////////////////////////////////////////////
 
-  virtual const Mysql::Nullable<String_type> &organization() const override {
+  const Mysql::Nullable<String_type> &organization() const override {
     return m_organization;
   }
 
-  virtual void set_organization(const String_type &organization) override {
+  void set_organization(const String_type &organization) override {
     m_organization = Mysql::Nullable<String_type>(organization);
   }
 
-  virtual void set_organization(std::nullptr_t) override {
+  void set_organization(std::nullptr_t) override {
     m_organization = Mysql::Nullable<String_type>();
   }
 
@@ -148,18 +146,18 @@ class Spatial_reference_system_impl : public Entity_object_impl,
   // organization_coordsys_id
   /////////////////////////////////////////////////////////////////////////
 
-  virtual const Mysql::Nullable<gis::srid_t> &organization_coordsys_id()
+  const Mysql::Nullable<gis::srid_t> &organization_coordsys_id()
       const override {
     return m_organization_coordsys_id;
   }
 
-  virtual void set_organization_coordsys_id(
+  void set_organization_coordsys_id(
       gis::srid_t organization_coordsys_id) override {
     m_organization_coordsys_id =
         Mysql::Nullable<gis::srid_t>(organization_coordsys_id);
   }
 
-  virtual void set_organization_coordsys_id(std::nullptr_t) override {
+  void set_organization_coordsys_id(std::nullptr_t) override {
     m_organization_coordsys_id = Mysql::Nullable<gis::srid_t>();
   }
 
@@ -167,29 +165,44 @@ class Spatial_reference_system_impl : public Entity_object_impl,
   // definition
   /////////////////////////////////////////////////////////////////////////
 
-  virtual const String_type &definition() const override {
-    return m_definition;
-  }
+  const String_type &definition() const override { return m_definition; }
 
-  virtual void set_definition(const String_type &definition) override {
+  void set_definition(const String_type &definition) override {
     m_definition = definition;
   }
 
-  virtual bool is_projected() const override {
+  gis::Coordinate_system cs_type() const override {
+    // Work around bugs in Developer Studio 12.5 on Solaris by casting the enum
+    // to int. Otherwise the default case, and only the default case, is always
+    // executed. This happens regardless of SRS type value.
+    switch (static_cast<int>(m_parsed_definition->srs_type())) {
+      case static_cast<int>(gis::srs::Srs_type::PROJECTED):
+        return gis::Coordinate_system::kCartesian;
+      case static_cast<int>(gis::srs::Srs_type::GEOGRAPHIC):
+        return gis::Coordinate_system::kGeographic;
+      default:
+        /* purecov: begin deadcode */
+        DBUG_ASSERT(false);
+        return gis::Coordinate_system::kCartesian;
+        /* purecov: end */
+    }
+  }
+
+  bool is_projected() const override {
     return (m_parsed_definition->srs_type() == gis::srs::Srs_type::PROJECTED);
   }
 
-  virtual bool is_geographic() const override {
+  bool is_geographic() const override {
     return (m_parsed_definition->srs_type() == gis::srs::Srs_type::GEOGRAPHIC);
   }
 
-  virtual bool is_cartesian() const override {
+  bool is_cartesian() const override {
     return (m_parsed_definition->srs_type() == gis::srs::Srs_type::PROJECTED);
   }
 
-  virtual bool is_lat_long() const override;
+  bool is_lat_long() const override;
 
-  virtual double semi_major_axis() const override {
+  double semi_major_axis() const override {
     if (is_geographic()) {
       return static_cast<gis::srs::Geographic_srs *>(m_parsed_definition.get())
           ->semi_major_axis();
@@ -198,7 +211,7 @@ class Spatial_reference_system_impl : public Entity_object_impl,
     }
   }
 
-  virtual double semi_minor_axis() const override {
+  double semi_minor_axis() const override {
     if (is_geographic()) {
       gis::srs::Geographic_srs *srs =
           static_cast<gis::srs::Geographic_srs *>(m_parsed_definition.get());
@@ -211,15 +224,19 @@ class Spatial_reference_system_impl : public Entity_object_impl,
     }
   }
 
-  virtual double angular_unit() const override {
+  double linear_unit() const override {
+    return m_parsed_definition->linear_unit();
+  }
+
+  double angular_unit() const override {
     return m_parsed_definition->angular_unit();
   }
 
-  virtual double prime_meridian() const override {
+  double prime_meridian() const override {
     return m_parsed_definition->prime_meridian();
   }
 
-  virtual bool positive_east() const override {
+  bool positive_east() const override {
     if (is_lat_long()) {
       return (m_parsed_definition->axis_direction(1) ==
               gis::srs::Axis_direction::EAST);
@@ -229,7 +246,7 @@ class Spatial_reference_system_impl : public Entity_object_impl,
     }
   }
 
-  virtual bool positive_north() const override {
+  bool positive_north() const override {
     if (is_lat_long()) {
       return (m_parsed_definition->axis_direction(0) ==
               gis::srs::Axis_direction::NORTH);
@@ -239,54 +256,95 @@ class Spatial_reference_system_impl : public Entity_object_impl,
     }
   }
 
-  virtual double to_radians(double d) const override {
+  bool missing_towgs84() const override {
+    return (!m_parsed_definition->is_wgs84_based() &&
+            !m_parsed_definition->has_towgs84());
+  }
+
+  double to_radians(double d) const override {
     DBUG_ASSERT(is_geographic());
     DBUG_ASSERT(angular_unit() > 0.0);
     return d * angular_unit();
   }
 
-  virtual double from_radians(double d) const override {
+  double from_radians(double d) const override {
     DBUG_ASSERT(is_geographic());
     DBUG_ASSERT(angular_unit() > 0.0);
     return d / angular_unit();
+  }
+
+  double to_normalized_latitude(double d) const override {
+    double latitude = to_radians(d);
+    if (!positive_north()) latitude *= -1.0;
+    return latitude;
+  }
+
+  double from_normalized_latitude(double d) const override {
+    double latitude = from_radians(d);
+    if (!positive_north()) latitude *= -1.0;
+    return latitude;
+  }
+
+  double to_normalized_longitude(double d) const override {
+    double longitude = d;
+    if (!positive_east()) longitude *= -1.0;
+    longitude += prime_meridian();
+    longitude *= angular_unit();
+    return longitude;
+  }
+
+  double from_normalized_longitude(double d) const override {
+    double longitude = d;
+    longitude /= angular_unit();
+    longitude -= prime_meridian();
+    if (!positive_east()) longitude *= -1.0;
+    return longitude;
+  }
+
+  bool can_be_modified_to(const Spatial_reference_system &srs) const override {
+    return m_parsed_definition->can_be_modified_to(
+        *static_cast<const Spatial_reference_system_impl &>(srs)
+             .m_parsed_definition);
+  }
+
+  String_type proj4_parameters() const override {
+    return m_parsed_definition->proj4_parameters().c_str();
   }
 
   /////////////////////////////////////////////////////////////////////////
   // description
   /////////////////////////////////////////////////////////////////////////
 
-  virtual const Mysql::Nullable<String_type> &description() const override {
+  const Mysql::Nullable<String_type> &description() const override {
     return m_description;
   }
 
-  virtual void set_description(const String_type &description) override {
+  void set_description(const String_type &description) override {
     m_description = Mysql::Nullable<String_type>(description);
   }
 
-  virtual void set_description(std::nullptr_t) override {
+  void set_description(std::nullptr_t) override {
     m_description = Mysql::Nullable<String_type>();
   }
 
   // Fix "inherits ... via dominance" warnings
-  virtual Entity_object_impl *impl() override {
+  Entity_object_impl *impl() override { return Entity_object_impl::impl(); }
+  const Entity_object_impl *impl() const override {
     return Entity_object_impl::impl();
   }
-  virtual const Entity_object_impl *impl() const override {
-    return Entity_object_impl::impl();
-  }
-  virtual Object_id id() const override { return Entity_object_impl::id(); }
-  virtual bool is_persistent() const override {
+  Object_id id() const override { return Entity_object_impl::id(); }
+  bool is_persistent() const override {
     return Entity_object_impl::is_persistent();
   }
-  virtual const String_type &name() const override {
+  const String_type &name() const override {
     return Entity_object_impl::name();
   }
-  virtual void set_name(const String_type &name) override {
+  void set_name(const String_type &name) override {
     Entity_object_impl::set_name(name);
   }
 
  public:
-  virtual void debug_print(String_type &outb) const override {
+  void debug_print(String_type &outb) const override {
     char outbuf[1024];
     sprintf(outbuf,
             "SPATIAL REFERENCE SYSTEM OBJECT: id= {OID: %lld}, "

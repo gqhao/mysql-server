@@ -1,5 +1,5 @@
 --source include/not_group_replication_plugin.inc
-source include/have_ssl.inc;
+let $rpl_privilege_checks_user_grant_option = 1;
 source include/master-slave.inc;
 
 # Default replication setup at master-slave.inc does not set MASTER_SSL
@@ -63,7 +63,7 @@ disable_result_log;
 # 2007-11-27 mats Bug #32756  	Starting and stopping the slave in a loop can lose rows
 # After discussions with Engineering, I'm disabling this part of the test to avoid it causing
 # red trees.
-disable_parsing;
+disable_testcase BUG#32756;
 let $i= 100;
 while ($i)
 {
@@ -76,7 +76,7 @@ while ($i)
   stop slave;
   dec $i;
 }
-enable_parsing;
+enable_testcase;
 START SLAVE;
 enable_query_log;
 enable_result_log;
@@ -116,9 +116,6 @@ drop table t1;
 --source include/sync_slave_sql_with_master.inc
 
 # ==== BUG#18165937: HITTING CRASH WHEN SETTING SSL OPTIONS THROUGH CHANGE MASTER COMMAND ====
-#
-# The server would crash when setting SSL_CRL options using CHANGE
-# MASTER with WOLFSSL enabled.
 
 --source include/stop_slave.inc
 --replace_column 2 ####

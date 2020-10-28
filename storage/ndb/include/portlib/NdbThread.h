@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -62,14 +62,6 @@ typedef void* NDB_THREAD_ARG;
 typedef size_t NDB_THREAD_STACKSIZE;
 
 struct NdbThread;
-
-/*
-  Method to block/unblock thread from receiving KILL signal with
-  signum set in g_ndb_shm_signum in a portable manner.
-*/
-#ifdef NDB_SHM_TRANSPORTER
-void NdbThread_set_shm_sigmask(bool block);
-#endif
 
 /**
  * Create a thread
@@ -267,6 +259,11 @@ struct NdbThread *NdbThread_GetNdbThread();
  *  return -1 - Invalid spec
  */
 int NdbThread_SetHighPrioProperties(const char * spec);
+
+/**
+ * Clear Unix signal mask of thread
+ */
+void NdbThread_ClearSigMask();
 
 #ifdef	__cplusplus
 }

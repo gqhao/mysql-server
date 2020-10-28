@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -222,45 +222,62 @@ int runTestMaxOperations(NDBT_Context* ctx, NDBT_Step* step){
   if (pNdb->init(2048)){
     NDB_ERR(pNdb->getNdbError());
     delete pNdb;
+    ndbout << "pNdb.init() failed" << endl;      
     return NDBT_FAILED;
   }
 
   HugoOperations hugoOps(*pTab);
 
-  bool endTest = false;
-  while (!endTest){
+  /**
+   * Finding max operations is done in two phases.
+   * First double transaction size until a transaction fail.
+   * Then bisect between last working transaction size and failing transaction
+   * size to find biggest working transaction.
+   */
+  int lower_max_ops = 0;
+  int next_max_ops = 1000;
+  int upper_max_ops = -1;
+  bool endTest;
+  while (upper_max_ops == -1 ||
+         (upper_max_ops - lower_max_ops) >= 1000)
+  {
     int errors = 0;
     const int maxErrors = 5;
 
-    maxOpsLimit = l*1000;    
-       
+    endTest = false;
+
     if (hugoOps.startTransaction(pNdb) != NDBT_OK){
       delete pNdb;
+      ndbout << "startTransaction failed, line: " << __LINE__ << endl;
       return NDBT_FAILED;
     }
     
-    int i = 0;
-    do
+    for (int i = 1; !endTest && i <= next_max_ops; i++)
     {
-      i++;      
-
       const int rowNo = (i % 256);
       if(hugoOps.pkReadRecord(pNdb, rowNo, 1) != NDBT_OK){
         errors++;
+        ndbout << "ReadRecord failed at line: " << __LINE__ << ", row: " << rowNo << endl;
         if (errors >= maxErrors){
           result = NDBT_FAILED;
-          maxOpsLimit = i;
         }
       }
 
       // Avoid Transporter overload by executing after max 1000 ops.
       int execResult = 0;
-      if (i >= maxOpsLimit)
+      if (i == next_max_ops)
+      {
         execResult = hugoOps.execute_Commit(pNdb); //Commit after last op
+      }
       else if ((i%1000) == 0)
+      {
         execResult = hugoOps.execute_NoCommit(pNdb);
+      }
       else
+      {
+        require(i < next_max_ops);
         continue;
+      }
 
       switch(execResult){
       case NDBT_OK:
@@ -268,21 +285,54 @@ int runTestMaxOperations(NDBT_Context* ctx, NDBT_Step* step){
 
       default:
         result = NDBT_FAILED;
-        // Fallthrough to '233' which also terminate test, but not 'FAILED'
+        // Fall through - to '233' which also terminate test, but not 'FAILED'
       case 233:  // Out of operation records in transaction coordinator  
+      case 1217:  // Out of operation records in local data manager (increase MaxNoOfLocalOperations)
+      case 261: //Increased beyond MaxDMLOperationsPerTransaction or MaxNoOfConcurrentOperations
         // OK - end test
         endTest = true;
-        maxOpsLimit = i;
         break;
       }
-    } while (i < maxOpsLimit);
-
-    ndbout << i << " operations used" << endl;
+    }
+    ndbout << next_max_ops
+           << " operations used"
+           << (endTest ? " failed" : " succeeded")
+           << endl;
+    if (upper_max_ops == -1 && !endTest)
+    {
+      lower_max_ops = next_max_ops;
+      if (next_max_ops == INT_MAX)
+      {
+        upper_max_ops = next_max_ops;
+      }
+      else if (next_max_ops <= INT_MAX / 2)
+      {
+        next_max_ops = next_max_ops * 2;
+      }
+      else
+      {
+        next_max_ops = INT_MAX;
+      }
+    }
+    else
+    {
+      if (!endTest)
+      {
+        lower_max_ops = next_max_ops;
+      }
+      else
+      {
+        upper_max_ops = next_max_ops;
+      }
+      next_max_ops = (lower_max_ops + upper_max_ops) / 2;
+    }
 
     hugoOps.closeTransaction(pNdb);
 
     l++;
   }
+  maxOpsLimit = lower_max_ops;
+  ndbout << "Found max operations limit " << maxOpsLimit << endl;
 
   /**
    * After the peak usage of NdbOperations comes a cool down periode
@@ -313,6 +363,7 @@ int runTestMaxOperations(NDBT_Context* ctx, NDBT_Step* step){
 
     if (hugoOps.startTransaction(pNdb) != NDBT_OK){
       delete pNdb;
+      ndbout << "startTransaction failed, line: " << __LINE__ << endl;
       return NDBT_FAILED;
     }
     
@@ -320,6 +371,7 @@ int runTestMaxOperations(NDBT_Context* ctx, NDBT_Step* step){
     {
       if(hugoOps.pkReadRecord(pNdb, rowNo, 1) != NDBT_OK){
         errors++;
+        ndbout << "ReadRecord failed at line: " << __LINE__ << ", row: " << rowNo << endl;
         if (errors >= maxErrors){
           result = NDBT_FAILED;
           break;
@@ -330,6 +382,8 @@ int runTestMaxOperations(NDBT_Context* ctx, NDBT_Step* step){
     const int execResult = hugoOps.execute_Commit(pNdb);
     if (execResult != NDBT_OK)
     {
+      ndbout << "execute failed at line: " << __LINE__
+	     << ", with execResult: " << execResult << endl;
       result = NDBT_FAILED;
     }
     hugoOps.closeTransaction(pNdb);
@@ -359,9 +413,11 @@ int runTestMaxOperations(NDBT_Context* ctx, NDBT_Step* step){
     ndbout << "Cool down periode didn't shrink NdbOperation free-list" << endl;
     result = NDBT_FAILED;
   }
-
+  
+  if (result != NDBT_OK)
+    ndbout << "Test case failed with result: " << result << endl;
+  
   delete pNdb;
-
   return result;
 }
 
@@ -1281,7 +1337,7 @@ int runCheckGetNdbErrorOperation(NDBT_Context* ctx, NDBT_Step* step){
   for(int a = 0; a<pTab->getNoOfColumns(); a++){
     if (pTab->getColumn(a)->getPrimaryKey() == true){
       if(hugoOps.equalForAttr(pOp, a, 1) != 0){
-	// An error has occured, check that 
+	// An error has occurred, check that 
 	// it's possible to get the NdbErrorOperation
 	const NdbError err = pCon->getNdbError();
 	NDB_ERR(err);
@@ -4982,6 +5038,11 @@ int runNdbClusterConnect(NDBT_Context* ctx, NDBT_Step* step)
     if (con.connect(retries, retry_delay, verbose) != 0)
     {
       g_err << "Ndb_cluster_connection.connect failed" << endl;
+      g_err << "Error code: "
+            << con.get_latest_error()
+            << " message: "
+            << con.get_latest_error_msg()
+            << endl;
       return NDBT_FAILED;
     }
 
@@ -4994,6 +5055,11 @@ int runNdbClusterConnect(NDBT_Context* ctx, NDBT_Step* step)
     {
       g_err << "Cluster connection was not ready, nodeid: "
             << con.node_id() << endl;
+      g_err << "Error code: "
+            << con.get_latest_error()
+            << " message: "
+            << con.get_latest_error_msg()
+            << endl;
       abort();
       return NDBT_FAILED;
     }
@@ -5026,6 +5092,7 @@ runRestarts(NDBT_Context* ctx, NDBT_Step* step)
   Uint32 sr = ctx->getProperty("ClusterRestart", (unsigned)0);
   Uint32 master = ctx->getProperty("Master", (unsigned)0);
   Uint32 slow = ctx->getProperty("SlowNR", (unsigned)0);
+  Uint32 slowNoStart = ctx->getProperty("SlowNoStart", (unsigned)0);
   NdbRestarter restarter;
 
   if (restarter.waitClusterStarted() != 0)
@@ -5070,6 +5137,22 @@ runRestarts(NDBT_Context* ctx, NDBT_Step* step)
         g_err << "Failed to waitNodesNoStart" << endl;
         result = NDBT_FAILED;
         break;
+      }
+
+      if (slowNoStart)
+      {
+        /**
+         * Spend some time in the NOT_STARTED state, as opposed
+         * to some substate of STARTING
+         */
+        Uint32 blockTime = 3 * 60 * 1000;
+        Uint64 end = NdbTick_CurrentMillisecond() + blockTime;
+        while (ctx->getProperty("runNdbClusterConnect_FINISHED") < threads
+               && !ctx->isTestStopped() &&
+               NdbTick_CurrentMillisecond() < end)
+        {
+          NdbSleep_MilliSleep(100);
+        }
       }
 
       if (slow)
@@ -5274,7 +5357,7 @@ int runNdbClusterConnectionConnect(NDBT_Context* ctx, NDBT_Step* step)
 class SectionStore
 {
 public:
-  virtual ~SectionStore() {};
+  virtual ~SectionStore() {}
   virtual int appendToSection(Uint32 secId, LinearSectionPtr ptr) = 0;
 };
 
@@ -5289,12 +5372,12 @@ public:
   BasicSectionStore()
   {
     init();
-  };
+  }
 
-  ~BasicSectionStore()
+  ~BasicSectionStore() override
   {
     freeStorage();
-  };
+  }
 
   void init()
   {
@@ -5311,7 +5394,7 @@ public:
     free(ptrs[2].p);
   }
 
-  virtual int appendToSection(Uint32 secId, LinearSectionPtr ptr)
+  int appendToSection(Uint32 secId, LinearSectionPtr ptr) override
   {
     /* Potentially expensive re-alloc + copy */
     require(secId < 3);
@@ -6404,7 +6487,7 @@ testMgmdSendBufferExhaust(NDBT_Context* ctx, NDBT_Step* step)
   ndbout << "Reducing MGMD SB memory + blocking send to data node" << endl;
   const int leftSbBytes = 96 * 1024;
   const int dumpCodeConsumeSb [] = {9996, leftSbBytes};
-  const int dumpCodeBlockSend [] = {9994, dataNodeId};
+  const int dumpCodeBlockSend [] = {9988, dataNodeId};
   CHECK(restarter.dumpStateOneNode(mgmdNodeId, dumpCodeConsumeSb, 2) == 0);
   CHECK(restarter.dumpStateOneNode(mgmdNodeId, dumpCodeBlockSend, 2) == 0);
 
@@ -6432,7 +6515,7 @@ testMgmdSendBufferExhaust(NDBT_Context* ctx, NDBT_Step* step)
   }
 
   ndbout << "Cleaning up" << endl;
-  const int dumpCodeUnblockSend [] = {9995, dataNodeId};
+  const int dumpCodeUnblockSend [] = {9989, dataNodeId};
   const int dumpCodeReleaseSb [] = {9997};
   CHECK(restarter.dumpStateOneNode(mgmdNodeId, dumpCodeUnblockSend, 2) == 0);
   CHECK(restarter.dumpStateOneNode(mgmdNodeId, dumpCodeReleaseSb, 1) == 0);
@@ -7109,6 +7192,63 @@ runTestColumnNameLookupPerf(NDBT_Context* ctx, NDBT_Step* step)
   return NDBT_OK;
 }
 
+int runMaybeRestartMaster(NDBT_Context* ctx, NDBT_Step* step)
+{
+  /**
+   * Psuedo-randomly restart the current master node
+   * Often in test runs the Master node is the lowest
+   * numbered node id due to nodes being iterated.
+   *
+   * Randomly restarting the Master prior to running a
+   * test is one way to avoid tests with do [not] restart
+   * the master for always [never] restarting the
+   * lowest node id
+   */
+  NdbRestarter restarter;
+  int masterNodeId = restarter.getMasterNodeId();
+  const bool restartMaster = ((rand() % 2) == 0);
+
+  if (restartMaster)
+  {
+    ndbout << "Restarting Master node "
+           << masterNodeId
+           << endl;
+
+    if (restarter.restartOneDbNode(masterNodeId,
+                                   false,        // Initial
+                                   true) != 0)   // NOSTART
+    {
+      g_err << "Failed to restart node" << endl;
+      return NDBT_FAILED;
+    }
+
+    if (restarter.waitNodesNoStart(&masterNodeId, 1) != 0)
+    {
+      g_err << "Failed to wait for NoStart" << endl;
+      return NDBT_FAILED;
+    }
+
+    if (restarter.startNodes(&masterNodeId, 1) != 0)
+    {
+      g_err << "Failed to start node" << endl;
+      return NDBT_FAILED;
+    }
+
+    if (restarter.waitClusterStarted() != 0)
+    {
+      g_err << "Failed waiting for node to start" << endl;
+      return NDBT_FAILED;
+    }
+    ndbout << "Master node restarted" << endl;
+  }
+  else
+  {
+    ndbout << "Not restarting Master node "
+           << masterNodeId
+           << endl;
+  }
+  return NDBT_OK;
+}
 
 void
 asyncCallback(int res, NdbTransaction* trans, void* obj)
@@ -7493,6 +7633,79 @@ int runCheckSlowCommit(NDBT_Context* ctx, NDBT_Step* step)
 }
 
 
+int runWriteRecord(NDBT_Context* ctx, NDBT_Step* step)
+{
+  // Write a record so we can run parallel exclusive reads
+  const NdbDictionary::Table *tab = ctx->getTab();
+  HugoOperations hugoOps(*tab);
+  Ndb *ndb = GETNDB(step);
+  CHECK(hugoOps.startTransaction(ndb) == 0);
+  CHECK(hugoOps.pkWriteRecord(ndb, 0, 1) == 0);
+  CHECK(hugoOps.execute_Commit(ndb) == 0);
+  CHECK(hugoOps.closeTransaction(ndb) == 0);
+  return NDBT_OK;
+}
+
+
+int runPkRead1(NDBT_Context* ctx, NDBT_Step* step)
+{
+  const NdbDictionary::Table *tab = ctx->getTab();
+  HugoOperations hugoOps(*tab);
+  Ndb *ndb = GETNDB(step);
+  CHECK(hugoOps.startTransaction(ndb) == 0);
+  CHECK(hugoOps.pkReadRecord(ndb, 0, 1, NdbOperation::LM_Exclusive) == 0);
+  CHECK(hugoOps.execute_NoCommit(ndb) == 0);
+  // Signal the other thread that the row is locked by this transaction
+  ctx->setProperty("ReadExecuted", 1);
+  ctx->getPropertyWait("ReadExecuted", 2);
+  // The other thread has completed its (unsuccessful) attempts to lock this
+  // row. Go ahead and complete the operation thus releasing the lock
+  CHECK(hugoOps.execute_Commit(ndb) == 0);
+  CHECK(hugoOps.closeTransaction(ndb) == 0);
+  // Signal the other thread that the transaction has completed and that the
+  // row has been unlocked
+  ctx->setProperty("ReadExecuted", 3);
+  return NDBT_OK;
+}
+
+
+int runPkRead2(NDBT_Context* ctx, NDBT_Step* step)
+{
+  // Wait until the transaction in the other thread has locked the row
+  ctx->getPropertyWait("ReadExecuted", 1);
+  const NdbDictionary::Table *tab = ctx->getTab();
+  HugoOperations hugoOps(*tab);
+  Ndb *ndb = GETNDB(step);
+  CHECK(hugoOps.startTransaction(ndb) == 0);
+  CHECK(hugoOps.pkReadRecord(ndb, 0, 1, NdbOperation::LM_Exclusive) == 0);
+  // Try and read the locked row without the NoWait option set. This results in
+  // Error 266: Time-out in NDB, probably caused by deadlock
+  CHECK(hugoOps.execute_NoCommit(ndb) == 266);
+  CHECK(hugoOps.closeTransaction(ndb) == 0);
+  CHECK(hugoOps.startTransaction(ndb) == 0);
+  // Try and read the locked row with the NoWait option set. This results in
+  // Error 635: Lock already taken, not waiting
+  CHECK(hugoOps.pkReadRecord(ndb, 0, 1, NdbOperation::LM_Exclusive, 0,
+                             true) == 0);
+  CHECK(hugoOps.execute_NoCommit(ndb) == 635);
+  CHECK(hugoOps.closeTransaction(ndb) == 0);
+  // Signal the other thread that this transaction has completed its attempts
+  // to lock the row
+  ctx->setProperty("ReadExecuted", 2);
+  // Wait until the transaction in the other thread has completed
+  ctx->getPropertyWait("ReadExecuted", 3);
+  // Finally now that the other transaction has completed its read, attempt
+  // another locking read with NoWait option set which should be successful
+  // this time around
+  CHECK(hugoOps.startTransaction(ndb) == 0);
+  CHECK(hugoOps.pkReadRecord(ndb, 0, 1, NdbOperation::LM_Exclusive, 0,
+                             true) == 0);
+  CHECK(hugoOps.execute_NoCommit(ndb) == 0);
+  CHECK(hugoOps.closeTransaction(ndb) == 0);
+  return NDBT_OK;
+}
+
+
 NDBT_TESTSUITE(testNdbApi);
 TESTCASE("MaxNdb", 
 	 "Create Ndb objects until no more can be created\n"){ 
@@ -7771,6 +7984,24 @@ TESTCASE("NdbClusterConnectSR",
   STEPS(runNdbClusterConnect, MAX_NODES);
   STEP(runRestarts); // Note after runNdbClusterConnect or else counting wrong
 }
+TESTCASE("NdbClusterConnectNR_slow_nostart",
+         "Make sure that every Ndb_cluster_connection get a unique nodeid")
+{
+  // Test ability for APIs to connect while some node in NOT_STARTED state
+  // Limit to non-master nodes due to uniqueness failing when master
+  // restarted
+  // (Bug #27484475 NDB : NODEID ALLOCATION UNIQUENESS NOT GUARANTEED
+  //  OVER MASTER NODE FAILURE)
+  // Use randomised initial master restart to avoid always testing
+  // the same node id restart behaviour
+  TC_PROPERTY("Master", 2);
+  TC_PROPERTY("TimeoutAfterFirst", (Uint32)0);
+  TC_PROPERTY("SlowNoStart", 1);
+  INITIALIZER(runMaybeRestartMaster);
+  INITIALIZER(runNdbClusterConnectInit);
+  STEPS(runNdbClusterConnect, MAX_NODES);
+  STEP(runRestarts); // Note after runNdbClusterConnect or else counting wrong
+}
 TESTCASE("TestFragmentedSend",
          "Test fragmented send behaviour"){
   INITIALIZER(testFragmentedSend);
@@ -7887,9 +8118,18 @@ TESTCASE("CheckSlowCommit",
   STEP(runCheckSlowCommit);
   FINALIZER(runDropTable);
 }
+TESTCASE("PkLockingReadNoWait",
+         "Check if PK locking read op with NoWait option set works as expected")
+{
+  TC_PROPERTY("ReadExecuted", Uint32(0));
+  INITIALIZER(runWriteRecord);
+  STEP(runPkRead1);
+  STEP(runPkRead2);
+  FINALIZER(runClearTable);
+}
 
 
-NDBT_TESTSUITE_END(testNdbApi);
+NDBT_TESTSUITE_END(testNdbApi)
 
 int main(int argc, const char** argv){
   ndb_init();

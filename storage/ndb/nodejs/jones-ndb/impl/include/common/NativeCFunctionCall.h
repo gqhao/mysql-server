@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2013, 2016, Oracle and/or its affiliates. All rights reserved.
+ Copyright (c) 2013, 2020 Oracle and/or its affiliates.
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License, version 2.0,
@@ -23,8 +23,6 @@
  */
 
 #include "AsyncMethodCall.h"
-
-using namespace v8;
 
 /** These templated classes represent normal C or C++ function calls.
   *
@@ -54,7 +52,7 @@ public:
   { }
 
   /* Methods */
-  void run() {
+  void run() override {
     AsyncCall_Returning<R>::return_val = (*function)();
   }
 };
@@ -82,7 +80,7 @@ public:
   { }
 
   /* Methods */
-  void run() {
+  void run() override {
     AsyncCall_Returning<R>::return_val = (function)(Call_1_<A0>::arg0);
   }
 };
@@ -110,7 +108,7 @@ public:
   { }
 
   /* Methods */
-  void run() {
+  void run() override {
     AsyncCall_Returning<R>::return_val = (function)(
       Call_2_<A0, A1>::arg0,
       Call_2_<A0, A1>::arg1
@@ -141,7 +139,7 @@ public:
   { }
 
   /* Methods */
-  void run() {
+  void run() override {
     AsyncCall_Returning<R>::return_val = (function)(
       Call_3_<A0, A1, A2>::arg0,
       Call_3_<A0, A1, A2>::arg1,
@@ -174,7 +172,7 @@ public:
   { }
 
   /* Methods */
-  void run() {
+  void run() override {
     AsyncCall_Returning<R>::return_val = (function)(
       Call_4_<A0, A1, A2, A3>::arg0,
       Call_4_<A0, A1, A2, A3>::arg1,
@@ -208,7 +206,7 @@ public:
   { }
 
   /* Methods */
-  void run() {
+  void run() override {
     AsyncCall_Returning<R>::return_val = (function)(
       Call_6_<A0, A1, A2, A3, A4, A5>::arg0,
       Call_6_<A0, A1, A2, A3, A4, A5>::arg1,
@@ -244,7 +242,7 @@ public:
   { }
 
   /* Methods */
-  void run() {
+  void run() override {
     assert(function);
     AsyncCall_Returning<R>::return_val = (function)(
       Call_8_<A0, A1, A2, A3, A4, A5, A6, A7>::arg0,
@@ -280,7 +278,7 @@ public:
   { }
 
   /* Methods */
-  void run() {
+  void run() override {
     function();
   }
 };
@@ -310,7 +308,7 @@ public:
   { }
 
   /* Methods */
-  void run() {
+  void run() override {
     function(Call_1_<A0>::arg0);
   }
 };

@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -46,17 +46,22 @@ class Keys_container : public IKeys_container {
 
  public:
   Keys_container(ILogger *logger);
-  bool init(IKeyring_io *keyring_io, std::string keyring_storage_url);
-  bool store_key(IKey *key);
-  IKey *fetch_key(IKey *key);
-  bool remove_key(IKey *key);
-  std::string get_keyring_storage_url();
-  void set_keyring_io(IKeyring_io *keyring_io);
-  std::vector<Key_metadata> get_keys_metadata() { return keys_metadata; }
+  bool init(IKeyring_io *keyring_io, std::string keyring_storage_url) override;
+  bool store_key(IKey *key) override;
+  IKey *fetch_key(IKey *key) override;
+  bool remove_key(IKey *key) override;
+  std::string get_keyring_storage_url() override;
+  void set_keyring_io(IKeyring_io *keyring_io) override;
+  std::vector<Key_metadata> get_keys_metadata() override {
+    return keys_metadata;
+  }
 
-  ~Keys_container();
+  ~Keys_container() override;
 
-  ulong get_number_of_keys() { return keys_hash->size(); };
+  size_t get_number_of_keys() { return keys_hash->size(); }
+
+  /** Internal function, returns the key from the internal hash, no locks */
+  IKey *get_key_from_hash(IKey *key) override;
 
  protected:
   Keys_container(const Keys_container &);
@@ -67,7 +72,6 @@ class Keys_container : public IKeys_container {
                                              size_t source_key_data_size);
   bool load_keys_from_keyring_storage();
   void free_keys_hash();
-  IKey *get_key_from_hash(IKey *key);
   bool store_key_in_hash(IKey *key);
   bool remove_key_from_hash(IKey *key);
   virtual bool flush_to_backup();

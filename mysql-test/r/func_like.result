@@ -270,8 +270,9 @@ x	y
 DROP TABLE t1, t2;
 # Bug#20035071: Out of range error in subselect lead to assertion failed
 CREATE TABLE t1(a INTEGER) engine=innodb;
+INSERT INTO t1 VALUES(1);
 SELECT 1 FROM t1 HAVING (SELECT 1 FROM t1) LIKE EXP(NOW());
-1
+ERROR 22003: DOUBLE value is out of range in 'exp(now())'
 DROP TABLE t1;
 #
 # Bug #25140629: WRONG RESULT WHEN USING LIKE FUNCTION WITH UCA
@@ -289,3 +290,143 @@ SELECT wildstr, str, like_result FROM t1 WHERE (str LIKE wildstr) <>
 like_result;
 wildstr	str	like_result
 DROP TABLE t1;
+#
+# Bug #12635103: VALGRIND WARNINGS IN MY_WILDCMP_MB AND
+#                MY_WILDCMP_8BIT WITH LIKE AND CONVERT
+#
+SELECT 'aa' LIKE CONVERT('%a' USING big5);
+'aa' LIKE CONVERT('%a' USING big5)
+1
+SELECT 'aa' LIKE CONVERT('%a' USING utf8mb4);
+'aa' LIKE CONVERT('%a' USING utf8mb4)
+1
+SELECT 'aa' LIKE CONVERT('%a' USING gb18030);
+'aa' LIKE CONVERT('%a' USING gb18030)
+1
+SELECT 'aa' LIKE CONVERT('%a' USING binary);
+'aa' LIKE CONVERT('%a' USING binary)
+1
+SELECT 'aa' LIKE CONVERT('%a' USING latin1);
+'aa' LIKE CONVERT('%a' USING latin1)
+1
+SET NAMES gb2312;
+SELECT 'aa' LIKE '%a' COLLATE gb2312_bin;
+'aa' LIKE '%a' COLLATE gb2312_bin
+1
+SET NAMES DEFAULT;
+SELECT 'aa' LIKE CONVERT('%a' USING utf8);
+'aa' LIKE CONVERT('%a' USING utf8)
+1
+Warnings:
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+#
+# Bug#29175461: LIKE RESULT ERROR IF ESCAPE IS % OF WILDCARD CHARACTERS
+#
+SET NAMES big5;
+select 1 where 'b%a' like '%%a' escape '%';
+1
+select 1 where 'b_a' like '__a' escape '_';
+1
+select 1 where 'b%a' like '#%a' escape '#';
+1
+select 1 where 'b_a' like '#_a' escape '#';
+1
+SET NAMES utf8mb4;
+select 1 where 'b%a' like '%%a' escape '%';
+1
+select 1 where 'b_a' like '__a' escape '_';
+1
+select 1 where 'b%a' like '#%a' escape '#';
+1
+select 1 where 'b_a' like '#_a' escape '#';
+1
+SET NAMES gb18030;
+select 1 where 'b%a' like '%%a' escape '%';
+1
+select 1 where 'b_a' like '__a' escape '_';
+1
+select 1 where 'b%a' like '#%a' escape '#';
+1
+select 1 where 'b_a' like '#_a' escape '#';
+1
+SET NAMES binary;
+select 1 where 'b%a' like '%%a' escape '%';
+1
+select 1 where 'b_a' like '__a' escape '_';
+1
+select 1 where 'b%a' like '#%a' escape '#';
+1
+select 1 where 'b_a' like '#_a' escape '#';
+1
+SET NAMES latin1;
+select 1 where 'b%a' like '%%a' escape '%';
+1
+select 1 where 'b_a' like '__a' escape '_';
+1
+select 1 where 'b%a' like '#%a' escape '#';
+1
+select 1 where 'b_a' like '#_a' escape '#';
+1
+SET NAMES gb2312;
+select 1 where 'b%a' like '%%a' escape '%';
+1
+select 1 where 'b_a' like '__a' escape '_';
+1
+select 1 where 'b%a' like '#%a' escape '#';
+1
+select 1 where 'b_a' like '#_a' escape '#';
+1
+SET NAMES utf8;
+Warnings:
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+select 1 where 'b%a' like '%%a' escape '%';
+1
+select 1 where 'b_a' like '__a' escape '_';
+1
+select 1 where 'b%a' like '#%a' escape '#';
+1
+select 1 where 'b_a' like '#_a' escape '#';
+1
+SET NAMES default;
+#
+# Bug#29368521: ASSERTION `!THD->IS_ERROR()' FAILED
+#
+SELECT 'a' LIKE '%' ESCAPE CAST('' AS JSON);
+ERROR 22032: Invalid JSON text in argument 1 to function cast_as_json: "The document is empty." at position 0.
+#
+# Bug#29590129 UBSAN: MEMBER CALL ON NULL POINTER OF TYPE
+#              'STRUCT STRING' IN ITEM_FUNC_LIKE::VA
+#
+CREATE TABLE t1 (c1 INT);
+INSERT INTO t1 VALUES (42);
+DELETE FROM t1 WHERE
+( EXISTS
+(SELECT * WHERE '520:33:32.77' < (c1 - INTERVAL(1) MONTH))
+) LIKE (c1);
+ERROR 22007: Incorrect datetime value: '42'
+DROP TABLE t1;
+#
+# Bug#29904751: LIKE CONDITION FOR DATE COLUMN RETURNS ERROR
+#
+CREATE TABLE t(col1 DATE);
+INSERT INTO t(col1) VALUES('2019-06-13'), ('2019-07-13');
+SELECT * FROM t WHERE col1 LIKE '2019%';
+col1
+2019-06-13
+2019-07-13
+SELECT * FROM t WHERE col1 LIKE '2019-06-1%';
+col1
+2019-06-13
+DROP TABLE t;
+#
+# Bug#31249687 WL9384: RESULTSET MISMATCH WITH LIKE KEYWORD USING PREPARE STATEMENT
+#
+create table t1(a int);
+insert into t1 values(0);
+set @pattern="%1%";
+select 1 from t1 where a like @pattern;
+1
+prepare s from 'select 1 from t1 where a like ?';
+execute s using @pattern;
+1
+drop table t1;

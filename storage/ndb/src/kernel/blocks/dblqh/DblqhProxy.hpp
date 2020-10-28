@@ -1,4 +1,4 @@
-/* Copyright (c) 2008, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2008, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -35,7 +35,6 @@
 #include <signaldata/StartRec.hpp>
 #include <signaldata/LqhTransReq.hpp>
 #include <signaldata/LqhTransConf.hpp>
-#include <signaldata/EmptyLcp.hpp>
 
 #define JAM_FILE_ID 445
 
@@ -43,19 +42,19 @@
 class DblqhProxy : public LocalProxy {
 public:
   DblqhProxy(Block_context& ctx);
-  virtual ~DblqhProxy();
+  ~DblqhProxy() override;
   BLOCK_DEFINES(DblqhProxy);
 
 protected:
-  virtual SimulatedBlock* newWorker(Uint32 instanceNo);
+  SimulatedBlock* newWorker(Uint32 instanceNo) override;
 
   // system info
   Uint32 c_tableRecSize;
   Uint8* c_tableRec;    // bool => table exists
 
   // GSN_NDB_STTOR
-  virtual void callNDB_STTOR(Signal*);
-  virtual void callREAD_CONFIG_REQ(Signal*);
+  void callNDB_STTOR(Signal*) override;
+  void callREAD_CONFIG_REQ(Signal*) override;
 
   // GSN_CREATE_TAB_REQ
   struct Ss_CREATE_TAB_REQ : SsParallel {
@@ -369,7 +368,7 @@ protected:
       m_sendREQ = (SsFUNCREQ)&DblqhProxy::sendEXEC_SR_1;
       m_sendCONF = (SsFUNCREP)0;
       m_gsn = 0;
-    };
+    }
     enum { poolSize = 1 };
     static SsPool<Ss_EXEC_SR_1>& pool(LocalProxy* proxy) {
       return ((DblqhProxy*)proxy)->c_ss_EXEC_SR_1;
@@ -378,7 +377,7 @@ protected:
   SsPool<Ss_EXEC_SR_1> c_ss_EXEC_SR_1;
   Uint32 getSsId(const Ss_EXEC_SR_1::Sig* sig) {
     return SsIdBase | refToNode(sig->nodeId);
-  };
+  }
   void execEXEC_SRREQ(Signal*);
   void execEXEC_SRCONF(Signal*);
   void execEXEC_SR_1(Signal*, GlobalSignalNumber gsn);
@@ -401,7 +400,7 @@ protected:
       m_sendCONF = (SsFUNCREP)&DblqhProxy::sendEXEC_SR_2;
       m_gsn = 0;
       m_sigcount = 0;
-    };
+    }
     enum { poolSize = 1 };
     static SsPool<Ss_EXEC_SR_2>& pool(LocalProxy* proxy) {
       return ((DblqhProxy*)proxy)->c_ss_EXEC_SR_2;
@@ -410,7 +409,7 @@ protected:
   SsPool<Ss_EXEC_SR_2> c_ss_EXEC_SR_2;
   Uint32 getSsId(const Ss_EXEC_SR_2::Sig* sig) {
     return SsIdBase | refToNode(sig->nodeId);
-  };
+  }
   void execEXEC_SR_2(Signal*, GlobalSignalNumber gsn);
   void sendEXEC_SR_2(Signal*, Uint32 ssId);
 
@@ -451,7 +450,6 @@ protected:
   void sendDROP_FRAG_CONF(Signal*, Uint32 ssId);
 
   // LCP handling
-  void execEMPTY_LCP_REQ(Signal*);
   void execLCP_FRAG_ORD(Signal*);
   void execLCP_FRAG_REP(Signal*);
   void execEND_LCPCONF(Signal*);
@@ -480,7 +478,6 @@ protected:
     Uint32 m_lcp_frag_ord_cnt;     // No of LCP_FRAG_ORD received
     Uint32 m_lcp_frag_rep_cnt;     // No of LCP_FRAG_REP sent
     Uint32 m_complete_outstanding; // Outstanding signals waiting for
-    NdbNodeBitmask m_empty_lcp_req;// Nodes waiting for EMPTY_LCP_CONF
     LcpFragOrd m_last_lcp_frag_ord;// Last received LCP_FRAG_ORD
     bool m_lastFragmentFlag;
 
@@ -490,20 +487,12 @@ protected:
       m_lcp_frag_ord_cnt = 0;
       m_lcp_frag_rep_cnt = 0;
       m_lastFragmentFlag = false;
-    };
+    }
   };
   LcpRecord c_lcpRecord;
   Uint32 getNoOfOutstanding(const LcpRecord&) const;
   void completeLCP(Signal* signal);
   void sendLCP_COMPLETE_REP(Signal*);
-
-  void checkSendEMPTY_LCP_CONF_impl(Signal* signal);
-  void checkSendEMPTY_LCP_CONF(Signal* signal)
-  {
-    if (c_lcpRecord.m_empty_lcp_req.isclear())
-      return;
-    checkSendEMPTY_LCP_CONF_impl(signal);
-  }
 };
 
 

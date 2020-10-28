@@ -1,5 +1,5 @@
 
-# Copyright (c) 2006, 2017, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2006, 2020, Oracle and/or its affiliates.
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0,
@@ -24,9 +24,18 @@
 cmake_minimum_required(VERSION 2.4.4)
 set(CMAKE_ALLOW_LOOSE_LOOP_CONSTRUCTS ON)
 
-project(zlib C)
-
 set(VERSION "1.2.11")
+
+IF(POLICY CMP0048)
+  CMAKE_POLICY(SET CMP0048 NEW)
+  project(zlib VERSION ${VERSION} LANGUAGES C)
+ELSE()
+  project(zlib C)
+ENDIF()
+
+IF(POLICY CMP0075)
+  CMAKE_POLICY(SET CMP0075 OLD)
+ENDIF()
 
 include(CheckTypeSize)
 include(CheckFunctionExists)
@@ -78,7 +87,7 @@ configure_file(
   ${CMAKE_CURRENT_BINARY_DIR}/zconf.h @ONLY
   )
 include_directories(
-  SYSTEM ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}
+  BEFORE SYSTEM ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}
   )
 
 #============================================================================
@@ -129,8 +138,12 @@ file(READ ${CMAKE_CURRENT_SOURCE_DIR}/zlib.h _zlib_h_contents)
 string(REGEX REPLACE ".*#define[ \t]+ZLIB_VERSION[ \t]+\"([-0-9A-Za-z.]+)\".*"
     "\\1" ZLIB_FULL_VERSION ${_zlib_h_contents})
 
-ADD_CONVENIENCE_LIBRARY(zlib STATIC
+ADD_CONVENIENCE_LIBRARY(zlib
   ${ZLIB_SRCS} ${ZLIB_PUBLIC_HDRS} ${ZLIB_PRIVATE_HDRS})
+
+IF(NOT WIN32)
+  ADD_COMPILE_FLAGS(${ZLIB_SRCS} COMPILE_FLAGS "-fvisibility=hidden")
+ENDIF()
 
 if(NOT CYGWIN)
     # This property causes shared libraries on Linux to have the full version

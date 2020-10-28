@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,17 +22,17 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-#ifndef _NGS_MEMORY_H_
-#define _NGS_MEMORY_H_
+#ifndef PLUGIN_X_NGS_INCLUDE_NGS_MEMORY_H_
+#define PLUGIN_X_NGS_INCLUDE_NGS_MEMORY_H_
 
 #include <mysql/plugin.h>
+#include <memory>
 
 #include "my_compiler.h"
-#include "plugin/x/ngs/include/ngs_common/bind.h"
-#include "plugin/x/ngs/include/ngs_common/smart_ptr.h"
+#include "plugin/x/src/config/config.h"
+#include "plugin/x/src/xpl_performance_schema.h"
 
 namespace ngs {
-extern unsigned int x_psf_objects_key;
 
 namespace detail {
 // PSF instrumented allocator class that can be used with STL objects
@@ -49,9 +49,9 @@ class PFS_allocator : public std::allocator<T> {
     typedef PFS_allocator<U> other;
   };
 
-  T *allocate(size_t n, const void *hint MY_ATTRIBUTE((unused)) = 0) {
-    return reinterpret_cast<T *>(
-        my_malloc(x_psf_objects_key, sizeof(T) * n, MYF(MY_WME)));
+  T *allocate(size_t n, const void *hint MY_ATTRIBUTE((unused)) = nullptr) {
+    return reinterpret_cast<T *>(my_malloc(
+        IS_PSI_AVAILABLE(KEY_memory_x_objects, 0), sizeof(T) * n, MYF(MY_WME)));
   }
 
   void deallocate(T *ptr, size_t) { my_free(ptr); }
@@ -62,63 +62,23 @@ class PFS_allocator : public std::allocator<T> {
 // instrumented deallocator
 template <class T>
 void free_object(T *ptr) {
-  if (ptr != NULL) {
+  if (ptr != nullptr) {
     ptr->~T();
     my_free(ptr);
   }
 }
 
 // set of instrumented object allocators for different parameters number
-template <typename T>
-T *allocate_object() {
-  return new (my_malloc(x_psf_objects_key, sizeof(T), MYF(MY_WME))) T();
-}
-
-template <typename T, typename Arg1>
-T *allocate_object(Arg1 const &arg1) {
-  return new (my_malloc(x_psf_objects_key, sizeof(T), MYF(MY_WME))) T(arg1);
-}
-
-template <typename T, typename Arg1, typename Arg2>
-T *allocate_object(Arg1 const &arg1, Arg2 const &arg2) {
-  return new (my_malloc(x_psf_objects_key, sizeof(T), MYF(MY_WME)))
-      T(arg1, arg2);
-}
-
-template <typename T, typename Arg1, typename Arg2, typename Arg3>
-T *allocate_object(Arg1 const &arg1, Arg2 const &arg2, Arg3 const &arg3) {
-  return new (my_malloc(x_psf_objects_key, sizeof(T), MYF(MY_WME)))
-      T(arg1, arg2, arg3);
-}
-
-template <typename T, typename Arg1, typename Arg2, typename Arg3,
-          typename Arg4>
-T *allocate_object(Arg1 const &arg1, Arg2 const &arg2, Arg3 const &arg3,
-                   Arg4 const &arg4) {
-  return new (my_malloc(x_psf_objects_key, sizeof(T), MYF(MY_WME)))
-      T(arg1, arg2, arg3, arg4);
-}
-
-template <typename T, typename Arg1, typename Arg2, typename Arg3,
-          typename Arg4, typename Arg5>
-T *allocate_object(Arg1 const &arg1, Arg2 const &arg2, Arg3 const &arg3,
-                   Arg4 const &arg4, Arg5 const &arg5) {
-  return new (my_malloc(x_psf_objects_key, sizeof(T), MYF(MY_WME)))
-      T(arg1, arg2, arg3, arg4, arg5);
-}
-
-template <typename T, typename Arg1, typename Arg2, typename Arg3,
-          typename Arg4, typename Arg5, typename Arg6>
-T *allocate_object(Arg1 const &arg1, Arg2 const &arg2, Arg3 const &arg3,
-                   Arg4 const &arg4, Arg5 const &arg5, Arg6 const &arg6) {
-  return new (my_malloc(x_psf_objects_key, sizeof(T), MYF(MY_WME)))
-      T(arg1, arg2, arg3, arg4, arg5, arg6);
+template <typename T, typename... Args>
+T *allocate_object(Args &&... args) {
+  return new (my_malloc(IS_PSI_AVAILABLE(KEY_memory_x_objects, 0), sizeof(T),
+                        MYF(MY_WME))) T(std::forward<Args>(args)...);
 }
 
 template <typename T, typename... Args>
-ngs::shared_ptr<T> allocate_shared(Args &&... args) {
-  return ngs::detail::allocate_shared<T>(detail::PFS_allocator<T>(),
-                                         std::forward<Args>(args)...);
+std::shared_ptr<T> allocate_shared(Args &&... args) {
+  return std::allocate_shared<T>(detail::PFS_allocator<T>(),
+                                 std::forward<Args>(args)...);
 }
 
 // allocates array of selected type using mysql server instrumentation
@@ -135,7 +95,7 @@ template <typename ArrayType>
 void reallocate_array(ArrayType *&array_ptr, std::size_t size,
                       unsigned int psf_key) {
   if (NULL == array_ptr) {
-    ngs::allocate_array(array_ptr, size, psf_key);
+    allocate_array(array_ptr, size, psf_key);
     return;
   }
 
@@ -156,7 +116,7 @@ struct Memory_instrumented {
     void operator()(Type *ptr) { free_object(ptr); }
   };
 
-  typedef ngs::unique_ptr<Type, Unary_delete> Unique_ptr;
+  typedef std::unique_ptr<Type, Unary_delete> Unique_ptr;
 };
 
 // PSF instrumented string
@@ -166,4 +126,4 @@ typedef std::basic_string<char, std::char_traits<char>,
 
 }  // namespace ngs
 
-#endif  // _NGS_MEMORY_H_
+#endif  // PLUGIN_X_NGS_INCLUDE_NGS_MEMORY_H_

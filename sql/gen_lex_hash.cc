@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -26,11 +26,10 @@
 
   @details
 @verbatim
-The idea of presented algorithm see in
+Algorithm implemented from a description in
 "The Art of Computer Programming" by Donald E. Knuth
-Volume 3 "Sorting and searching"
-(chapter 6.3 "Digital searching" - name and number of chapter
-   is back translation from Russian edition :))
+Volume 3 "Sorting and searching",
+chapter 6.3 "Digital searching"
 
 as illustration of data structures, imagine next table:
 
@@ -93,9 +92,9 @@ So, we can read full search-structure as 32-bit word
 #include <utility>
 
 #include "my_inttypes.h"
-#include "my_macros.h"
 #include "sql/lex.h"
 #include "sql/lex_symbol.h"
+#include "template_utils.h"
 #include "welcome_copyright_notice.h" /* ORACLE_WELCOME_COPYRIGHT_NOTICE */
 
 static bool check_duplicates(uint group_mask);
@@ -128,7 +127,7 @@ class hash_map_info {
   int size_hash_map;
 
   hash_map_info()
-      : root_by_len(NULL), max_len(0), hash_map(NULL), size_hash_map(0) {}
+      : root_by_len(nullptr), max_len(0), hash_map(nullptr), size_hash_map(0) {}
 
   ~hash_map_info() {
     for (int i = 0; i < max_len; i++) root_by_len[i].destroy();

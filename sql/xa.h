@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2013, 2018, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2013, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -26,14 +26,19 @@
 
 #include <string.h>
 #include <sys/types.h>
+#include <list>
+#include <mutex>
 
 #include "lex_string.h"
 #include "my_dbug.h"
 #include "my_inttypes.h"
 #include "my_sqlcommand.h"
-#include "sql/sql_cmd.h"         // Sql_cmd
-#include "sql/sql_plugin_ref.h"  // plugin_ref
-#include "sql/xa_aux.h"          // serialize_xid
+#include "sql/malloc_allocator.h"  // Malloc_allocator
+#include "sql/psi_memory_key.h"    // key_memory_Recovered_xa_transactions
+#include "sql/sql_cmd.h"           // Sql_cmd
+#include "sql/sql_list.h"          // List
+#include "sql/sql_plugin_ref.h"    // plugin_ref
+#include "sql/xa_aux.h"            // serialize_xid
 
 class Protocol;
 class THD;
@@ -64,9 +69,9 @@ class Sql_cmd_xa_start : public Sql_cmd {
   Sql_cmd_xa_start(xid_t *xid_arg, enum xa_option_words xa_option)
       : m_xid(xid_arg), m_xa_opt(xa_option) {}
 
-  virtual enum_sql_command sql_command_code() const { return SQLCOM_XA_START; }
+  enum_sql_command sql_command_code() const override { return SQLCOM_XA_START; }
 
-  virtual bool execute(THD *thd);
+  bool execute(THD *thd) override;
 
  private:
   bool trans_xa_start(THD *thd);
@@ -84,9 +89,9 @@ class Sql_cmd_xa_end : public Sql_cmd {
   Sql_cmd_xa_end(xid_t *xid_arg, enum xa_option_words xa_option)
       : m_xid(xid_arg), m_xa_opt(xa_option) {}
 
-  virtual enum_sql_command sql_command_code() const { return SQLCOM_XA_END; }
+  enum_sql_command sql_command_code() const override { return SQLCOM_XA_END; }
 
-  virtual bool execute(THD *thd);
+  bool execute(THD *thd) override;
 
  private:
   bool trans_xa_end(THD *thd);
@@ -104,11 +109,11 @@ class Sql_cmd_xa_prepare : public Sql_cmd {
  public:
   explicit Sql_cmd_xa_prepare(xid_t *xid_arg) : m_xid(xid_arg) {}
 
-  virtual enum_sql_command sql_command_code() const {
+  enum_sql_command sql_command_code() const override {
     return SQLCOM_XA_PREPARE;
   }
 
-  virtual bool execute(THD *thd);
+  bool execute(THD *thd) override;
 
  private:
   bool trans_xa_prepare(THD *thd);
@@ -126,11 +131,11 @@ class Sql_cmd_xa_recover : public Sql_cmd {
   explicit Sql_cmd_xa_recover(bool print_xid_as_hex)
       : m_print_xid_as_hex(print_xid_as_hex) {}
 
-  virtual enum_sql_command sql_command_code() const {
+  enum_sql_command sql_command_code() const override {
     return SQLCOM_XA_RECOVER;
   }
 
-  virtual bool execute(THD *thd);
+  bool execute(THD *thd) override;
 
  private:
   bool check_xa_recover_privilege(THD *thd) const;
@@ -139,6 +144,7 @@ class Sql_cmd_xa_recover : public Sql_cmd {
   bool m_print_xid_as_hex;
 };
 
+class XID_STATE;
 /**
   This class represents SQL statement which commits
   and terminates an XA transaction with the given xid value.
@@ -149,14 +155,18 @@ class Sql_cmd_xa_commit : public Sql_cmd {
   Sql_cmd_xa_commit(xid_t *xid_arg, enum xa_option_words xa_option)
       : m_xid(xid_arg), m_xa_opt(xa_option) {}
 
-  virtual enum_sql_command sql_command_code() const { return SQLCOM_XA_COMMIT; }
+  enum_sql_command sql_command_code() const override {
+    return SQLCOM_XA_COMMIT;
+  }
 
-  virtual bool execute(THD *thd);
+  bool execute(THD *thd) override;
 
   enum xa_option_words get_xa_opt() const { return m_xa_opt; }
 
  private:
   bool trans_xa_commit(THD *thd);
+  bool process_external_xa_commit(THD *thd, xid_t *xid, XID_STATE *xid_state);
+  bool process_internal_xa_commit(THD *thd, XID_STATE *xid_state);
 
   xid_t *m_xid;
   enum xa_option_words m_xa_opt;
@@ -171,14 +181,16 @@ class Sql_cmd_xa_rollback : public Sql_cmd {
  public:
   explicit Sql_cmd_xa_rollback(xid_t *xid_arg) : m_xid(xid_arg) {}
 
-  virtual enum_sql_command sql_command_code() const {
+  enum_sql_command sql_command_code() const override {
     return SQLCOM_XA_ROLLBACK;
   }
 
-  virtual bool execute(THD *thd);
+  bool execute(THD *thd) override;
 
  private:
   bool trans_xa_rollback(THD *thd);
+  bool process_external_xa_rollback(THD *thd, xid_t *xid, XID_STATE *xid_state);
+  bool process_internal_xa_rollback(THD *thd, XID_STATE *xid_state);
 
   xid_t *m_xid;
 };
@@ -230,10 +242,10 @@ typedef struct xid_t {
   long get_format_id() const { return formatID; }
 
   void set_format_id(long v) {
-    DBUG_ENTER("xid_t::set_format_id");
+    DBUG_TRACE;
     DBUG_PRINT("debug", ("SETTING XID_STATE formatID: %ld", v));
     formatID = v;
-    DBUG_VOID_RETURN;
+    return;
   }
 
   long get_gtrid_length() const { return gtrid_length; }
@@ -259,13 +271,13 @@ typedef struct xid_t {
   }
 
   void set(long f, const char *g, long gl, const char *b, long bl) {
-    DBUG_ENTER("xid_t::set");
+    DBUG_TRACE;
     DBUG_PRINT("debug", ("SETTING XID_STATE formatID: %ld", f));
     formatID = f;
     memcpy(data, g, gtrid_length = gl);
     bqual_length = bl;
     if (bl > 0) memcpy(data + gl, b, bl);
-    DBUG_VOID_RETURN;
+    return;
   }
 
   my_xid get_my_xid() const;
@@ -335,6 +347,18 @@ typedef struct xid_t {
   friend class XID_STATE;
 } XID;
 
+struct st_handler_tablename;
+
+/**
+  Plain structure to store information about XA transaction id
+  and a list of table names involved into XA transaction with
+  specified id.
+*/
+typedef struct st_xarecover_txn {
+  XID id;
+  List<st_handler_tablename> *mod_tables;
+} XA_recover_txn;
+
 class XID_STATE {
  public:
   enum xa_states {
@@ -353,6 +377,14 @@ class XID_STATE {
   static const char *xa_state_names[];
 
   XID m_xid;
+  /**
+    This mutex used for eliminating a possibility to run two
+    XA COMMIT/XA ROLLBACK statements concurrently against the same xid value.
+    m_xa_lock is used on handling XA COMMIT/XA ROLLBACK and acquired only for
+    external XA branches.
+  */
+  std::mutex m_xa_lock;
+
   /// Used by external XA only
   xa_states xa_state;
   bool in_recovery;
@@ -376,6 +408,8 @@ class XID_STATE {
         m_is_binlogged(false) {
     m_xid.null();
   }
+
+  std::mutex &get_xa_lock() { return m_xa_lock; }
 
   void set_state(xa_states state) { xa_state = state; }
 
@@ -497,6 +531,78 @@ class XID_STATE {
   bool check_in_xa(bool report_error) const;
 };
 
+/**
+  This class servers as a registry for prepared XA transactions existed before
+  server was shutdown and being resurrected during the server restart.
+  The class is singleton. To collect a list of XA transaction identifiers and
+  a list of tables for that MDL locks have be acquired the method
+  add_prepared_xa_transaction() must be called. This method is invoked by
+  the function trx_recover_for_mysql() called by innobase_xa_recover during
+  running of X/Open XA distributed transaction recovery procedure. After a list
+  of XA transaction identifiers and a list of table names to be locked in MDL
+  have been collected and the function ha_recover() has returned control flow
+  the method recover_prepared_xa_transactions() must be called to resurrect
+  prepared XA transactions. Separation of collecting information about prepared
+  XA transactions from restoring XA transactions is done in order to exclude
+  possible suspending on MDL locks inside the function
+  dd::reset_tables_and_tablespaces() that is called right after the function
+  ha_recover() returns control flow.
+ */
+
+class Recovered_xa_transactions {
+ public:
+  /**
+    Initialize singleton.
+  */
+  static bool init();
+
+  /**
+    Cleanup and delete singleton object
+  */
+  static void destroy();
+
+  /**
+    Get instance of the class Recovered_xa_transactions
+  */
+  static Recovered_xa_transactions &instance();
+
+  /**
+    Add information about prepared XA transaction into a list of
+    XA transactions to resurrect.
+
+    @param prepared_xa_trn  information about prepared XA transaction
+
+    @return false on success, else true
+  */
+  bool add_prepared_xa_transaction(XA_recover_txn *prepared_xa_trn);
+
+  /**
+    Iterate along a list of prepared XA transactions, register every XA
+    transaction in a cache and acquire MDL locks for every table taking part in
+    XA transaction being resurrected.
+
+    @return false on success, else true
+  */
+  bool recover_prepared_xa_transactions();
+
+  /**
+    Get initialized MEM_ROOT.
+
+    @return Pointer to a initialized MEM_ROOT.
+  */
+  MEM_ROOT *get_allocated_memroot();
+
+ private:
+  // Disable direct instantiation. Use the method init() instead.
+  Recovered_xa_transactions();
+
+  static Recovered_xa_transactions *m_instance;
+  std::list<XA_recover_txn *, Malloc_allocator<XA_recover_txn *>>
+      m_prepared_xa_trans;
+  bool m_mem_root_inited;
+  MEM_ROOT m_mem_root;
+};
+
 class Transaction_ctx;
 
 /**
@@ -571,6 +677,23 @@ struct st_plugin_int *plugin_find_by_type(const LEX_CSTRING &plugin, int type);
 */
 
 bool detach_native_trx(THD *thd, plugin_ref plugin, void *);
+
+/**
+  The function reattaches existing storage engines transaction
+  context to thd. Backup area to save it is provided to low level
+  storage engine function.
+
+  is invoked by plugin_foreach() after
+  trans_xa_prepare() for each storage engine.
+
+  @param[in,out]     thd     Thread context
+  @param             plugin  Reference to handlerton
+
+  @return    false   on success,
+             true    otherwise.
+*/
+
+bool reattach_native_trx(THD *thd, plugin_ref plugin, void *);
 
 /**
   Reset some transaction state information and delete corresponding

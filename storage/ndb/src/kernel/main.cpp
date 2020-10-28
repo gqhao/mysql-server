@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -26,6 +26,7 @@
 #include <ndb_opts.h>
 #include <kernel/NodeBitmask.hpp>
 #include <portlib/ndb_daemon.h>
+#include "util/ndb_openssl_evp.h"
 
 #include "my_alloc.h"
 #include "ndbd.hpp"
@@ -51,6 +52,7 @@ static unsigned opt_allocated_nodeid;
 static int opt_angel_pid;
 static int opt_retries;
 static int opt_delay;
+static unsigned long opt_logbuffer_size;
 
 extern NdbNodeBitmask g_nowait_nodes;
 
@@ -115,6 +117,11 @@ static struct my_option my_long_options[] =
     "Number of seconds between each connection attempt",
     (uchar**) &opt_delay, (uchar**) &opt_delay, 0,
     GET_INT, REQUIRED_ARG, 5, 0, 3600, 0, 0, 0 },
+  { "logbuffer-size", NDB_OPT_NOSHORT,
+    "Size of the log buffer for data node ndb_x_out.log",
+    (uchar**) &opt_logbuffer_size, (uchar**) &opt_logbuffer_size, 0,
+    GET_ULONG, REQUIRED_ARG, 32768, 2048, ULONG_MAX, 0, 0, 0
+  },
   { 0, 0, 0, 0, 0, 0, GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0}
 };
 
@@ -136,8 +143,9 @@ static void short_usage_sub(void)
 int
 real_main(int argc, char** argv)
 {
+  NDB_INIT(argv[0]);
+  Ndb_opts::release();  // because ndbd can fork and call real_main() again
   Ndb_opts opts(argc, argv, my_long_options, load_default_groups);
-  opts.set_usage_funcs(short_usage_sub);
 
   // Print to stdout/console
   g_eventLogger->createConsoleHandler();
@@ -151,6 +159,8 @@ real_main(int argc, char** argv)
 
   // Turn on max loglevel for startup messages
   g_eventLogger->m_logLevel.setLogLevel(LogLevel::llStartUp, 15);
+
+  opts.set_usage_funcs(short_usage_sub);
 
 #ifndef DBUG_OFF
   opt_debug= "d:t:O,/tmp/ndbd.trace";
@@ -212,10 +222,10 @@ real_main(int argc, char** argv)
     ndbd_run(opt_foreground, opt_report_fd,
              opt_ndb_connectstring, opt_ndb_nodeid, opt_bind_address,
              opt_no_start, opt_initial, opt_initialstart,
-             opt_allocated_nodeid, opt_retries, opt_delay);
+             opt_allocated_nodeid, opt_retries, opt_delay,
+             opt_logbuffer_size);
   }
 
-  Ndb_opts::release();
   /**
     The angel process takes care of automatic restarts, by default this is
     the default to have an angel process. When an angel process is used the
@@ -240,6 +250,9 @@ real_main(int argc, char** argv)
 int
 main(int argc, char** argv)
 {
-  return ndb_daemon_init(argc, argv, real_main, angel_stop,
-                         "ndbd", "MySQL Cluster Data Node Daemon");
+  ndb_openssl_evp::library_init();
+  int rc = ndb_daemon_init(argc, argv, real_main, angel_stop,
+                           "ndbd", "MySQL Cluster Data Node Daemon");
+  ndb_openssl_evp::library_end();
+  return rc;
 }

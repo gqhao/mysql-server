@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -32,12 +32,12 @@
 class Applier_handler : public Event_handler {
  public:
   Applier_handler();
-  int handle_event(Pipeline_event *ev, Continuation *cont);
-  int handle_action(Pipeline_action *action);
-  int initialize();
-  int terminate();
-  bool is_unique();
-  int get_role();
+  int handle_event(Pipeline_event *ev, Continuation *cont) override;
+  int handle_action(Pipeline_action *action) override;
+  int initialize() override;
+  int terminate() override;
+  bool is_unique() override;
+  int get_role() override;
 
   /**
     Initializes the SQL thread when receiving a configuration package
@@ -94,10 +94,26 @@ class Applier_handler : public Event_handler {
   int wait_for_gtid_execution(double timeout);
 
   /**
+    Checks if all the given transactions were executed.
+
+    @param retrieved_set the set in string format of transaction to wait for
+    @param timeout  the time (seconds) after which the method returns if the
+                  above condition was not satisfied
+    @param update_THD_status     Shall the method update the THD stage
+
+    @return the operation status
+      @retval 0      All transactions were executed
+      @retval -1     A timeout occurred
+      @retval -2     An error occurred
+*/
+  int wait_for_gtid_execution(std::string &retrieved_set, double timeout,
+                              bool update_THD_status = true);
+
+  /**
     Checks if the channel's relay log contains partial transaction.
-    @return
-      @retval true  If relaylog contains partial transaction.
-      @retval false If relaylog does not contain partial transaction.
+
+    @retval true  If relaylog contains partial transaction.
+    @retval false If relaylog does not contain partial transaction.
   */
   int is_partial_transaction_on_relay_log();
 

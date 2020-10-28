@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -26,7 +26,7 @@
 //**************************************************************************** 
 // 
 //  AUTHOR 
-//      Åsa Fransson 
+//      Ã…sa Fransson 
 // 
 //  NAME 
 //      TransporterCallback 
@@ -39,7 +39,9 @@
 #include <kernel_types.h> 
 #include "TransporterDefinitions.hpp" 
 #include "TransporterRegistry.hpp"
- 
+
+class Transporter;
+
 /**
  * The TransporterReceiveCallback class encapsulates
  * the receive aspects of the transporter code that is
@@ -120,7 +122,7 @@ public:
   /**
    *
    */
-  virtual ~TransporterReceiveHandle() { };
+  virtual ~TransporterReceiveHandle() {}
 
 #ifndef NDEBUG
   /**
@@ -128,9 +130,11 @@ public:
    * DEBUG to detect concurrent calls to ::update_connections and
    * ::performReceive() which isn't allowed.
    */
-  TransporterReceiveHandle() : m_active(false) {};
+  TransporterReceiveHandle() : m_active(false) {}
   volatile bool m_active;
 #endif
+  Uint32 nTCPTransporters;
+  Uint32 nSHMTransporters;
 };
 
 /**
@@ -170,8 +174,8 @@ public:
    * failures, e.g. a couple of direct transitions from CONNECTING
    * to DISCONNECTING in the TransporterRegistry.
    */
-  virtual void enable_send_buffer(NodeId node) = 0;
-  virtual void disable_send_buffer(NodeId node) = 0;
+  virtual void enable_send_buffer(NodeId, TrpId) = 0;
+  virtual void disable_send_buffer(NodeId, TrpId) = 0;
 
   /**
    * The transporter periodically calls this method, indicating the number
@@ -195,8 +199,10 @@ public:
    *
    * See src/common/transporter/trp.txt for more information.
    */
-  virtual void lock_transporter(NodeId node) { }
-  virtual void unlock_transporter(NodeId node) { }
+  virtual void lock_transporter(NodeId, TrpId) { }
+  virtual void unlock_transporter(NodeId, TrpId) { }
+  virtual void lock_send_transporter(NodeId, TrpId) { }
+  virtual void unlock_send_transporter(NodeId, TrpId) { }
 
   /**
    * ToDo: In current patch, these are not used, instead we use default
@@ -227,7 +233,10 @@ public:
    *
    * Nothing should be returned from a node with a disabled send buffer.
    */
-  virtual Uint32 get_bytes_to_send_iovec(NodeId, struct iovec *dst, Uint32) = 0;
+  virtual Uint32 get_bytes_to_send_iovec(NodeId node,
+                                         TrpId id,
+                                         struct iovec *dst,
+                                         Uint32) = 0;
 
   /**
    * Called when data has been sent, allowing to free / reuse the space. Passes
@@ -242,9 +251,9 @@ public:
    *
    * Like get_bytes_to_send_iovec(), this is called during performSend().
    */
-  virtual Uint32 bytes_sent(NodeId node, Uint32 bytes) = 0;
+  virtual Uint32 bytes_sent(NodeId, TrpId, Uint32 bytes) = 0;
 
-  virtual ~TransporterCallback() { };
+  virtual ~TransporterCallback() {}
 };
 
 
@@ -285,7 +294,7 @@ public:
    * The second is the config parameter ExtraSendBufferMemory
    */
   virtual void allocate_send_buffers(Uint64 total_send_buffer,
-			             Uint64 extra_send_buffer) {};
+			             Uint64 extra_send_buffer) {}
 
   /**
    * Check that send bufferes are enabled for the specified node.
@@ -303,7 +312,7 @@ public:
    * actually sent. The buffer contents is then silently discarded.
    */
   virtual bool isSendEnabled(NodeId node) const
-  { return true; };
+  { return true; }
 
   /**
    * Get space for packing a signal into, allocate more buffer as needed.
@@ -312,8 +321,12 @@ public:
    * delivered through get_bytes_to_send_iovec() or not) for one node; the
    * method must return NULL rather than allow to exceed this amount.
    */
-  virtual Uint32 *getWritePtr(NodeId node, Uint32 lenBytes, Uint32 prio,
-                              Uint32 max_use) = 0;
+  virtual Uint32 *getWritePtr(NodeId,
+                              TrpId, 
+                              Uint32 lenBytes,
+                              Uint32 prio,
+                              Uint32 max_use,
+                              SendStatus *error) = 0;
   /**
    * Called when new signal is packed.
    *
@@ -321,7 +334,10 @@ public:
    * was made available to send with get_bytes_to_send_iovec(), but has not
    * yet been marked as really sent from bytes_sent()).
    */
-  virtual Uint32 updateWritePtr(NodeId node, Uint32 lenBytes, Uint32 prio) = 0;
+  virtual Uint32 updateWritePtr(NodeId,
+                                TrpId,
+                                Uint32 lenBytes,
+                                Uint32 prio) = 0;
 
   /**
    * Provide a mechanism to check the level of risk in using the send buffer.
@@ -335,9 +351,9 @@ public:
    * send to the remote node with the hope of freeing up send buffer for the
    * signal to be queued.
    */
-  virtual bool forceSend(NodeId node) = 0;
+  virtual bool forceSend(NodeId, TrpId) = 0;
 
-  virtual ~TransporterSendBufferHandle() { };
+  virtual ~TransporterSendBufferHandle() {}
 };
 
 /**

@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2020, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -37,7 +37,6 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "buf0dblwr.h"
 #include "dict0dict.h"
 #include "log0recv.h"
-#include "my_inttypes.h"
 #endif /* !UNIV_HOTBACKUP */
 #include "page0page.h"
 
@@ -45,11 +44,11 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "dict0boot.h"
 #endif /* !UNIV_HOTBACKUP */
 
-/** Catenates n bytes to the mtr log. */
-void mlog_catenate_string(mtr_t *mtr,      /*!< in: mtr */
-                          const byte *str, /*!< in: string to write */
-                          ulint len)       /*!< in: string length */
-{
+/** Catenates n bytes to the mtr log.
+@param[in] mtr Mini-transaction
+@param[in] str String to write
+@param[in] len String length */
+void mlog_catenate_string(mtr_t *mtr, const byte *str, ulint len) {
   if (mtr_get_log_mode(mtr) == MTR_LOG_NONE) {
     return;
   }
@@ -68,15 +67,13 @@ void mlog_write_initial_log_record(
     mlog_id_t type,  /*!< in: log item type: MLOG_1BYTE, ... */
     mtr_t *mtr)      /*!< in: mini-transaction handle */
 {
-  byte *log_ptr;
+  byte *log_ptr = nullptr;
 
   ut_ad(type <= MLOG_BIGGEST_TYPE);
   ut_ad(type > MLOG_8BYTES);
 
-  log_ptr = mlog_open(mtr, 11);
-
   /* If no logging is requested, we may return now */
-  if (log_ptr == NULL) {
+  if (!mlog_open(mtr, 11, log_ptr)) {
     return;
   }
 
@@ -86,7 +83,7 @@ void mlog_write_initial_log_record(
 }
 #endif /* !UNIV_HOTBACKUP */
 
-/** Parse an initial log record written by mlog_write_initial_dict_log_record.
+/** Parses an initial log record written by mlog_write_initial_dict_log_record.
 @param[in]	ptr		buffer
 @param[in]	end_ptr		buffer end
 @param[out]	type		log record type, should be
@@ -131,7 +128,7 @@ byte *mlog_parse_initial_log_record(
     page_no_t *page_no)  /*!< out: page number */
 {
   if (end_ptr < ptr + 1) {
-    return (NULL);
+    return (nullptr);
   }
 
   *type = (mlog_id_t)((ulint)*ptr & ~MLOG_SINGLE_REC_FLAG);
@@ -140,12 +137,12 @@ byte *mlog_parse_initial_log_record(
   ptr++;
 
   if (end_ptr < ptr + 2) {
-    return (NULL);
+    return (nullptr);
   }
 
   *space = mach_parse_compressed(&ptr, end_ptr);
 
-  if (ptr != NULL) {
+  if (ptr != nullptr) {
     *page_no = mach_parse_compressed(&ptr, end_ptr);
   }
 
@@ -170,7 +167,7 @@ byte *mlog_parse_nbytes(
   ut_a(!page || !page_zip || !fil_page_index_page_check(page));
 
   if (end_ptr < ptr + 2) {
-    return (NULL);
+    return (nullptr);
   }
 
   offset = mach_read_from_2(ptr);
@@ -179,14 +176,14 @@ byte *mlog_parse_nbytes(
   if (offset >= UNIV_PAGE_SIZE) {
     recv_sys->found_corrupt_log = TRUE;
 
-    return (NULL);
+    return (nullptr);
   }
 
   if (type == MLOG_8BYTES) {
     dval = mach_u64_parse_compressed(&ptr, end_ptr);
 
-    if (ptr == NULL) {
-      return (NULL);
+    if (ptr == nullptr) {
+      return (nullptr);
     }
 
     if (page) {
@@ -201,8 +198,8 @@ byte *mlog_parse_nbytes(
 
   val = mach_parse_compressed(&ptr, end_ptr);
 
-  if (ptr == NULL) {
-    return (NULL);
+  if (ptr == nullptr) {
+    return (nullptr);
   }
 
   switch (type) {
@@ -239,7 +236,7 @@ byte *mlog_parse_nbytes(
     default:
     corrupt:
       recv_sys->found_corrupt_log = TRUE;
-      ptr = NULL;
+      ptr = nullptr;
   }
 
   return (const_cast<byte *>(ptr));
@@ -267,22 +264,24 @@ void mlog_write_ulint(
       ut_error;
   }
 
-  if (mtr != 0) {
-    byte *log_ptr = mlog_open(mtr, 11 + 2 + 5);
-
-    /* If no logging is requested, we may return now */
-
-    if (log_ptr != 0) {
-      log_ptr = mlog_write_initial_log_record_fast(ptr, type, log_ptr, mtr);
-
-      mach_write_to_2(log_ptr, page_offset(ptr));
-      log_ptr += 2;
-
-      log_ptr += mach_write_compressed(log_ptr, val);
-
-      mlog_close(mtr, log_ptr);
-    }
+  if (mtr == nullptr) {
+    return;
   }
+
+  /* If no logging is requested, we may return now */
+  byte *log_ptr = nullptr;
+  if (!mlog_open(mtr, 11 + 2 + 5, log_ptr)) {
+    return;
+  }
+
+  log_ptr = mlog_write_initial_log_record_fast(ptr, type, log_ptr, mtr);
+
+  mach_write_to_2(log_ptr, page_offset(ptr));
+  log_ptr += 2;
+
+  log_ptr += mach_write_compressed(log_ptr, val);
+
+  mlog_close(mtr, log_ptr);
 }
 
 /** Writes 8 bytes to a file page. Writes the corresponding log
@@ -293,22 +292,24 @@ void mlog_write_ull(byte *ptr,       /*!< in: pointer where to write */
 {
   mach_write_to_8(ptr, val);
 
-  if (mtr != 0) {
-    byte *log_ptr = mlog_open(mtr, 11 + 2 + 9);
-
-    /* If no logging is requested, we may return now */
-    if (log_ptr != 0) {
-      log_ptr =
-          mlog_write_initial_log_record_fast(ptr, MLOG_8BYTES, log_ptr, mtr);
-
-      mach_write_to_2(log_ptr, page_offset(ptr));
-      log_ptr += 2;
-
-      log_ptr += mach_u64_write_compressed(log_ptr, val);
-
-      mlog_close(mtr, log_ptr);
-    }
+  if (mtr == nullptr) {
+    return;
   }
+
+  /* If no logging is requested, we may return now */
+  byte *log_ptr = nullptr;
+  if (!mlog_open(mtr, 11 + 2 + 9, log_ptr)) {
+    return;
+  }
+
+  log_ptr = mlog_write_initial_log_record_fast(ptr, MLOG_8BYTES, log_ptr, mtr);
+
+  mach_write_to_2(log_ptr, page_offset(ptr));
+  log_ptr += 2;
+
+  log_ptr += mach_u64_write_compressed(log_ptr, val);
+
+  mlog_close(mtr, log_ptr);
 }
 
 #ifndef UNIV_HOTBACKUP
@@ -333,15 +334,13 @@ void mlog_log_string(byte *ptr,  /*!< in: pointer written to */
                      ulint len,  /*!< in: string length */
                      mtr_t *mtr) /*!< in: mini-transaction handle */
 {
-  byte *log_ptr;
+  byte *log_ptr = nullptr;
 
   ut_ad(ptr && mtr);
   ut_ad(len <= UNIV_PAGE_SIZE);
 
-  log_ptr = mlog_open(mtr, 30);
-
   /* If no logging is requested, we may return now */
-  if (log_ptr == NULL) {
+  if (!mlog_open(mtr, 30, log_ptr)) {
     return;
   }
 
@@ -375,7 +374,7 @@ byte *mlog_parse_string(
         fil_page_get_type(page) != FIL_PAGE_RTREE));
 
   if (end_ptr < ptr + 4) {
-    return (NULL);
+    return (nullptr);
   }
 
   offset = mach_read_from_2(ptr);
@@ -386,11 +385,11 @@ byte *mlog_parse_string(
   if (offset >= UNIV_PAGE_SIZE || len + offset > UNIV_PAGE_SIZE) {
     recv_sys->found_corrupt_log = TRUE;
 
-    return (NULL);
+    return (nullptr);
   }
 
   if (end_ptr < ptr + len) {
-    return (NULL);
+    return (nullptr);
   }
 
   if (page) {
@@ -403,36 +402,27 @@ byte *mlog_parse_string(
   return (ptr + len);
 }
 
-/** Opens a buffer for mlog, writes the initial log record and,
- if needed, the field lengths of an index.
- @return buffer, NULL if log mode MTR_LOG_NONE */
-byte *mlog_open_and_write_index(
-    mtr_t *mtr,                /*!< in: mtr */
-    const byte *rec,           /*!< in: index record or page */
-    const dict_index_t *index, /*!< in: record descriptor */
-    mlog_id_t type,            /*!< in: log item type */
-    ulint size)                /*!< in: requested buffer size in bytes
-                               (if 0, calls mlog_close() and
-                               returns NULL) */
-{
+bool mlog_open_and_write_index(mtr_t *mtr, const byte *rec,
+                               const dict_index_t *index, mlog_id_t type,
+                               ulint size, byte *&log_ptr) {
 #ifndef UNIV_HOTBACKUP
-  byte *log_ptr;
   const byte *log_start;
   const byte *log_end;
 
   ut_ad(!!page_rec_is_comp(rec) == dict_table_is_comp(index->table));
 
   if (!page_rec_is_comp(rec)) {
-    log_start = log_ptr = mlog_open(mtr, 11 + size);
-    if (!log_ptr) {
-      return (NULL); /* logging is disabled */
+    if (!mlog_open(mtr, 11 + size, log_ptr)) {
+      return (false); /* logging is disabled */
     }
+    log_start = log_ptr;
     log_ptr = mlog_write_initial_log_record_fast(rec, type, log_ptr, mtr);
     log_end = log_ptr + 11 + size;
   } else {
+    bool instant = index->has_instant_cols();
     ulint i;
     ulint n = dict_index_get_n_fields(index);
-    ulint total = 11 + size + (n + 2) * 2;
+    ulint total = 11 + (instant ? 2 : 0) + size + (n + 2) * 2;
     ulint alloc = total;
 
     if (alloc > mtr_buf_t::MAX_DATA_SIZE) {
@@ -445,16 +435,23 @@ byte *mlog_open_and_write_index(
       n = DICT_INDEX_SPATIAL_NODEPTR_SIZE;
     }
 
-    log_start = log_ptr = mlog_open(mtr, alloc);
-
-    if (!log_ptr) {
-      return (NULL); /* logging is disabled */
+    if (!mlog_open(mtr, alloc, log_ptr)) {
+      return (false); /* logging is disabled */
     }
 
+    log_start = log_ptr;
     log_end = log_ptr + alloc;
 
     log_ptr = mlog_write_initial_log_record_fast(rec, type, log_ptr, mtr);
 
+    if (instant) {
+      /* Since the max columns could only be 1017,
+      The leading bit is leveraged to indicate if the
+      index is instant one and number of columns when
+      first instant ADD COLUMN stored */
+      mach_write_to_2(log_ptr, index->get_instant_fields() | 0x8000);
+      log_ptr += 2;
+    }
     mach_write_to_2(log_ptr, n);
     log_ptr += 2;
 
@@ -493,11 +490,10 @@ byte *mlog_open_and_write_index(
           alloc = mtr_buf_t::MAX_DATA_SIZE;
         }
 
-        log_start = log_ptr = mlog_open(mtr, alloc);
-
-        if (!log_ptr) {
-          return (NULL); /* logging is disabled */
+        if (!mlog_open(mtr, alloc, log_ptr)) {
+          return (false); /* logging is disabled */
         }
+        log_start = log_ptr;
         log_end = log_ptr + alloc;
       }
       mach_write_to_2(log_ptr, len);
@@ -506,14 +502,15 @@ byte *mlog_open_and_write_index(
   }
   if (size == 0) {
     mlog_close(mtr, log_ptr);
-    log_ptr = NULL;
+    log_ptr = nullptr;
   } else if (log_ptr + size > log_end) {
     mlog_close(mtr, log_ptr);
-    log_ptr = mlog_open(mtr, size);
+    bool success = mlog_open(mtr, size, log_ptr);
+    ut_a(success);
   }
-  return (log_ptr);
+  return (log_ptr != nullptr);
 #else  /* !UNIV_HOTBACKUP */
-  return (NULL);
+  return (false);
 #endif /* !UNIV_HOTBACKUP */
 }
 
@@ -524,29 +521,50 @@ byte *mlog_parse_index(byte *ptr,            /*!< in: buffer */
                        ibool comp,           /*!< in: TRUE=compact row format */
                        dict_index_t **index) /*!< out, own: dummy index */
 {
-  ulint i, n, n_uniq;
+  ulint i;
   dict_table_t *table;
   dict_index_t *ind;
+  bool instant = false;
+  uint16_t n, n_uniq;
+  uint16_t instant_cols = 0;
 
   ut_ad(comp == FALSE || comp == TRUE);
 
   if (comp) {
     if (end_ptr < ptr + 4) {
-      return (NULL);
+      return (nullptr);
     }
     n = mach_read_from_2(ptr);
     ptr += 2;
+    if ((n & 0x8000) != 0) {
+      /* This is instant fields,
+      see also mlog_open_and_write_index() */
+      instant = true;
+      instant_cols = n & ~0x8000;
+      n = mach_read_from_2(ptr);
+      ptr += 2;
+      ut_ad((n & 0x8000) == 0);
+      ut_ad(instant_cols <= n);
+
+      if (end_ptr < ptr + 2) {
+        return (nullptr);
+      }
+    }
     n_uniq = mach_read_from_2(ptr);
     ptr += 2;
     ut_ad(n_uniq <= n);
     if (end_ptr < ptr + n * 2) {
-      return (NULL);
+      return (nullptr);
     }
   } else {
     n = n_uniq = 1;
   }
-  table = dict_mem_table_create("LOG_DUMMY", DICT_HDR_SPACE, n, 0,
+  table = dict_mem_table_create("LOG_DUMMY", DICT_HDR_SPACE, n, 0, 0,
                                 comp ? DICT_TF_COMPACT : 0, 0);
+  if (instant) {
+    table->set_instant_cols(instant_cols);
+  }
+
   ind = dict_mem_index_create("LOG_DUMMY", "LOG_DUMMY", DICT_HDR_SPACE, 0, n);
   ind->table = table;
   ind->n_uniq = (unsigned int)n_uniq;
@@ -562,9 +580,9 @@ byte *mlog_parse_index(byte *ptr,            /*!< in: buffer */
       the rest is 0 or 0x7fff for variable-length fields,
       and 1..0x7ffe for fixed-length fields. */
       dict_mem_table_add_col(
-          table, NULL, NULL,
+          table, nullptr, nullptr,
           ((len + 1) & 0x7fff) <= 1 ? DATA_BINARY : DATA_FIXBINARY,
-          len & 0x8000 ? DATA_NOT_NULL : 0, len & 0x7fff);
+          len & 0x8000 ? DATA_NOT_NULL : 0, len & 0x7fff, true);
 
       /* The is_ascending flag does not matter during
       redo log apply, because we do not compare for
@@ -579,6 +597,15 @@ byte *mlog_parse_index(byte *ptr,            /*!< in: buffer */
       ind->fields[DATA_TRX_ID - 1 + n_uniq].col = &table->cols[n + DATA_TRX_ID];
       ind->fields[DATA_ROLL_PTR - 1 + n_uniq].col =
           &table->cols[n + DATA_ROLL_PTR];
+    }
+
+    if (ind->is_clustered() && ind->table->has_instant_cols()) {
+      ind->instant_cols = true;
+      ind->n_instant_nullable =
+          ind->get_n_nullable_before(ind->get_instant_fields());
+    } else {
+      ind->instant_cols = false;
+      ind->n_instant_nullable = ind->n_nullable;
     }
   }
   /* avoid ut_ad(index->cached) in dict_index_get_n_unique_in_tree */

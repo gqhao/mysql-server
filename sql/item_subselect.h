@@ -1,7 +1,7 @@
 #ifndef ITEM_SUBSELECT_INCLUDED
 #define ITEM_SUBSELECT_INCLUDED
 
-/* Copyright (c) 2002, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2002, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -25,19 +25,28 @@
 
 /* subselect Item */
 
-#include <stddef.h>
 #include <sys/types.h>
 
-#include "binary_log_types.h"
+#include <cstddef>
+#include <memory>  // unique_ptr
+#include <vector>
+
+#include "field_types.h"  // enum_field_types
+#include "my_alloc.h"     // Destroy_only
 #include "my_dbug.h"
 #include "my_inttypes.h"
 #include "my_table_map.h"
 #include "my_time.h"
 #include "mysql/udf_registration_types.h"
 #include "mysql_time.h"
+#include "sql/comp_creator.h"
 #include "sql/enum_query_type.h"
-#include "sql/item.h"  // Item_result_field
+#include "sql/item.h"            // Item_result_field
+#include "sql/parse_location.h"  // POS
 #include "sql/parse_tree_node_base.h"
+#include "sql/row_iterator.h"  // IWYU pragma: keep
+#include "sql/sql_const.h"
+#include "template_utils.h"
 
 class Comp_creator;
 class Field;
@@ -49,24 +58,20 @@ class PT_subquery;
 class QEP_TAB;
 class Query_result_interceptor;
 class Query_result_subquery;
+class Query_result_union;
 class SELECT_LEX;
 class SELECT_LEX_UNIT;
 class String;
+class SubqueryWithResult;
 class THD;
 class Temp_table_param;
 class my_decimal;
-class subselect_engine;
+class subselect_indexsubquery_engine;
+struct AccessPath;
 struct TABLE_LIST;
+
 template <class T>
 class List;
-
-/**
-  Convenience typedef used in this file, and further used by any files
-  including this file.
-
-  @retval NULL In case of semantic errors.
-*/
-typedef Comp_creator *(*chooser_compare_func_creator)(bool invert);
 
 /* base class for subselects */
 
@@ -87,18 +92,17 @@ class Item_subselect : public Item_result_field {
   /*
     Used inside Item_subselect::fix_fields() according to this scenario:
       > Item_subselect::fix_fields
-        > engine->prepare
+        > subquery->prepare
           > query_block->prepare
             (Here we realize we need to do the rewrite and set
              substitution= some new Item, eg. Item_in_optimizer )
           < query_block->prepare
-        < engine->prepare
+        < subquery->prepare
         *ref= substitution;
       < Item_subselect::fix_fields
   */
   Item *substitution;
 
- public:
   /* unit of subquery */
   SELECT_LEX_UNIT *unit;
   /**
@@ -107,14 +111,31 @@ class Item_subselect : public Item_result_field {
   */
   int in_cond_of_tab;
 
-  /// EXPLAIN needs read-only access to the engine
-  const subselect_engine *get_engine_for_explain() const { return engine; }
+  // For EXPLAIN.
+  enum enum_engine_type { OTHER_ENGINE, INDEXSUBQUERY_ENGINE, HASH_SJ_ENGINE };
+  enum_engine_type engine_type() const;
+
+  // For EXPLAIN. Only valid if engine_type() == HASH_SJ_ENGINE.
+  const QEP_TAB *get_qep_tab() const;
+
+  void create_iterators(THD *thd);
+  virtual AccessPath *root_access_path() const { return nullptr; }
 
  protected:
-  /* engine that perform execution of subselect (single select or union) */
-  subselect_engine *engine;
-  /* old engine if engine was changed */
-  subselect_engine *old_engine;
+  /*
+    We need this method, because some compilers do not allow 'this'
+    pointer in constructor initialization list, but we need to pass a pointer
+    to subselect Item class to Query_result_interceptor's constructor.
+  */
+  void init(SELECT_LEX *select, Query_result_subquery *result);
+
+  // The inner part of the subquery.
+  unique_ptr_destroy_only<SubqueryWithResult> subquery;
+
+  // Only relevant for Item_in_subselect; optimized structure used for
+  // execution in place of running the entire subquery.
+  subselect_indexsubquery_engine *indexsubquery_engine = nullptr;
+
   /* cache of used external tables */
   table_map used_tables_cache;
   /* allowed number of columns (1 for single value subqueries) */
@@ -151,8 +172,6 @@ class Item_subselect : public Item_result_field {
   /// Accumulate properties from a condition or GROUP/ORDER within a query
   /// block.
   void accumulate_condition(Item *item);
-  /// Accumulate properties from a join condition within a query block.
-  void accumulate_join_condition(List<TABLE_LIST> *tables);
 
  public:
   /// Accumulate used tables
@@ -160,45 +179,29 @@ class Item_subselect : public Item_result_field {
     used_tables_cache |= add_tables;
   }
 
-  virtual subs_type substype() { return UNKNOWN_SUBS; }
+  virtual subs_type substype() const { return UNKNOWN_SUBS; }
 
-  /*
-    We need this method, because some compilers do not allow 'this'
-    pointer in constructor initialization list, but we need to pass a pointer
-    to subselect Item class to Query_result_interceptor's constructor.
-  */
-  void init(SELECT_LEX *select, Query_result_subquery *result);
-
-  ~Item_subselect();
   void cleanup() override;
-  virtual void reset() { null_value = 1; }
-  virtual trans_res select_transformer(SELECT_LEX *select) = 0;
+  virtual void reset() { null_value = true; }
+  virtual trans_res select_transformer(THD *thd, SELECT_LEX *select) = 0;
   bool assigned() const { return value_assigned; }
   void assigned(bool a) { value_assigned = a; }
   enum Type type() const override;
-  bool is_null() override {
-    /*
-      TODO : Implement error handling for this function as
-      update_null_value() can return error.
-    */
-    (void)update_null_value();
-    return null_value;
-  }
+  bool is_null() override { return update_null_value() || null_value; }
   bool fix_fields(THD *thd, Item **ref) override;
   void fix_after_pullout(SELECT_LEX *parent_select,
                          SELECT_LEX *removed_select) override;
-  virtual bool exec();
+  virtual bool exec(THD *thd);
   bool resolve_type(THD *) override;
   table_map used_tables() const override { return used_tables_cache; }
   table_map not_null_tables() const override { return 0; }
   Item *get_tmp_table_item(THD *thd) override;
   void update_used_tables() override;
-  void print(String *str, enum_query_type query_type) override;
-  virtual bool have_guarded_conds() { return false; }
-  bool change_engine(subselect_engine *eng) {
-    old_engine = engine;
-    engine = eng;
-    return eng == 0;
+  void print(const THD *thd, String *str,
+             enum_query_type query_type) const override;
+
+  void set_indexsubquery_engine(subselect_indexsubquery_engine *eng) {
+    indexsubquery_engine = eng;
   }
 
   /*
@@ -214,7 +217,6 @@ class Item_subselect : public Item_result_field {
   */
   virtual void reset_value_registration() {}
   enum_parsing_context place() { return parsing_place; }
-  bool walk_body(Item_processor processor, enum_walk walk, uchar *arg);
   bool walk(Item_processor processor, enum_walk walk, uchar *arg) override;
   bool explain_subquery_checker(uchar **arg) override;
   bool inform_item_in_cond_of_tab(uchar *arg) override;
@@ -225,21 +227,45 @@ class Item_subselect : public Item_result_field {
     return "subselect";
   }
 
+  bool check_function_as_value_generator(uchar *args) override {
+    Check_function_as_value_generator_parameters *func_arg =
+        pointer_cast<Check_function_as_value_generator_parameters *>(args);
+    func_arg->err_code = func_arg->get_unnamed_function_error_code();
+    return true;
+  }
+
+  /// argument used by walk method collect_scalar_subqueries ("css")
+  struct Collect_subq_info {
+    ///< accumulated all subq (or aggregates) found
+    std::vector<Item_subselect *> list;
+    SELECT_LEX *m_select{nullptr};
+    Collect_subq_info(SELECT_LEX *owner) : m_select(owner) {}
+    bool contains(SELECT_LEX_UNIT *candidate) {
+      for (auto sq : list) {
+        if (sq->unit == candidate) return true;
+      }
+      return false;
+    }
+  };
+
+  bool collect_subqueries(uchar *) override;
+  Item *replace_item_field(uchar *arg) override;
+  Item *replace_item_view_ref(uchar *arg) override;
+  Item *replace_item(Item_transformer t, uchar *arg);
+
   friend class Query_result_interceptor;
   friend class Item_in_optimizer;
   friend bool Item_field::fix_fields(THD *, Item **);
   friend int Item_field::fix_outer_field(THD *, Field **, Item **);
   friend bool Item_ref::fix_fields(THD *, Item **);
   friend void Item_ident::fix_after_pullout(SELECT_LEX *parent_select,
-                                            SELECT_LEX *removed_selec);
-  friend void mark_select_range_as_dependent(THD *thd, SELECT_LEX *last_select,
-                                             SELECT_LEX *current_sel,
-                                             Field *found_field,
-                                             Item *found_item,
-                                             Item_ident *resolved_item);
+                                            SELECT_LEX *removed_select);
 
  private:
   bool subq_opt_away_processor(uchar *arg) override;
+
+ protected:
+  uint unit_cols() const;
 };
 
 /* single value subselect */
@@ -251,13 +277,13 @@ class Item_singlerow_subselect : public Item_subselect {
  public:
   Item_singlerow_subselect(SELECT_LEX *select_lex);
   Item_singlerow_subselect()
-      : Item_subselect(), value(0), row(0), no_rows(false) {}
+      : Item_subselect(), value(nullptr), row(nullptr), no_rows(false) {}
 
   void cleanup() override;
-  subs_type substype() override { return SINGLEROW_SUBS; }
+  subs_type substype() const override { return SINGLEROW_SUBS; }
 
   void reset() override;
-  trans_res select_transformer(SELECT_LEX *select) override;
+  trans_res select_transformer(THD *thd, SELECT_LEX *select) override;
   void store(uint i, Item *item);
   double val_real() override;
   longlong val_int() override;
@@ -277,7 +303,8 @@ class Item_singlerow_subselect : public Item_subselect {
   */
   void no_rows_in_result() override;
 
-  uint cols() const override;
+  uint cols() const override { return unit_cols(); }
+
   /**
     @note that this returns the i-th element of the SELECT list.
     To check for nullability, look at this->maybe_null and not
@@ -292,6 +319,28 @@ class Item_singlerow_subselect : public Item_subselect {
   bool null_inside() override;
   void bring_value() override;
 
+  bool collect_scalar_subqueries(uchar *) override;
+  virtual bool is_maxmin() const { return false; }
+
+  /**
+    Argument for walk method replace_scalar_subquery
+  */
+  struct Scalar_subquery_replacement {
+    Item_singlerow_subselect *m_target;  ///< subquery to be replaced with field
+    Field *m_field;                      ///< the replacement field
+    SELECT_LEX *m_outer_select;          ///< The transformed query block.
+    SELECT_LEX *m_inner_select;  ///< The immediately surrounding query block.
+                                 ///< This will be the transformed block or a
+                                 ///< subquery of it
+    Scalar_subquery_replacement(Item_singlerow_subselect *target, Field *field,
+                                SELECT_LEX *select)
+        : m_target(target),
+          m_field(field),
+          m_outer_select(select),
+          m_inner_select(select) {}
+  };
+
+  Item *replace_scalar_subquery(uchar *arge) override;
   /**
     This method is used to implement a special case of semantic tree
     rewriting, mandated by a SQL:2003 exception in the specification.
@@ -305,7 +354,6 @@ class Item_singlerow_subselect : public Item_subselect {
     @return the SELECT_LEX structure that was given in the constructor.
   */
   SELECT_LEX *invalidate_and_restore_select_lex();
-
   friend class Query_result_scalar_subquery;
 };
 
@@ -315,48 +363,62 @@ class Item_maxmin_subselect final : public Item_singlerow_subselect {
   bool max;
   bool was_values;  // Set if we have found at least one row
  public:
-  Item_maxmin_subselect(THD *thd, Item_subselect *parent,
-                        SELECT_LEX *select_lex, bool max, bool ignore_nulls);
-  void print(String *str, enum_query_type query_type) override;
+  Item_maxmin_subselect(Item_subselect *parent, SELECT_LEX *select_lex,
+                        bool max, bool ignore_nulls);
+  void print(const THD *thd, String *str,
+             enum_query_type query_type) const override;
   void cleanup() override;
   bool any_value() { return was_values; }
   void register_value() { was_values = true; }
   void reset_value_registration() override { was_values = false; }
+  bool is_maxmin() const override { return true; }
 };
 
 /* exists subselect */
+
+/**
+  Strategy which will be used to handle this subquery: flattening to a
+  semi-join, conversion to a derived table, rewrite of IN to EXISTS...
+  Sometimes the strategy is first only a candidate, then the real decision
+  happens in a second phase. Other times the first decision is final.
+ */
+enum class Subquery_strategy : int {
+  /// Nothing decided yet
+  UNSPECIFIED,
+  /// Candidate for rewriting IN(subquery) to EXISTS, or subquery
+  /// materialization
+  CANDIDATE_FOR_IN2EXISTS_OR_MAT,
+  /// Candidate for semi-join flattening
+  CANDIDATE_FOR_SEMIJOIN,
+  /// Candidate for rewriting to joined derived table
+  CANDIDATE_FOR_DERIVED_TABLE,
+  /// Semi-join flattening
+  SEMIJOIN,
+  /// Subquery's WHERE is always false, replace predicate with "false"
+  ALWAYS_FALSE,
+  /// Rewrite to joined derived table
+  DERIVED_TABLE,
+  /// Evaluate as EXISTS subquery (possibly after rewriting from another type)
+  SUBQ_EXISTS,
+  /// Subquery materialization (HASH_SJ_ENGINE)
+  SUBQ_MATERIALIZATION,
+};
 
 class Item_exists_subselect : public Item_subselect {
   typedef Item_subselect super;
 
  protected:
-  bool value; /* value of this item (boolean: exists/not-exists) */
+  /// value of this item (boolean: exists/not-exists)
+  bool value{false};
 
  public:
-  /**
-    The method chosen to execute the predicate, currently used for IN, =ANY
-    and EXISTS predicates.
-  */
-  enum enum_exec_method {
-    EXEC_UNSPECIFIED,  ///< No execution method specified yet.
-    EXEC_SEMI_JOIN,    ///< Predicate is converted to semi-join nest.
-    /// IN was converted to correlated EXISTS, and this is a final decision.
-    EXEC_EXISTS,
-    /**
-       Decision between EXEC_EXISTS and EXEC_MATERIALIZATION is not yet taken.
-       IN was temporarily converted to correlated EXISTS.
-       All descendants of Item_in_subselect must go through this method
-       before they can reach EXEC_EXISTS.
-    */
-    EXEC_EXISTS_OR_MAT,
-    /// Predicate executed via materialization, and this is a final decision.
-    EXEC_MATERIALIZATION
-  };
-  enum_exec_method exec_method;
   /// Priority of this predicate in the convert-to-semi-join-nest process.
-  int sj_convert_priority;
-  /// True if this predicate is chosen for semi-join transformation
-  bool sj_chosen;
+  int sj_convert_priority{0};
+  /// Execution strategy chosen for this Item
+  Subquery_strategy strategy{Subquery_strategy::UNSPECIFIED};
+  /// Used by the transformation to derived table
+  enum_condition_context outer_condition_context{enum_condition_context::ANDS};
+
   /**
     Used by subquery optimizations to keep track about where this subquery
     predicate is located, and whether it is a candidate for transformation.
@@ -366,35 +428,58 @@ class Item_exists_subselect : public Item_subselect {
       NULL              - for all other locations. It also means that the
                           predicate is not a candidate for transformation.
     See also THD::emb_on_expr_nest.
+
+    As for the second case above (the join nest pointer), note that this value
+    may change if scalar subqueries are transformed to derived tables,
+    cf. transform_scalar_subqueries_to_join_with_derived, due to the need to
+    build new join nests. The change is performed in SELECT_LEX::nest_derived.
   */
-  TABLE_LIST *embedding_join_nest;
+  TABLE_LIST *embedding_join_nest{nullptr};
 
   Item_exists_subselect(SELECT_LEX *select);
 
-  Item_exists_subselect()
-      : Item_subselect(),
-        value(false),
-        exec_method(EXEC_UNSPECIFIED),
-        sj_convert_priority(0),
-        sj_chosen(false),
-        embedding_join_nest(NULL) {}
+  Item_exists_subselect() : Item_subselect() {}
 
-  explicit Item_exists_subselect(const POS &pos)
-      : super(pos),
-        value(false),
-        exec_method(EXEC_UNSPECIFIED),
-        sj_convert_priority(0),
-        sj_chosen(false),
-        embedding_join_nest(NULL) {}
+  explicit Item_exists_subselect(const POS &pos) : super(pos) {}
 
-  trans_res select_transformer(SELECT_LEX *) override {
-    exec_method = EXEC_EXISTS;
+  trans_res select_transformer(THD *, SELECT_LEX *) override {
+    strategy = Subquery_strategy::SUBQ_EXISTS;
     return RES_OK;
   }
-  subs_type substype() override { return EXISTS_SUBS; }
-  void reset() override { value = 0; }
+  subs_type substype() const override { return EXISTS_SUBS; }
+  bool is_bool_func() const override { return true; }
+  void reset() override { value = false; }
 
   enum Item_result result_type() const override { return INT_RESULT; }
+  /*
+    The item is
+    ([NOT] IN/EXISTS) [ IS [NOT] TRUE|FALSE ]
+  */
+  enum Bool_test value_transform = BOOL_IDENTITY;
+  bool with_is_op() const {
+    switch (value_transform) {
+      case BOOL_IS_TRUE:
+      case BOOL_IS_FALSE:
+      case BOOL_NOT_TRUE:
+      case BOOL_NOT_FALSE:
+        return true;
+      default:
+        return false;
+    }
+  }
+  /// True if the IS TRUE/FALSE wasn't explicit in the query
+  bool implicit_is_op = false;
+  Item *truth_transformer(THD *, enum Bool_test test) override;
+  bool translate(bool &null_v, bool v);
+  void apply_is_true() override {
+    bool had_is = with_is_op();
+    truth_transformer(nullptr, BOOL_IS_TRUE);
+    if (!had_is && value_transform == BOOL_IS_TRUE)
+      implicit_is_op = true;  // needn't be written by EXPLAIN
+  }
+  /// True if the Item has decided that it can do antijoin
+  bool can_do_aj = false;
+  bool choose_semijoin_or_antijoin();
   longlong val_int() override;
   double val_real() override;
   String *val_str(String *) override;
@@ -405,10 +490,10 @@ class Item_exists_subselect : public Item_subselect {
   }
   bool get_time(MYSQL_TIME *ltime) override { return get_time_from_int(ltime); }
   bool resolve_type(THD *thd) override;
-  void print(String *str, enum_query_type query_type) override;
+  void print(const THD *thd, String *str,
+             enum_query_type query_type) const override;
 
   friend class Query_result_exists_subquery;
-  friend class subselect_indexsubquery_engine;
 };
 
 /**
@@ -472,6 +557,11 @@ class Item_in_subselect : public Item_exists_subselect {
   bool was_null;
 
  protected:
+  /**
+     True if naked IN is allowed to exchange FALSE for UNKNOWN.
+     Because this is about the naked IN, there is no public ignore_unknown(),
+     intentionally, so that callers don't get it wrong.
+  */
   bool abort_on_null;
 
  private:
@@ -521,12 +611,11 @@ class Item_in_subselect : public Item_exists_subselect {
   }
 
   bool *get_cond_guard(int i) {
-    return pushed_cond_guards ? pushed_cond_guards + i : NULL;
+    return pushed_cond_guards ? pushed_cond_guards + i : nullptr;
   }
   void set_cond_guard_var(int i, bool v) {
     if (pushed_cond_guards) pushed_cond_guards[i] = v;
   }
-  bool have_guarded_conds() override { return pushed_cond_guards != nullptr; }
 
   Item_in_subselect(Item *left_expr, SELECT_LEX *select_lex);
   Item_in_subselect(const POS &pos, Item *left_expr,
@@ -534,67 +623,76 @@ class Item_in_subselect : public Item_exists_subselect {
 
   Item_in_subselect()
       : Item_exists_subselect(),
-        left_expr(NULL),
-        left_expr_cache(NULL),
+        left_expr(nullptr),
+        left_expr_cache(nullptr),
         left_expr_cache_filled(false),
         need_expr_cache(true),
-        m_injected_left_expr(NULL),
-        optimizer(NULL),
+        m_injected_left_expr(nullptr),
+        optimizer(nullptr),
         was_null(false),
         abort_on_null(false),
-        in2exists_info(NULL),
-        pushed_cond_guards(NULL),
-        upper_item(NULL) {}
+        in2exists_info(nullptr),
+        pushed_cond_guards(nullptr),
+        upper_item(nullptr) {}
 
   bool itemize(Parse_context *pc, Item **res) override;
 
   void cleanup() override;
-  subs_type substype() override { return IN_SUBS; }
+  subs_type substype() const override { return IN_SUBS; }
+
   void reset() override {
-    value = 0;
-    null_value = 0;
-    was_null = 0;
+    value = false;
+    null_value = false;
+    was_null = false;
   }
-  trans_res select_transformer(SELECT_LEX *select) override;
-  trans_res select_in_like_transformer(SELECT_LEX *select, Comp_creator *func);
-  trans_res single_value_transformer(SELECT_LEX *select, Comp_creator *func);
-  trans_res row_value_transformer(SELECT_LEX *select);
-  trans_res single_value_in_to_exists_transformer(SELECT_LEX *select,
+  trans_res select_transformer(THD *thd, SELECT_LEX *select) override;
+  trans_res select_in_like_transformer(THD *thd, SELECT_LEX *select,
+                                       Comp_creator *func);
+  trans_res single_value_transformer(THD *thd, SELECT_LEX *select,
+                                     Comp_creator *func);
+  trans_res row_value_transformer(THD *thd, SELECT_LEX *select);
+  trans_res single_value_in_to_exists_transformer(THD *thd, SELECT_LEX *select,
                                                   Comp_creator *func);
-  trans_res row_value_in_to_exists_transformer(SELECT_LEX *select);
+  trans_res row_value_in_to_exists_transformer(THD *thd, SELECT_LEX *select);
+  bool subquery_allows_materialization(THD *thd, SELECT_LEX *select_lex,
+                                       const SELECT_LEX *outer);
   bool walk(Item_processor processor, enum_walk walk, uchar *arg) override;
-  bool exec() override;
+  Item *transform(Item_transformer transformer, uchar *arg) override;
+  bool exec(THD *thd) override;
   longlong val_int() override;
   double val_real() override;
   String *val_str(String *) override;
   my_decimal *val_decimal(my_decimal *) override;
   bool val_bool() override;
-  void top_level_item() override { abort_on_null = 1; }
-  bool is_top_level_item() const { return abort_on_null; }
-
   bool test_limit();
-  void print(String *str, enum_query_type query_type) override;
+  void print(const THD *thd, String *str,
+             enum_query_type query_type) const override;
   bool fix_fields(THD *thd, Item **ref) override;
   void fix_after_pullout(SELECT_LEX *parent_select,
                          SELECT_LEX *removed_select) override;
-  bool init_left_expr_cache();
+  bool init_left_expr_cache(THD *thd);
 
   /**
      Once the decision to use IN->EXISTS has been taken, performs some last
      steps of this transformation.
   */
-  bool finalize_exists_transform(SELECT_LEX *select);
+  bool finalize_exists_transform(THD *thd, SELECT_LEX *select);
   /**
      Once the decision to use materialization has been taken, performs some
      last steps of this transformation.
   */
-  bool finalize_materialization_transform(JOIN *join);
+  bool finalize_materialization_transform(THD *thd, JOIN *join);
+
+  AccessPath *root_access_path() const override;
 
   friend class Item_ref_null_helper;
   friend class Item_is_not_null_test;
   friend class Item_in_optimizer;
   friend class subselect_indexsubquery_engine;
   friend class subselect_hash_sj_engine;
+
+ private:
+  bool val_bool_naked();
 };
 
 /// ALL/ANY/SOME subselect.
@@ -608,77 +706,46 @@ class Item_allany_subselect final : public Item_in_subselect {
                         SELECT_LEX *select, bool all);
 
   // only ALL subquery has upper not
-  subs_type substype() override { return all ? ALL_SUBS : ANY_SUBS; }
-  trans_res select_transformer(SELECT_LEX *select) override;
-  void print(String *str, enum_query_type query_type) override;
+  subs_type substype() const override { return all ? ALL_SUBS : ANY_SUBS; }
+  trans_res select_transformer(THD *thd, SELECT_LEX *select) override;
+  void print(const THD *thd, String *str,
+             enum_query_type query_type) const override;
 };
 
-class subselect_engine {
- protected:
-  Query_result_interceptor *result; /* results storage class */
-  Item_subselect *item;             /* item, that use this engine */
-  enum Item_result res_type;        /* type of results */
-  enum_field_types res_field_type;  /* column type of the results */
-  /**
-    True if at least one of the columns returned by the subquery may
-    be null, or if a single-row subquery may return zero rows.
-  */
-  bool maybe_null;
-
+class SubqueryWithResult {
  public:
-  enum enum_engine_type {
-    ABSTRACT_ENGINE,
-    SINGLE_SELECT_ENGINE,
-    UNION_ENGINE,
-    INDEXSUBQUERY_ENGINE,
-    HASH_SJ_ENGINE
-  };
-
-  subselect_engine(Item_subselect *si, Query_result_interceptor *res)
-      : result(res),
-        item(si),
-        res_type(STRING_RESULT),
-        res_field_type(MYSQL_TYPE_VAR_STRING),
-        maybe_null(false) {}
-  virtual ~subselect_engine(){};  // to satisfy compiler
+  SubqueryWithResult(SELECT_LEX_UNIT *u, Query_result_interceptor *res,
+                     Item_subselect *si);
   /**
-    Cleanup engine after complete query execution, free all resources.
+    Cleanup subquery after complete query execution, free all resources.
   */
-  virtual void cleanup() = 0;
-
-  /// Sets "thd" for 'result'. Should be called before prepare()
-  void set_thd_for_result();
-  virtual bool prepare() = 0;
-  virtual void fix_length_and_dec(Item_cache **row) = 0;
-  /*
-    Execute the engine
+  void cleanup(THD *thd);
+  bool prepare(THD *thd);
+  void fix_length_and_dec(Item_cache **row);
+  /**
+    Execute the subquery
 
     SYNOPSIS
       exec()
 
     DESCRIPTION
-      Execute the engine. The result of execution is subquery value that is
-      either captured by previously set up Query_result-based 'sink' or
-      stored somewhere by the exec() method itself.
+      Execute the subquery. The result of execution is subquery value that is
+      captured by previously set up Query_result-based 'sink'.
 
     RETURN
-      0 - OK
-      1 - Either an execution error, or the engine was "changed", and the
-          caller should call exec() again for the new engine.
+      false - OK
+      true  - Execution error.
   */
-  virtual bool exec() = 0;
-  virtual uint cols() const = 0; /* return number of columns in select */
-  virtual uint8 uncacheable() const = 0; /* query is uncacheable */
-  virtual enum Item_result type() const { return res_type; }
-  virtual enum_field_types field_type() const { return res_field_type; }
-  virtual void exclude() = 0;
+  bool exec(THD *thd);
+  void print(const THD *thd, String *str, enum_query_type query_type);
+  bool change_query_result(THD *thd, Item_subselect *si,
+                           Query_result_subquery *result);
+  SELECT_LEX *single_select_lex() const;  // Only if unit is simple.
+
+  enum Item_result type() const { return res_type; }
+  enum_field_types field_type() const { return res_field_type; }
   bool may_be_null() const { return maybe_null; }
-  virtual table_map upper_select_const_tables() const = 0;
-  static table_map calc_const_tables(TABLE_LIST *);
-  virtual void print(String *str, enum_query_type query_type) = 0;
-  virtual bool change_query_result(Item_subselect *si,
-                                   Query_result_subquery *result) = 0;
-  virtual enum_engine_type engine_type() const { return ABSTRACT_ENGINE; }
+
 #ifndef DBUG_OFF
   /**
      @returns the internal Item. Defined only in debug builds, because should
@@ -687,53 +754,23 @@ class subselect_engine {
   const Item_subselect *get_item() const { return item; }
 #endif
 
- protected:
-  void set_row(List<Item> &item_list, Item_cache **row, bool never_empty);
-};
-
-class subselect_single_select_engine final : public subselect_engine {
  private:
-  SELECT_LEX *select_lex; /* corresponding select_lex */
- public:
-  subselect_single_select_engine(SELECT_LEX *select,
-                                 Query_result_interceptor *result,
-                                 Item_subselect *item);
-  void cleanup() override;
-  bool prepare() override;
-  void fix_length_and_dec(Item_cache **row) override;
-  bool exec() override;
-  uint cols() const override;
-  uint8 uncacheable() const override;
-  void exclude() override;
-  table_map upper_select_const_tables() const override;
-  void print(String *str, enum_query_type query_type) override;
-  bool change_query_result(Item_subselect *si,
-                           Query_result_subquery *result) override;
-  enum_engine_type engine_type() const override { return SINGLE_SELECT_ENGINE; }
+  Query_result_interceptor *result; /* results storage class */
+  Item_subselect *item;             /* item, that use this subquery */
+  enum Item_result res_type;        /* type of results */
+  enum_field_types res_field_type;  /* column type of the results */
+  /**
+    True if at least one of the columns returned by the subquery may
+    be null, or if a single-row subquery may return zero rows.
+  */
+  bool maybe_null;
+
+  SELECT_LEX_UNIT *unit; /* corresponding unit structure */
+
+  void set_row(const mem_root_deque<Item *> &item_list, Item_cache **row,
+               bool never_empty);
 
   friend class subselect_hash_sj_engine;
-  friend class Item_in_subselect;
-};
-
-class subselect_union_engine final : public subselect_engine {
- public:
-  subselect_union_engine(SELECT_LEX_UNIT *u, Query_result_interceptor *result,
-                         Item_subselect *item);
-  void cleanup() override;
-  bool prepare() override;
-  void fix_length_and_dec(Item_cache **row) override;
-  bool exec() override;
-  uint cols() const override;
-  uint8 uncacheable() const override;
-  void exclude() override;
-  table_map upper_select_const_tables() const override;
-  void print(String *str, enum_query_type query_type) override;
-  bool change_query_result(Item_subselect *si,
-                           Query_result_subquery *result) override;
-  enum_engine_type engine_type() const override { return UNION_ENGINE; }
-
- private:
-  SELECT_LEX_UNIT *unit; /* corresponding unit structure */
 };
 
 /**
@@ -752,13 +789,13 @@ class subselect_union_engine final : public subselect_engine {
   i.e. the subquery is a single table SELECT without GROUP BY, aggregate
   functions, etc.
 */
-class subselect_indexsubquery_engine : public subselect_engine {
+class subselect_indexsubquery_engine {
  protected:
+  Query_result_union *result = nullptr; /* results storage class */
   /// Table which is read, using one of eq_ref, ref, ref_or_null.
   QEP_TAB *tab;
   Item *cond;     /* The WHERE condition of subselect */
-  ulonglong hash; /* Hash value calculated by copy_ref_key, when needed. */
- private:
+  ulonglong hash; /* Hash value calculated by RefIterator, when needed. */
   /*
     The "having" clause. This clause (further referred to as "artificial
     having") was inserted by subquery transformation code. It contains
@@ -771,27 +808,20 @@ class subselect_indexsubquery_engine : public subselect_engine {
   */
   Item *having;
 
+  Item_in_subselect *item; /* item that uses this engine */
+
  public:
-  subselect_indexsubquery_engine(QEP_TAB *tab_arg, Item_subselect *subs,
+  enum enum_engine_type { INDEXSUBQUERY_ENGINE, HASH_SJ_ENGINE };
+
+  subselect_indexsubquery_engine(QEP_TAB *tab_arg, Item_in_subselect *subs,
                                  Item *where, Item *having_arg)
-      : subselect_engine(subs, 0),
-        tab(tab_arg),
-        cond(where),
-        having(having_arg){};
-  bool exec() override;
-  void print(String *str, enum_query_type query_type) override;
-  enum_engine_type engine_type() const override { return INDEXSUBQUERY_ENGINE; }
-  void cleanup() override {}
-  bool prepare() override;
-  void fix_length_and_dec(Item_cache **row) override;
-  uint cols() const override { return 1; }
-  uint8 uncacheable() const override { return UNCACHEABLE_DEPENDENT; }
-  void exclude() override;
-  table_map upper_select_const_tables() const override { return 0; }
-  bool change_query_result(Item_subselect *si,
-                           Query_result_subquery *result) override;
-  bool scan_table();
-  void copy_ref_key(bool *require_scan, bool *convert_error);
+      : tab(tab_arg), cond(where), having(having_arg), item(subs) {}
+  virtual ~subselect_indexsubquery_engine() = default;
+  virtual bool exec(THD *thd);
+  virtual void print(const THD *thd, String *str, enum_query_type query_type);
+  virtual enum_engine_type engine_type() const { return INDEXSUBQUERY_ENGINE; }
+  virtual void cleanup(THD *) {}
+  virtual void create_iterators(THD *) {}
 };
 
 /*
@@ -802,10 +832,6 @@ Item *all_any_subquery_creator(Item *left_expr,
                                chooser_compare_func_creator cmp, bool all,
                                SELECT_LEX *select);
 
-inline bool Item_subselect::is_uncacheable() const {
-  return engine->uncacheable();
-}
-
 /**
   Compute an IN predicate via a hash semi-join. The subquery is materialized
   during the first evaluation of the IN predicate. The IN predicate is executed
@@ -814,8 +840,11 @@ inline bool Item_subselect::is_uncacheable() const {
 
 class subselect_hash_sj_engine final : public subselect_indexsubquery_engine {
  private:
-  /* TRUE if the subquery was materialized into a temp table. */
+  /* true if the subquery was materialized into a temp table. */
   bool is_materialized;
+  // true if we know for sure that there are zero rows in the table.
+  // Set only after is_materialized is true.
+  bool has_zero_rows = false;
   /**
      Existence of inner NULLs in materialized table:
      By design, other values than IRRELEVANT_OR_FALSE are possible only if the
@@ -830,34 +859,33 @@ class subselect_hash_sj_engine final : public subselect_indexsubquery_engine {
     NEX_TRUE = 2
   };
   enum nulls_exist mat_table_has_nulls;
-  /*
-    The old engine already chosen at parse time and stored in permanent memory.
-    Through this member we can re-create and re-prepare the join object
-    used to materialize the subquery for each execution of a prepared
-    statement. We also reuse the functionality of
-    subselect_single_select_engine::[prepare | cols].
-  */
-  subselect_single_select_engine *materialize_engine;
+  SELECT_LEX_UNIT *const unit;
+  unique_ptr_destroy_only<RowIterator> m_iterator;
+  AccessPath *m_root_access_path;
   /* Temp table context of the outer select's JOIN. */
   Temp_table_param *tmp_param;
 
- public:
-  subselect_hash_sj_engine(Item_subselect *in_predicate,
-                           subselect_single_select_engine *old_engine)
-      : subselect_indexsubquery_engine(NULL, in_predicate, NULL, NULL),
-        is_materialized(false),
-        materialize_engine(old_engine),
-        tmp_param(NULL) {}
-  ~subselect_hash_sj_engine();
+  /// Saved result object, must be restored after use
+  Query_result_interceptor *saved_result{nullptr};
 
-  bool setup(List<Item> *tmp_columns);
-  void cleanup() override;
-  bool prepare() override { return materialize_engine->prepare(); }
-  bool exec() override;
-  void print(String *str, enum_query_type query_type) override;
-  uint cols() const override { return materialize_engine->cols(); }
+ public:
+  subselect_hash_sj_engine(Item_in_subselect *in_predicate,
+                           SELECT_LEX_UNIT *unit_arg)
+      : subselect_indexsubquery_engine(nullptr, in_predicate, nullptr, nullptr),
+        is_materialized(false),
+        unit(unit_arg),
+        tmp_param(nullptr) {}
+  ~subselect_hash_sj_engine() override;
+
+  bool setup(THD *thd, const mem_root_deque<Item *> &tmp_columns);
+  void cleanup(THD *thd) override;
+  bool exec(THD *thd) override;
+  void print(const THD *thd, String *str, enum_query_type query_type) override;
   enum_engine_type engine_type() const override { return HASH_SJ_ENGINE; }
 
   const QEP_TAB *get_qep_tab() const { return tab; }
+  AccessPath *root_access_path() const { return m_root_access_path; }
+  void create_iterators(THD *thd) override;
 };
+
 #endif /* ITEM_SUBSELECT_INCLUDED */

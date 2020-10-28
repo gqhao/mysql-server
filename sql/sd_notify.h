@@ -1,4 +1,4 @@
-/* Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2018, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -22,6 +22,7 @@
 
 #include <sstream>
 
+// build with -DWITH_SYSTEMD_DEBUG=1 as needed!
 namespace sysd {
 void notify_connect();
 void notify();
@@ -55,9 +56,11 @@ class NotifyGlobals {
 template <typename T, typename... Ts>
 inline void notify(T t, Ts... ts) {
 #ifndef _WIN32
+#ifndef WITH_SYSTEMD_DEBUG
   if (NotifyGlobals::socket == -1) {
     return;
   }
+#endif /* WITH_SYSTEMD_DEBUG */
   NotifyGlobals::fmt << t;
   notify(ts...);
 #endif /* not defined _WIN32 */

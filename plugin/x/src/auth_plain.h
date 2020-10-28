@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,25 +22,26 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-#ifndef _XPL_AUTH_PLAIN_H_
-#define _XPL_AUTH_PLAIN_H_
+#ifndef PLUGIN_X_SRC_AUTH_PLAIN_H_
+#define PLUGIN_X_SRC_AUTH_PLAIN_H_
 
+#include <memory>
 #include <string>
 
-#include "plugin/x/ngs/include/ngs/interface/authentication_interface.h"
-#include "plugin/x/ngs/include/ngs/interface/sha256_password_cache_interface.h"
 #include "plugin/x/src/account_verification_handler.h"
+#include "plugin/x/src/interface/authentication.h"
+#include "plugin/x/src/interface/sha256_password_cache.h"
 
 namespace xpl {
 
-class Sasl_plain_auth : public ngs::Authentication_interface {
+class Sasl_plain_auth : public iface::Authentication {
  public:
   explicit Sasl_plain_auth(Account_verification_handler *handler)
       : m_verification_handler(handler) {}
 
-  static ngs::Authentication_interface_ptr create(
-      ngs::Session_interface *session,
-      ngs::SHA256_password_cache_interface *sha256_password_cache);
+  static std::unique_ptr<iface::Authentication> create(
+      iface::Session *session,
+      iface::SHA256_password_cache *sha256_password_cache);
 
   Response handle_start(const std::string &mechanism, const std::string &data,
                         const std::string &initial_response) override;
@@ -51,12 +52,16 @@ class Sasl_plain_auth : public ngs::Authentication_interface {
       const std::string &user, const std::string &host,
       const std::string &passwd) const override;
 
-  std::string get_auth_name() { return "PLAIN"; }
+  std::string get_auth_name() const { return "PLAIN"; }
+  iface::Authentication_info get_authentication_info() const override {
+    return m_auth_info;
+  }
 
  private:
-  Account_verification_handler_ptr m_verification_handler;
+  Account_verification_handler::Unique_ptr m_verification_handler;
+  iface::Authentication_info m_auth_info;
 };
 
 }  // namespace xpl
 
-#endif  // _XPL_AUTH_PLAIN_H_
+#endif  // PLUGIN_X_SRC_AUTH_PLAIN_H_

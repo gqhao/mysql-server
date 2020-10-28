@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2005, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2005, 2020, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -31,29 +31,37 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #ifndef handler0alter_h
 #define handler0alter_h
 
-/** Copies an InnoDB record to table->record[0]. */
-void innobase_rec_to_mysql(struct TABLE *table, /*!< in/out: MySQL table */
-                           const rec_t *rec,    /*!< in: record */
-                           const dict_index_t *index, /*!< in: index */
-                           const ulint *offsets);     /*!< in: rec_get_offsets(
-                                                     rec, index, ...) */
+#define ERROR_STR_LENGTH 1024
 
-/** Copies an InnoDB index entry to table->record[0]. */
-void innobase_fields_to_mysql(
-    struct TABLE *table,       /*!< in/out: MySQL table */
-    const dict_index_t *index, /*!< in: InnoDB index */
-    const dfield_t *fields);   /*!< in: InnoDB index fields */
+/** Copies an InnoDB record to table->record[0].
+@param[in,out] table Mysql table
+@param[in] rec Record
+@param[in] index Index
+@param[in] offsets rec_get_offsets( rec, index, ...) */
+void innobase_rec_to_mysql(struct TABLE *table, const rec_t *rec,
+                           const dict_index_t *index, const ulint *offsets);
 
-/** Copies an InnoDB row to table->record[0]. */
-void innobase_row_to_mysql(struct TABLE *table,      /*!< in/out: MySQL table */
-                           const dict_table_t *itab, /*!< in: InnoDB table */
-                           const dtuple_t *row);     /*!< in: InnoDB row */
+/** Copies an InnoDB index entry to table->record[0].
+@param[in,out] table Mysql table
+@param[in] index Innodb index
+@param[in] fields Innodb index fields */
+void innobase_fields_to_mysql(struct TABLE *table, const dict_index_t *index,
+                              const dfield_t *fields);
+
+/** Copies an InnoDB row to table->record[0].
+@param[in,out] table Mysql table
+@param[in] itab Innodb table
+@param[in] row Innodb row */
+void innobase_row_to_mysql(struct TABLE *table, const dict_table_t *itab,
+                           const dtuple_t *row);
 
 /** Resets table->record[0]. */
 void innobase_rec_reset(struct TABLE *table); /*!< in/out: MySQL table */
 
 /** Generate the next autoinc based on a snapshot of the session
-auto_increment_increment and auto_increment_offset variables. */
+auto_increment_increment and auto_increment_offset variables.
+Assingnment operator would be used during the inplace_alter_table()
+phase only **/
 struct ib_sequence_t {
   /**
   @param thd the session
@@ -63,12 +71,23 @@ struct ib_sequence_t {
 
   /** Postfix increment
   @return the value to insert */
-  ulonglong operator++(int)UNIV_NOTHROW;
+  ulonglong operator++(int) UNIV_NOTHROW;
 
   /** Check if the autoinc "sequence" is exhausted.
   @return true if the sequence is exhausted */
   bool eof() const UNIV_NOTHROW { return (m_eof); }
 
+  /** assignment operator to copy the sequence values
+  @param in 		sequence to copy from */
+  ib_sequence_t &operator=(const ib_sequence_t &in) {
+    ut_ad(in.m_next_value > 0);
+    ut_ad(in.m_max_value == m_max_value);
+    m_next_value = in.m_next_value;
+    m_increment = in.m_increment;
+    m_offset = in.m_offset;
+    m_eof = in.m_eof;
+    return (*this);
+  }
   /**
   @return the next value in the sequence */
   ulonglong last() const UNIV_NOTHROW {

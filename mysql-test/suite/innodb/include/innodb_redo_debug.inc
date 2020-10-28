@@ -1,5 +1,6 @@
 --disable_query_log
 call mtr.add_suppression('Error in Log_event::read_log_event()');
+call mtr.add_suppression("Ignoring ib_.*_0.dblwr - page size doesn't match");
 --enable_query_log
 
 # setup db and table
@@ -168,4 +169,4 @@ SELECT count(*)=0 FROM (SELECT col1,col2 FROM dbredoopt.t1 WHERE col1 NOT BETWEE
 
 DROP DATABASE dbredoopt;
 DROP USER 'redo_wl_user'@'localhost';
-#--remove_files_wildcard $MYSQLTEST_VARDIR/tmp/ t1_*put*
+--remove_files_wildcard $MYSQLTEST_VARDIR/tmp/ t1_*put*

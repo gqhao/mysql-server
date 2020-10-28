@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2018 Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -24,6 +24,8 @@
 
 #include "unittest/gunit/xplugin/xcl/protocol_t.h"
 
+#include "plugin/x/protocol/stream/compression/compression_algorithm_interface.h"
+
 namespace xcl {
 namespace test {
 
@@ -35,7 +37,9 @@ using Msg_types = ::testing::Types<
     ::Mysqlx::Crud::CreateView, ::Mysqlx::Crud::ModifyView,
     ::Mysqlx::Crud::DropView, ::Mysqlx::Expect::Open, ::Mysqlx::Expect::Close,
     ::Mysqlx::Connection::CapabilitiesGet,
-    ::Mysqlx::Connection::CapabilitiesSet, ::Mysqlx::Connection::Close>;
+    ::Mysqlx::Connection::CapabilitiesSet, ::Mysqlx::Connection::Close,
+    ::Mysqlx::Prepare::Prepare, ::Mysqlx::Prepare::Execute,
+    ::Mysqlx::Prepare::Deallocate>;
 
 TYPED_TEST_CASE(Xcl_protocol_impl_tests_with_msg, Msg_types);
 
@@ -128,8 +132,8 @@ TYPED_TEST(Xcl_protocol_impl_tests_with_msg, connection_send_successful) {
 }
 
 TEST_F(Xcl_protocol_impl_tests, recv_fails_at_header) {
-  const int64 expected_error_code = 3000;
-  const int32 expected_payload_size = 10;
+  const int64_t expected_error_code = 3000;
+  const int32_t expected_payload_size = 10;
   XProtocol::Server_message_type_id out_id;
   XError out_error;
 
@@ -142,7 +146,7 @@ TEST_F(Xcl_protocol_impl_tests, recv_fails_at_header) {
 
 TEST_F(Xcl_protocol_impl_tests, recv_fails_at_payload) {
   const int expected_error_code = 3000;
-  const int32 expected_payload_size = 10;
+  const int32_t expected_payload_size = 10;
   XProtocol::Server_message_type_id out_id;
   XError out_error;
 
@@ -155,9 +159,41 @@ TEST_F(Xcl_protocol_impl_tests, recv_fails_at_payload) {
   ASSERT_EQ(expected_error_code, out_error.error());
 }
 
+TEST_F(Xcl_protocol_impl_tests, recv_large_message) {
+  std::string message_payload(1024 * 64, 'x');
+  int offset = 0;
+  expect_read_header(::Mysqlx::ServerMessages::OK,
+                     static_cast<int32>(message_payload.size()));
+
+  {
+    InSequence s;
+    const int k_internal_buffer = 4 * 1024;
+    size_t count_data_in_reads = 0;
+
+    while (count_data_in_reads < message_payload.size()) {
+      EXPECT_CALL(*m_mock_connection, read(_, k_internal_buffer))
+          .WillOnce(Invoke(
+              [&offset, message_payload](
+                  uchar *data, const std::size_t data_length MY_ATTRIBUTE(
+                                   (unused))) -> XError {
+                auto i_start = message_payload.begin() + offset;
+                std::copy(i_start, i_start + data_length, data);
+                offset += data_length;
+                return {};
+              }));
+      count_data_in_reads += k_internal_buffer;
+    }
+  }
+  XProtocol::Server_message_type_id out_id;
+  XError out_error;
+  auto result = m_sut->recv_single_message(&out_id, &out_error);
+  ASSERT_TRUE(result.get());
+  ASSERT_EQ(0, out_error.error());
+}
+
 TEST_F(Xcl_protocol_impl_tests, recv_unknown_msg_type) {
-  const int32 invalid_message_id = 255;
-  const int32 expected_payload_size = 10;
+  const int32_t invalid_message_id = 255;
+  const int32_t expected_payload_size = 10;
   XProtocol::Server_message_type_id out_id;
   XError out_error;
 
@@ -171,7 +207,7 @@ TEST_F(Xcl_protocol_impl_tests, recv_unknown_msg_type) {
 }
 
 TEST_F(Xcl_protocol_impl_tests, recv_in_single_read_op) {
-  const int32 expected_payload_size = 0;
+  const int32_t expected_payload_size = 0;
   const std::string expected_message_name = "Mysqlx.Ok";
   XProtocol::Server_message_type_id out_id;
   XError out_error;
@@ -309,15 +345,24 @@ TEST_F(Xcl_protocol_impl_tests, recv_ok_fails_on_other_msg) {
 TEST_F(Xcl_protocol_impl_tests, recv_ok_fails_error_msg) {
   using Error_desc = Server_message<::Mysqlx::Error>;
 
-  const uint32 expected_error_code = 23332;
+  const uint32_t expected_error_code = 23332;
+  const char *expected_msg = "expected error message";
+  const char *expected_sql_state = "expected sql state";
+
   auto msg_error = Error_desc::make_required();
 
   msg_error.set_code(expected_error_code);
+  msg_error.set_msg(expected_msg);
+  msg_error.set_sql_state(expected_sql_state);
+  msg_error.set_severity(::Mysqlx::Error::FATAL);
 
   expect_read_message(msg_error);
-  auto error = m_sut->recv_ok();
+  XError error = m_sut->recv_ok();
 
   ASSERT_EQ(expected_error_code, error.error());
+  ASSERT_STREQ(expected_msg, error.what());
+  ASSERT_STREQ(expected_sql_state, error.sql_state());
+  ASSERT_TRUE(error.is_fatal());
 }
 
 TEST_F(Xcl_protocol_impl_tests, recv_ok) {
@@ -341,6 +386,16 @@ TEST_F(Xcl_protocol_impl_tests, recv_resultset) {
   auto result = m_sut->recv_resultset();
 
   ASSERT_EQ(query_result, result.get());
+}
+
+TEST_F(Xcl_protocol_impl_tests, send_compressed) {
+  m_sut->use_compression(Compression_algorithm::k_deflate, 1);
+  expect_write_payload(Mysqlx::ClientMessages::COMPRESSION, 17, 0);
+
+  auto result = m_sut->send_compressed_frame(
+      Mysqlx::ClientMessages::EXPECT_OPEN, Mysqlx::Expect::Open());
+
+  ASSERT_EQ(0, result.error());
 }
 
 }  // namespace test

@@ -1,6 +1,7 @@
 
 # This test case needs InnoDB.
 
+call mtr.add_suppression("Unable to use user mysql.session account when connecting the server for internal plugin requests");
 call mtr.add_suppression("Failed to find tablespace for table .* in the cache. Attempting to load the tablespace with space id");
 
 --disable_query_log
@@ -36,7 +37,7 @@ drop index idx on t1;
 --error ER_OPEN_AS_READONLY
 update t1 set f1=3 where f2=2;
 
---error ER_OPEN_AS_READONLY
+--error ER_READ_ONLY_MODE
 create table t3(f1 int not null)engine=innodb;
 
 --error ER_BAD_TABLE_ERROR
@@ -48,7 +49,7 @@ rename table t1 to t3;
 --error ER_OPEN_AS_READONLY
 truncate table t1;
 
---error ER_OPEN_AS_READONLY
+--error ER_READ_ONLY_MODE
 create tablespace t4 add datafile 't1.ibd' Engine=InnoDB;
 
 let $restart_parameters =;
@@ -78,7 +79,7 @@ drop index idx on t2;
 --error ER_OPEN_AS_READONLY
 update t2 set f1=3 where f2=2;
 
---error ER_OPEN_AS_READONLY
+--error ER_READ_ONLY_MODE
 create table t1(f1 int not null)engine=innodb;
 
 --error ER_BAD_TABLE_ERROR
@@ -90,7 +91,7 @@ rename table t2 to t3;
 --error ER_OPEN_AS_READONLY
 truncate table t2;
 
---error ER_OPEN_AS_READONLY
+--error ER_READ_ONLY_MODE
 create tablespace t1 add datafile 't1.ibd' Engine=InnoDB;
 
 --error ER_ENGINE_CANT_DROP_TABLE
@@ -118,7 +119,7 @@ drop index idx on t2;
 --error ER_CANT_LOCK
 update t2 set f1=3 where f2=2;
 
---error ER_OPEN_AS_READONLY
+--error ER_READ_ONLY_MODE
 create table t1(f1 int not null)engine=innodb;
 
 --error ER_BAD_TABLE_ERROR
@@ -130,7 +131,7 @@ rename table t2 to t3;
 --error ER_OPEN_AS_READONLY
 truncate table t2;
 
---error ER_OPEN_AS_READONLY
+--error ER_READ_ONLY_MODE
 create tablespace t1 add datafile 't1.ibd' Engine=InnoDB;
 
 --error ER_ENGINE_CANT_DROP_TABLE

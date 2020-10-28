@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -22,7 +22,14 @@
 
 #include "my_config.h"
 
+#include "my_compiler.h"
+
+MY_COMPILER_DIAGNOSTIC_PUSH()
+// include/mecab.h:1384:22: warning: empty paragraph passed to '@param' command
+// [-Wdocumentation]
+MY_COMPILER_CLANG_DIAGNOSTIC_IGNORE("-Wdocumentation")
 #include <mecab.h>
+MY_COMPILER_DIAGNOSTIC_POP()
 #include <string>
 
 #include <mysql/components/my_service.h>
@@ -45,12 +52,6 @@ static char *mecab_rc_file;
 
 static const char *mecab_min_supported_version = "0.993";
 static const char *mecab_max_supported_version = "0.996";
-
-#if defined(BUNDLE_MECAB)
-static const bool bundle_mecab = true;
-#else
-static const bool bundle_mecab = false;
-#endif
 
 static SERVICE_TYPE(registry) *reg_srv = nullptr;
 SERVICE_TYPE(log_builtins) *log_bi = nullptr;
@@ -137,13 +138,14 @@ static int mecab_parser_plugin_init(void *) {
   mecab_dict = mecab_model->dictionary_info();
   mecab_charset[0] = '\0';
   if (!mecab_parser_check_and_set_charset(mecab_dict->charset)) {
+    LogErr(ERROR_LEVEL, ER_MECAB_UNSUPPORTED_CHARSET, mecab_dict->charset);
+
     delete mecab_tagger;
     mecab_tagger = NULL;
 
     delete mecab_model;
     mecab_model = NULL;
 
-    LogErr(ERROR_LEVEL, ER_MECAB_UNSUPPORTED_CHARSET, mecab_dict->charset);
     deinit_logging_service_for_plugin(&reg_srv, &log_bi, &log_bs);
     return (1);
   } else {
@@ -351,7 +353,7 @@ mysql_declare_plugin(mecab_parser){
     MYSQL_FTPARSER_PLUGIN,                 /*!< type	*/
     &mecab_parser_descriptor,              /*!< descriptor	*/
     "mecab",                               /*!< name	*/
-    "Oracle Corp",                         /*!< author	*/
+    PLUGIN_AUTHOR_ORACLE,                  /*!< author	*/
     "Mecab Full-Text Parser for Japanese", /*!< description*/
     PLUGIN_LICENSE_GPL,                    /*!< license	*/
     mecab_parser_plugin_init,              /*!< init function (when loaded)*/

@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -50,6 +50,8 @@ class Triggers : virtual public Object_table_impl {
     return *s_instance;
   }
 
+  static const CHARSET_INFO *name_collation();
+
   enum enum_fields {
     FIELD_ID,
     FIELD_SCHEMA_ID,
@@ -67,7 +69,8 @@ class Triggers : virtual public Object_table_impl {
     FIELD_CLIENT_COLLATION_ID,
     FIELD_CONNECTION_COLLATION_ID,
     FIELD_SCHEMA_COLLATION_ID,
-    FIELD_OPTIONS
+    FIELD_OPTIONS,
+    NUMBER_OF_FIELDS  // Always keep this entry at the end of the enum
   };
 
   enum enum_indexes {
@@ -76,7 +79,8 @@ class Triggers : virtual public Object_table_impl {
     INDEX_UK_TABLE_ID_EVENT_TYPE_ACTION_TIMING_ACTION_ORDER,
     INDEX_K_CLIENT_COLLATION_ID,
     INDEX_K_CONNECTION_COLLATION_ID,
-    INDEX_K_SCHEMA_COLLATION_ID
+    INDEX_K_SCHEMA_COLLATION_ID,
+    INDEX_K_DEFINER
   };
 
   enum enum_foreign_keys {
@@ -126,6 +130,15 @@ class Triggers : virtual public Object_table_impl {
                                    const String_type &trigger_name,
                                    Object_id *oid);
 
+  /**
+    Create a key to find all triggers for a given definer.
+
+    @param definer   Name of the definer.
+
+    @returns Pointer to Object_key.
+  */
+  static Object_key *create_key_by_definer(const String_type &definer);
+
  private:
   /**
     Create a key to find a trigger by schema_id and trigger name.
@@ -135,7 +148,6 @@ class Triggers : virtual public Object_table_impl {
 
     @returns Pointer to Object_key.
   */
-
   static Object_key *create_key_by_trigger_name(Object_id schema_id,
                                                 const char *trigger_name);
 

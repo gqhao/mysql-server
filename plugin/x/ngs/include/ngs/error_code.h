@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,22 +22,20 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-#ifndef _NGS_ERROR_CODE_H_
-#define _NGS_ERROR_CODE_H_
+#ifndef PLUGIN_X_NGS_INCLUDE_NGS_ERROR_CODE_H_
+#define PLUGIN_X_NGS_INCLUDE_NGS_ERROR_CODE_H_
 
 #include <stdio.h>
-#include <string>
-
-#ifndef NGS_STANDALONE
-#include "mysqld_error.h"
-#endif
-
 #include <cstdarg>
 #include <string>
 
 #include "my_compiler.h"
+#include "my_dbug.h"
+#include "my_sys.h"
+#include "mysqld_error.h"
 
 namespace ngs {
+
 struct Error_code {
   static const int MAX_MESSAGE_LENGTH = 1024;
 
@@ -53,7 +51,11 @@ struct Error_code {
   Error_code() : error(0), severity(OK) {}
   Error_code(int e, const std::string &m, const std::string &state = "HY000",
              Severity sev = ERROR)
-      : error(e), message(m), sql_state(state), severity(sev) {}
+      : error(e), message(m), sql_state(state), severity(sev) {
+    if (e) {
+      DBUG_PRINT("info", ("Error_code: %s", m.c_str()));
+    }
+  }
 
   Error_code(int e, const std::string &state, Severity sev, const char *fmt,
              va_list args) MY_ATTRIBUTE((format(printf, 5, 0)));
@@ -79,12 +81,13 @@ inline Error_code::Error_code(int e, const std::string &state, Severity sev,
   char buffer[MAX_MESSAGE_LENGTH];
   vsnprintf(buffer, sizeof(buffer), fmt, args);
   message = buffer;
+  if (e) {
+    DBUG_PRINT("info", ("Error_code: %s", message.c_str()));
+  }
 }
 
 inline Error_code Success(const char *msg, ...)
     MY_ATTRIBUTE((format(printf, 1, 2)));
-inline Error_code SQLError(int e, const std::string &sqlstate, const char *msg,
-                           ...) MY_ATTRIBUTE((format(printf, 3, 4)));
 inline Error_code Error(int e, const char *msg, ...)
     MY_ATTRIBUTE((format(printf, 2, 3)));
 inline Error_code Fatal(int e, const char *msg, ...)
@@ -100,13 +103,23 @@ inline Error_code Success(const char *msg, ...) {
 
 inline Error_code Success() { return Error_code(); }
 
-inline Error_code SQLError(int e, const std::string &sqlstate, const char *msg,
-                           ...) {
+inline Error_code SQLError(const int error_code, ...) {
   va_list ap;
-  va_start(ap, msg);
-  Error_code tmp(Error_code(e, sqlstate, Error_code::ERROR, msg, ap));
+  va_start(ap, error_code);
+  const auto format = my_get_err_msg(error_code);
+
+  Error_code tmp(error_code, "");
+
+  if (nullptr != format)
+    tmp = Error_code(error_code, "HY000", Error_code::ERROR, format, ap);
+
   va_end(ap);
+
   return tmp;
+}
+
+inline Error_code SQLError_access_denied() {
+  return Error_code(ER_ACCESS_DENIED_ERROR, "Invalid user or password");
 }
 
 inline Error_code Error(int e, const char *msg, ...) {
@@ -132,4 +145,4 @@ inline Error_code Fatal(const Error_code &err) {
 }
 }  // namespace ngs
 
-#endif  // _NGS_ERROR_CODE_H_
+#endif  // PLUGIN_X_NGS_INCLUDE_NGS_ERROR_CODE_H_

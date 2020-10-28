@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2007, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2007, 2020, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -85,22 +85,44 @@ string based columns */
 
 /** This structure represents INFORMATION_SCHEMA.innodb_locks row */
 struct i_s_locks_row_t {
-  trx_id_t lock_trx_id; /*!< transaction identifier */
+  uint64_t lock_trx_immutable_id; /*!< transaction address as integer. We need
+                          an id which is unique and does not change over time.
+                          Unfortunately trx->id is initially equal to 0 for
+                          all trxs which still appear to be read only, and it
+                          changes to non-zero, once trx needs to perform write.
+                          For this reason trx->id is not good enough for our
+                          purpose. */
+  uint64_t lock_immutable_id; /*!< lock address as integer. We need to identify
+                      the lock in unique way. Specifying space, page and heap_no
+                      and trx is not enough, because there could be locks with
+                      different modes. Using mode as part of id is not good,
+                      because we sometimes change the mode of the lock (for
+                      example when granting the lock we drop LOCK_WAITING flag
+                      and in lock_trx_release_read_locks we add LOCK_REC_NOT_GAP
+                      flag). The only permanent thing is then the address.
+                      We use both lock_immutable_id and lock_trx_immutable_id
+                      even though lock_immutable_id is unique, because we need
+                      to be able to locate the row in PERFORMANCE_SCHEMA based
+                      on the id, and we need a way to verify that the
+                      lock_immutable_id is safe to dereference. Simplest way to
+                      do that is to check that trx still has the lock on its
+                      list of locks.     */
+
   /** Information for record locks.  All these are
   ULINT_UNDEFINED for table locks. */
-  /* @{ */
+  /** @{ */
   space_id_t lock_space; /*!< tablespace identifier */
   page_no_t lock_page;   /*!< page number within the_space */
   ulint lock_rec;        /*!< heap number of the record
                          on the page */
-  /* @} */
+  /** @} */
 
   /** The following are auxiliary and not included in the table */
-  /* @{ */
+  /** @{ */
   table_id_t lock_table_id;
   /*!< table identifier from
   lock_get_table_id */
-  /* @} */
+  /** @} */
 };
 
 /** This structure represents INFORMATION_SCHEMA.innodb_trx row */
@@ -113,8 +135,16 @@ struct i_s_trx_row_t {
   /*!< pointer to a row
   in innodb_locks if trx
   is waiting, or NULL */
-  ib_time_t trx_wait_started;       /*!< trx_t::wait_started */
-  uintmax_t trx_weight;             /*!< TRX_WEIGHT() */
+
+  /** The value of trx->lock.wait_started */
+  ib_time_t trx_wait_started;
+  /** The value of TRX_WEIGHT(trx) */
+  uintmax_t trx_weight;
+  /** If `first` is `true` then `second` is the value of the
+  trx->lock.schedule_weight, otherwise the `second` should be ignored and
+  displayed as NULL to the end user.
+  (This could be std::optional once we move to C++17) */
+  std::pair<bool, trx_schedule_weight_t> trx_schedule_weight;
   ulint trx_mysql_thread_id;        /*!< thd_get_thread_id() */
   const char *trx_query;            /*!< MySQL statement being
                                     executed in the transaction */
@@ -203,12 +233,14 @@ int trx_i_s_possibly_fetch_data_into_cache(
 
 /** Returns TRUE if the data in the cache is truncated due to the memory
  limit posed by TRX_I_S_MEM_LIMIT.
+ @param[in]   cache   The cache
  @return true if truncated */
-ibool trx_i_s_cache_is_truncated(trx_i_s_cache_t *cache); /*!< in: cache */
+bool trx_i_s_cache_is_truncated(trx_i_s_cache_t *cache);
+
 /** The maximum length of a resulting lock_id_size in
 trx_i_s_create_lock_id(), not including the terminating NUL.
-":%lu:%lu:%lu" -> 63 chars */
-#define TRX_I_S_LOCK_ID_MAX_LEN (TRX_ID_MAX_LEN + 63)
+"%lu:%lu:%lu:%lu:%lu" -> 20*5+4 chars */
+#define TRX_I_S_LOCK_ID_MAX_LEN (20 * 5 + 4)
 
 /** Crafts a lock id string from a i_s_locks_row_t object. Returns its
  second argument. This function aborts if there is not enough space in
@@ -233,4 +265,16 @@ void p_s_fill_lock_data(const char **lock_data, const lock_t *lock,
                         ulint heap_no,
                         PSI_server_data_lock_container *container);
 
+/** Fills i_s_locks_row_t object with data about the lock.
+@param[out] row     Result object that's filled
+@param[in]  lock    Lock to get data from
+@param[in]  heap_no Lock's record number or ULINT_UNDEFINED if the lock is a
+                    table lock */
+void fill_locks_row(i_s_locks_row_t *row, const lock_t *lock, ulint heap_no);
+
+/** Parses lock id into row
+@param[in]      lock_id     Lock id generated with trx_i_s_create_lock_id
+@param[out]     row         Row to be filled in with data
+@return LOCK_REC, LOCK_TABLE or 0 if failed to parse */
+int trx_i_s_parse_lock_id(const char *lock_id, i_s_locks_row_t *row);
 #endif /* trx0i_s_h */

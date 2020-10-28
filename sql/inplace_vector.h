@@ -1,7 +1,7 @@
 #ifndef INPLACE_VECTOR_INCLUDED
 #define INPLACE_VECTOR_INCLUDED
 
-/* Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -77,16 +77,16 @@ class Inplace_vector {
     DBUG_ASSERT(index <= m_obj_count);
     size_t arr_id = index / array_size;
     size_t slot_id = index % array_size;
-    objtype *ptr = NULL;
+    objtype *ptr = nullptr;
 
     DBUG_ASSERT(arr_id <= m_obj_arrays.size());
 
     // Appending a new slot causes appending a new array.
     if (arr_id == m_obj_arrays.size()) {
       DBUG_ASSERT(slot_id == 0);
-      if (m_outof_mem) return NULL;
+      if (m_outof_mem) return nullptr;
       append_new_array();
-      if (m_outof_mem) return NULL;
+      if (m_outof_mem) return nullptr;
     }
 
     ptr = m_obj_arrays[arr_id];
@@ -168,18 +168,13 @@ class Inplace_vector {
                objects at the tail are removed and destroyed. If greater,
                new objects are added with default value.
     @param val default value assigned to extended slots in the vector. Unused
-               if the vector is shrinked. We have to define a const reference
-               instead of passing by value because MSVC on 32bit Windows
-               doesn't allow formal parameter to have alignment specification
-               (error C2719) as defined in my_aligned_storage but in
-               Geometry_buffer and potentially more classes in future,
-               we do use alignement specification.
+               if the vector is shrinked.
     @return true if out of memory; false if successful.
     */
   bool resize(size_t new_size, const objtype &val = objtype()) {
     if (new_size > size()) {
       for (size_t i = size(); i < new_size; i++) {
-        if (push_back(val) == NULL) return true;
+        if (push_back(val) == nullptr) return true;
       }
     } else if (new_size < size()) {
       // Destroy objects at tail.

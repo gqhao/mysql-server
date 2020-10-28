@@ -1,7 +1,7 @@
 #ifndef SQL_ITEM_REGEXP_FUNC_H_
 #define SQL_ITEM_REGEXP_FUNC_H_
 
-/* Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -62,7 +62,8 @@
 
 #include <string>
 
-#include "my_dbug.h"  // DBUG_ASSERT
+#include "my_dbug.h"      // DBUG_ASSERT
+#include "my_inttypes.h"  // MY_INT32_NUM_DECIMAL_DIGITS
 #include "sql/item_cmpfunc.h"
 #include "sql/item_strfunc.h"
 #include "sql/mysqld.h"  // make_unique_destroy_only
@@ -75,7 +76,8 @@
 */
 class Item_func_regexp : public Item_func {
  public:
-  Item_func_regexp(const POS &pos, PT_item_list *args) : Item_func(pos, args) {}
+  Item_func_regexp(const POS &pos, PT_item_list *opt_list)
+      : Item_func(pos, opt_list) {}
 
   /**
     Resolves the collation to use for comparison. The type resolution is done
@@ -178,11 +180,11 @@ class Item_func_regexp : public Item_func {
   double convert_str_to_real() {
     DBUG_ASSERT(fixed == 1);
     int err_not_used;
-    char *end_not_used;
+    const char *end_not_used;
     String *res = val_str(&str_value);
     if (res == nullptr) return 0.0;
-    return my_strntod(res->charset(), const_cast<char *>(res->ptr()),
-                      res->length(), &end_not_used, &err_not_used);
+    return my_strntod(res->charset(), res->ptr(), res->length(), &end_not_used,
+                      &err_not_used);
   }
 
   longlong convert_str_to_int() {
@@ -209,24 +211,19 @@ class Item_func_regexp : public Item_func {
   /// The position in the argument list of match_parameter.
   virtual int match_arg_pos() const = 0;
 
- protected:
-  unique_ptr_destroy_only<regexp::Regexp_facade> m_facade;
+  bool set_pattern();
 
- private:
-  /**
-    The collation that is supposed to be used if you were to compare the
-    pattern and the subject strings. We use this only for figuring out whether
-    regular expression matching should be case-sensitive or not.
-  */
-  DTCollation m_cmp_collation;
+  unique_ptr_destroy_only<regexp::Regexp_facade> m_facade;
 };
 
 class Item_func_regexp_instr : public Item_func_regexp {
  public:
-  Item_func_regexp_instr(const POS &pos, PT_item_list *args)
-      : Item_func_regexp(pos, args) {
+  Item_func_regexp_instr(const POS &pos, PT_item_list *opt_list)
+      : Item_func_regexp(pos, opt_list) {
     set_data_type_longlong();
   }
+
+  Item_result result_type() const override { return INT_RESULT; }
 
   bool fix_fields(THD *thd, Item **arguments) override;
 
@@ -271,14 +268,19 @@ class Item_func_regexp_instr : public Item_func_regexp {
   /// The position in the argument list of `occurrence`.
   int retopt_arg_pos() const { return 4; }
   int match_arg_pos() const override { return 5; }
+
+ private:
+  bool resolve_type(THD *) final;
 };
 
 class Item_func_regexp_like : public Item_func_regexp {
  public:
-  Item_func_regexp_like(const POS &pos, PT_item_list *args)
-      : Item_func_regexp(pos, args) {
-    set_data_type_longlong();
+  Item_func_regexp_like(const POS &pos, PT_item_list *opt_list)
+      : Item_func_regexp(pos, opt_list) {
+    set_data_type_bool();
   }
+
+  Item_result result_type() const override { return INT_RESULT; }
 
   String *val_str(String *str) override { return convert_int_to_str(str); }
 
@@ -308,14 +310,17 @@ class Item_func_regexp_like : public Item_func_regexp {
   int pos_arg_pos() const override { return -1; }
   int occ_arg_pos() const override { return -1; }
   int match_arg_pos() const override { return 2; }
+
+ private:
+  bool resolve_type(THD *) final;
 };
 
 class Item_func_regexp_replace : public Item_func_regexp {
  public:
-  Item_func_regexp_replace(const POS &pos, PT_item_list *args)
-      : Item_func_regexp(pos, args) {
-    set_data_type_string_init();
-  }
+  Item_func_regexp_replace(const POS &pos, PT_item_list *item_list)
+      : Item_func_regexp(pos, item_list) {}
+
+  Item_result result_type() const override { return STRING_RESULT; }
 
   bool resolve_type(THD *) final;
 
@@ -351,10 +356,10 @@ class Item_func_regexp_replace : public Item_func_regexp {
 
 class Item_func_regexp_substr : public Item_func_regexp {
  public:
-  Item_func_regexp_substr(const POS &pos, PT_item_list *args)
-      : Item_func_regexp(pos, args) {
-    set_data_type_string_init();
-  }
+  Item_func_regexp_substr(const POS &pos, PT_item_list *item_list)
+      : Item_func_regexp(pos, item_list) {}
+
+  Item_result result_type() const override { return STRING_RESULT; }
 
   bool resolve_type(THD *) final;
 

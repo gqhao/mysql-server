@@ -1,7 +1,7 @@
 #ifndef SQL_PARTITION_INCLUDED
 #define SQL_PARTITION_INCLUDED
 
-/* Copyright (c) 2006, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2006, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -27,7 +27,6 @@
 #include <sys/types.h>
 
 #include "lex_string.h"
-#include "m_ctype.h"
 #include "my_base.h"
 #include "my_inttypes.h"
 #include "sql/partition_element.h"  // partition_state
@@ -41,6 +40,7 @@ class KEY;
 class String;
 class THD;
 class partition_info;
+struct CHARSET_INFO;
 struct HA_CREATE_INFO;
 struct MEM_ROOT;
 struct MY_BITMAP;
@@ -78,13 +78,18 @@ class List;
   The handler can not use FOREIGN KEYS with partitioning
 */
 #define HA_CANNOT_PARTITION_FK (1 << 5)
+/**
+  Engine requires closing all open table instances before TRUNCATE
+  PARTITION operation.
+*/
+#define HA_TRUNCATE_PARTITION_PRECLOSE (1 << 6)
 
 typedef struct {
   uint32 start_part;
   uint32 end_part;
 } part_id_range;
 
-int get_parts_for_update(const uchar *old_data, uchar *new_data,
+int get_parts_for_update(const uchar *old_data, const uchar *new_data,
                          const uchar *rec0, partition_info *part_info,
                          uint32 *old_part_id, uint32 *new_part_id,
                          longlong *func_value);
@@ -97,11 +102,11 @@ bool partition_key_modified(TABLE *table, const MY_BITMAP *fields);
 void get_partition_set(const TABLE *table, uchar *buf, const uint index,
                        const key_range *key_spec, part_id_range *part_spec);
 uint get_partition_field_store_length(Field *field);
-int get_cs_converted_part_value_from_string(THD *thd, Item *item,
-                                            String *input_str,
-                                            String *output_str,
-                                            const CHARSET_INFO *cs,
-                                            bool use_hex);
+bool get_cs_converted_part_value_from_string(THD *thd, Item *item,
+                                             String *input_str,
+                                             String *output_str,
+                                             const CHARSET_INFO *cs,
+                                             bool use_hex);
 void get_full_part_id_from_key(const TABLE *table, uchar *buf, KEY *key_info,
                                const key_range *key_spec,
                                part_id_range *part_spec);
@@ -146,11 +151,6 @@ bool verify_data_with_partition(TABLE *table, TABLE *part_table,
 bool compare_partition_options(HA_CREATE_INFO *table_create_info,
                                partition_element *part_elem);
 
-void create_partition_name(char *out, const char *in1, const char *in2,
-                           bool translate);
-void create_subpartition_name(char *out, const char *in1, const char *in2,
-                              const char *in3);
-
 enum enum_partition_keywords {
   PKW_HASH = 0,
   PKW_RANGE,
@@ -162,6 +162,6 @@ enum enum_partition_keywords {
   PKW_ALGORITHM
 };
 
-extern const LEX_STRING partition_keywords[];
+extern const LEX_CSTRING partition_keywords[];
 
 #endif /* SQL_PARTITION_INCLUDED */

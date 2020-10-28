@@ -3,10 +3,6 @@
 #
 # Test of alter table
 #
---disable_warnings
-drop table if exists t1,t2;
-drop database if exists mysqltest;
---enable_warnings
 
 SET sql_mode = 'NO_ENGINE_SUBSTITUTION';
 
@@ -383,9 +379,6 @@ drop table t1;
 # This problem happens if the data change is compatible.
 # Changing to the same type is compatible for example.
 #
---disable_warnings
-drop table if exists t1;
---enable_warnings
 create table t1 (a int, key(a)) engine=myisam;
 show indexes from t1;
 --echo "this used not to disable the index"
@@ -521,10 +514,6 @@ DROP TABLE t1;
 # Disable/Enable keys supported by Myisam only
 # Bug#24219 - ALTER TABLE ... RENAME TO ... , DISABLE KEYS leads to crash
 #
---disable_warnings
-DROP TABLE IF EXISTS bug24219;
-DROP TABLE IF EXISTS bug24219_2;
---enable_warnings
 
 CREATE TABLE bug24219 (a INT, INDEX(a)) ENGINE=MyISAM;
 
@@ -539,10 +528,6 @@ DROP TABLE bug24219_2;
 #
 # Bug#24562 (ALTER TABLE ... ORDER BY ... with complex expression asserts)
 #
-
---disable_warnings
-drop table if exists table_24562;
---enable_warnings
 
 create table table_24562(
   section int,
@@ -705,6 +690,7 @@ CREATE TABLE t1 (a varchar(500));
 
 ALTER TABLE t1 ADD b GEOMETRY NOT NULL SRID 0, ADD SPATIAL INDEX(b);
 SHOW CREATE TABLE t1;
+--error ER_WRONG_SUB_KEY
 ALTER TABLE t1 ADD KEY(b(50));
 SHOW CREATE TABLE t1;
 
@@ -780,9 +766,6 @@ drop table t1;
 # See also innodb_mysql.test.
 # See alter_table-big.test for extended full ALTER TABLE RENAME coverage.
 #
---disable_warnings
-drop table if exists t1, t2, t3;
---enable_warnings
 create table t1 (i int);
 create table t3 (j int);
 insert into t1 values ();
@@ -827,9 +810,6 @@ drop tables t1, t3;
 # Bug#18775 - Temporary table from alter table visible to other threads
 #
 # Check if special characters work and duplicates are detected.
---disable_warnings
-DROP TABLE IF EXISTS `t+1`, `t+2`;
---enable_warnings
 CREATE TABLE `t+1` (c1 INT);
 ALTER TABLE  `t+1` RENAME `t+2`;
 CREATE TABLE `t+1` (c1 INT);
@@ -880,9 +860,6 @@ DROP TABLE `#sql2`, `@0023sql1`;
 # This problem happens if the data change is compatible.
 # Changing to the same type is compatible for example.
 #
---disable_warnings
-DROP TABLE IF EXISTS t1;
-DROP TABLE IF EXISTS t2;
 --enable_warnings
 CREATE TABLE t1 (
   int_field INTEGER UNSIGNED NOT NULL,
@@ -938,9 +915,6 @@ drop table t1;
 # Bug#33873: Fast ALTER TABLE doesn't work with multibyte character sets
 #
 
---disable_warnings
-DROP TABLE IF EXISTS t1;
---enable_warnings
 CREATE TABLE t1 (id int, c int) character set latin1;
 INSERT INTO t1 VALUES (1,1);
 --enable_info
@@ -952,9 +926,6 @@ ALTER TABLE t1 CHANGE d c varchar(10);
 --disable_info
 DROP TABLE t1;
 
---disable_warnings
-DROP TABLE IF EXISTS t1;
---enable_warnings
 CREATE TABLE t1 (id int, c int) character set utf8;
 INSERT INTO t1 VALUES (1,1);
 --enable_info
@@ -1011,10 +982,6 @@ DROP TABLE t1;
 --echo # Bug#45567: Fast ALTER TABLE broken for enum and set
 --echo #
 
---disable_warnings
-DROP TABLE IF EXISTS t1;
---enable_warnings
-
 CREATE TABLE t1 (a ENUM('a1','a2'));
 INSERT INTO t1 VALUES ('a1'),('a2');
 --enable_info
@@ -1048,7 +1015,7 @@ ALTER TABLE t1 MODIFY COLUMN a SET('a1','a2','xx');
 ALTER TABLE t1 MODIFY COLUMN a SET('a1','a2','a0','xx');
 --echo # No copy: Add new to the end
 ALTER TABLE t1 MODIFY COLUMN a SET('a1','a2','a0','xx','a5','a6');
---echo # Copy: Numerical incrase (pack lenght)
+--echo # Copy: Numerical increase (pack length)
 ALTER TABLE t1 MODIFY COLUMN a SET('a1','a2','a0','xx','a5','a6','a7','a8','a9','a10');
 --disable_info
 DROP TABLE t1;
@@ -1084,9 +1051,6 @@ DROP TABLE t1;
 --echo # Test for bug #12652385 - "61493: REORDERING COLUMNS TO POSITION
 --echo #                           FIRST CAN CAUSE DATA TO BE CORRUPTED".
 --echo #
---disable_warnings
-drop table if exists t1;
---enable_warnings
 --echo # Use MyISAM engine as the fact that InnoDB doesn't support
 --echo # in-place ALTER TABLE in cases when columns are being renamed
 --echo # hides some bugs.
@@ -1167,9 +1131,6 @@ DROP TABLE t1;
 --echo # Test for bug #53820 "ALTER a MEDIUMINT column table causes full
 --echo #                      table copy".
 --echo #
---disable_warnings
-DROP TABLE IF EXISTS t1;
---enable_warnings
 CREATE TABLE t1 (a INT, b MEDIUMINT);
 INSERT INTO t1 VALUES (1, 1), (2, 2);
 --echo # The below ALTER should not copy table and so no rows should
@@ -1183,10 +1144,6 @@ DROP TABLE t1;
 --echo #
 --echo # Bug#11754461 CANNOT ALTER TABLE WHEN KEY PREFIX TOO LONG
 --echo #
-
---disable_warnings
-DROP DATABASE IF EXISTS db1;
---enable_warnings
 
 CREATE DATABASE db1 CHARACTER SET utf8;
 --error ER_TOO_LONG_KEY
@@ -1203,10 +1160,6 @@ DROP DATABASE db1;
 --echo #
 --echo # At some point the below test case failed on assertion.
 
---disable_warnings
-DROP TABLE IF EXISTS t1;
---enable_warnings
-
 CREATE TEMPORARY TABLE t1 (i int) ENGINE=MyISAM;
 
 --error ER_ILLEGAL_HA
@@ -1219,9 +1172,6 @@ DROP TABLE t1;
 --echo # Bug#11938039 RE-EXECUTION OF FRM-ONLY ALTER TABLE WITH RENAME
 --echo #              CLAUSE FAILS OR ABORTS SERVER.
 --echo #
---disable_warnings
-drop table if exists t1;
---enable_warnings
 create table t1 (a int);
 prepare stmt1 from 'alter table t1 alter column a set default 1, rename to t2';
 execute stmt1;
@@ -1249,10 +1199,6 @@ DROP TABLE t1;
 
 --echo # Single thread tests.
 --echo # See innodb_mysql_sync.test for multi thread tests.
-
---disable_warnings
-DROP TABLE IF EXISTS t1;
---enable_warnings
 
 CREATE TABLE t1(a INT PRIMARY KEY, b INT) engine=InnoDB;
 CREATE TABLE m1(a INT PRIMARY KEY, b INT) engine=MyISAM;
@@ -1405,10 +1351,6 @@ DROP TABLE t1;
 --echo # --enable_info allows us to see how many rows were updated
 --echo # by ALTER TABLE. in-place will show 0 rows, while copy > 0.
 --echo #
-
---disable_warnings
-DROP TABLE IF EXISTS ti1, ti2, ti3, tm1, tm2, tm3;
---enable_warnings
 
 --echo # Single operation tests
 
@@ -1595,7 +1537,7 @@ CREATE TABLE db (dummy int) ENGINE=memory;
 --error ER_UNSUPPORTED_ENGINE
 CREATE TABLE user (dummy int) ENGINE=memory;
 --error ER_UNSUPPORTED_ENGINE
-CREATE TABLE func (dummy int) ENGINE=csv;
+CREATE TABLE func (dummy int) ENGINE=memory;
 --error ER_UNSUPPORTED_ENGINE
 CREATE TABLE servers (dummy int) ENGINE=merge;
 --error ER_UNSUPPORTED_ENGINE
@@ -1603,7 +1545,7 @@ CREATE TABLE procs_priv (dummy int) ENGINE=memory;
 --error ER_UNSUPPORTED_ENGINE
 CREATE TABLE tables_priv (dummy int) ENGINE=heap;
 --error ER_UNSUPPORTED_ENGINE
-CREATE TABLE columns_priv (dummy int) ENGINE=csv;
+CREATE TABLE columns_priv (dummy int) ENGINE=memory;
 --error ER_UNSUPPORTED_ENGINE
 CREATE TABLE time_zone (dummy int) ENGINE=merge;
 --error ER_UNSUPPORTED_ENGINE
@@ -2049,6 +1991,7 @@ DROP TABLE t1;
 
 CREATE TABLE t1(a INT NOT NULL, b POINT NOT NULL) ENGINE=INNODB;
 SHOW CREATE TABLE t1;
+--error ER_SPATIAL_UNIQUE_INDEX
 ALTER TABLE t1 ADD UNIQUE INDEX (b);
 
 --echo # Note that SHOW CREATE TABLE does not list b as a primary key,
@@ -2091,9 +2034,10 @@ SET sql_mode= '';
 --echo # Test with '767' as index size limit.
 CREATE TABLE t1(fld1 VARCHAR(767), KEY a(fld1)) charset latin1 ENGINE= INNODB
 ROW_FORMAT=COMPACT;
---error ER_INDEX_COLUMN_TOO_LONG
+--echo # With patch for Bug#26848813, a warning is reported.
 ALTER TABLE t1 CHANGE fld1 fld1 VARCHAR(768), ALGORITHM= INPLACE;
 DROP TABLE t1;
+
 CREATE TABLE t1(fld1 VARCHAR(3072), KEY a(fld1)) charset latin1 ENGINE= INNODB,
 ROW_FORMAT=DYNAMIC;
 INSERT INTO t1 VALUES('a');
@@ -2327,16 +2271,18 @@ CREATE TABLE t0(a INT NOT NULL) ENGINE=INNODB;
 ALTER TABLE t0 ADD UNIQUE INDEX (a);
 
 --echo # Case a: Create table with virtual unique not null column
+--error ER_UNSUPPORTED_ACTION_ON_GENERATED_COLUMN
 CREATE TABLE t1(a POINT GENERATED ALWAYS AS (POINT(1,1)) VIRTUAL UNIQUE NOT NULL) ENGINE=INNODB;
-SELECT * FROM t1;
 
 --echo # Case b: Create table with index on virtual point column
+--error ER_UNSUPPORTED_ACTION_ON_GENERATED_COLUMN
 CREATE TABLE t2(a POINT GENERATED ALWAYS AS (POINT(1,1)) VIRTUAL NOT NULL, UNIQUE INDEX no_pk(a(1))) ENGINE=INNODB;
-SELECT * FROM t2;
 
 --echo # Case c: Add unique index on virtual point column
 CREATE TABLE t3(a POINT GENERATED ALWAYS AS (POINT(1,1)) VIRTUAL NOT NULL)
 ENGINE=INNODB;
+--echo # Case c: Add unique index on virtual point column
+--error ER_UNSUPPORTED_ACTION_ON_GENERATED_COLUMN
 ALTER TABLE t3 ADD UNIQUE INDEX (a(1));
 SELECT * FROM t3;
 
@@ -2360,8 +2306,6 @@ SELECT T.NAME AS TABLE_NAME, I.NAME AS INDEX_NAME,
 
 
 DROP TABLE t0;
-DROP TABLE t1;
-DROP TABLE t2;
 DROP TABLE t3;
 DROP TABLE t4;
 
@@ -2821,9 +2765,9 @@ SHOW CREATE TABLE t_gen;
 ALTER TABLE t_gen RENAME COLUMN a TO c, CHANGE COLUMN b b DOUBLE GENERATED ALWAYS AS (SQRT(c));
 SELECT * FROM t_gen;
 SHOW CREATE TABLE t_gen;
---error ER_BAD_FIELD_ERROR
+--error ER_DEPENDENT_BY_GENERATED_COLUMN
 ALTER TABLE t_gen CHANGE COLUMN c a INT;
---error ER_BAD_FIELD_ERROR
+--error ER_DEPENDENT_BY_GENERATED_COLUMN
 ALTER TABLE t_gen RENAME COLUMN c TO a;
 DROP TABLE t_gen;
 
@@ -2913,3 +2857,818 @@ ALTER TABLE t
 ADD COLUMN e DATE GENERATED ALWAYS AS (NULL) STORED NOT NULL;
 SELECT * FROM t;
 DROP TABLE t;
+
+--echo #
+--echo # Basic test coverage for ALGORITHM=INSTANT support on SQL-layer.
+--echo #
+
+--echo #
+--echo # 1) Syntax.
+--echo #
+CREATE TABLE t1 (i INT) ENGINE=InnoDB;
+ALTER TABLE t1 ALTER COLUMN i SET DEFAULT 10, ALGORITHM=INSTANT;
+SHOW CREATE TABLE t1;
+--echo # ALGORITHM=INSTANT doesn't make sense with LOCK clause.
+--error ER_WRONG_USAGE
+ALTER TABLE t1 ALTER COLUMN i SET DEFAULT 11, ALGORITHM=INSTANT, LOCK=NONE;
+--error ER_WRONG_USAGE
+ALTER TABLE t1 ALTER COLUMN i SET DEFAULT 12, ALGORITHM=INSTANT, LOCK=SHARED;
+--error ER_WRONG_USAGE
+ALTER TABLE t1 ALTER COLUMN i SET DEFAULT 13, ALGORITHM=INSTANT, LOCK=EXCLUSIVE;
+--echo # ALGORITHM=INSTANT and LOCK=DEFAULT are OK though.
+ALTER TABLE t1 ALTER COLUMN i SET DEFAULT 13, ALGORITHM=INSTANT, LOCK=DEFAULT;
+SHOW CREATE TABLE t1;
+
+--echo #
+--echo # 2) We support INSTANT algorithm for a few trivial metadata-only
+--echo #    changes for InnoDB.
+--echo #
+ALTER TABLE t1 ALTER COLUMN i SET DEFAULT 14, ALGORITHM=INSTANT;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 ALTER COLUMN i DROP DEFAULT, ALGORITHM=INSTANT;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 ADD COLUMN j ENUM('a', 'b', 'c');
+ALTER TABLE t1 MODIFY COLUMN j ENUM('a', 'b', 'c', 'd', 'e'), ALGORITHM=INSTANT;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 RENAME TO t2, ALGORITHM=INSTANT;
+SHOW CREATE TABLE t2;
+
+--echo #
+--echo # 3) You can still use ALGORITHM=INPLACE for these operations
+--echo #    (even though INSTANT algorithm will be used internally).
+--echo #
+ALTER TABLE t2 RENAME TO t1, ALGORITHM=INPLACE;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 ALTER COLUMN i SET DEFAULT 15, ALGORITHM=INPLACE;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 ALTER COLUMN i DROP DEFAULT, ALGORITHM=INPLACE;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 MODIFY COLUMN j ENUM('a', 'b', 'c', 'd', 'e', 'f', 'g'), ALGORITHM=INPLACE;
+SHOW CREATE TABLE t1;
+
+--echo #
+--echo # 4) However, some operations are not supported as INSTANT.
+--echo #
+--error ER_ALTER_OPERATION_NOT_SUPPORTED
+ALTER TABLE t1 ADD KEY(j), ALGORITHM=INSTANT;
+--error ER_ALTER_OPERATION_NOT_SUPPORTED
+ALTER TABLE t1 ALTER COLUMN i SET DEFAULT 15, DROP COLUMN j, ALGORITHM=INSTANT;
+
+--echo #
+--echo # 5) For MyISAM tables we support INSTANT algorithm for metadata-only
+--echo #    changes as well.
+--echo #
+DROP TABLE t1;
+CREATE TABLE t1 (i INT, j ENUM('a', 'b'), KEY(i)) ENGINE=MyISAM;
+ALTER TABLE t1 ALTER COLUMN i SET DEFAULT 10, ALGORITHM=INSTANT;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 ALTER COLUMN i DROP DEFAULT, ALGORITHM=INSTANT;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 MODIFY COLUMN j ENUM('a', 'b', 'c', 'd', 'e'), ALGORITHM=INSTANT;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 CHANGE COLUMN i k INT, ALGORITHM=INSTANT;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 RENAME INDEX i TO k, ALGORITHM=INSTANT;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 RENAME TO t2, ALGORITHM=INSTANT;
+SHOW CREATE TABLE t2;
+
+--echo #
+--echo # 6) And you can still use ALGORITHM=INPLACE for the same operations
+--echo #    for MyISAM tables too.
+--echo #
+ALTER TABLE t2 RENAME TO t1, ALGORITHM=INPLACE;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 ALTER COLUMN k SET DEFAULT 11, ALGORITHM=INPLACE;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 ALTER COLUMN k DROP DEFAULT, ALGORITHM=INPLACE;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 MODIFY COLUMN j ENUM('a', 'b', 'c', 'd', 'e', 'f', 'g'), ALGORITHM=INPLACE;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 CHANGE COLUMN k i INT, ALGORITHM=INPLACE;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 RENAME INDEX k TO i, ALGORITHM=INPLACE;
+SHOW CREATE TABLE t1;
+
+--echo #
+--echo # 7) Indeed, some options are not supported as INSTANT
+--echo #
+--error ER_ALTER_OPERATION_NOT_SUPPORTED
+ALTER TABLE t1 ADD COLUMN l INT, ALGORITHM=INSTANT;
+--error ER_ALTER_OPERATION_NOT_SUPPORTED
+ALTER TABLE t1 ALTER COLUMN i SET DEFAULT 12, DROP COLUMN j, ALGORITHM=INSTANT;
+DROP TABLE t1;
+
+--echo #
+--echo # Bug#27864226: ASSERTION `(CREATE_INFO->USED_FIELDS & (1L << 8)) == 0 ||
+--echo #
+
+CREATE TABLE t1 (a INT) ENGINE=INNODB;
+
+--echo # Verify that ALTER can have both a CONVERT clause and a
+--echo # DEFAULT CHARACTER SET clause with different charsets
+ALTER TABLE t1 CONVERT TO CHARACTER SET utf16 COLLATE utf16_turkish_ci,
+DEFAULT CHARACTER SET utf16 COLLATE utf16_slovak_ci;
+
+--echo # Verify that last default (utf16) overrides
+SHOW CREATE TABLE t1;
+
+DROP TABLE t1;
+
+--echo #  BUG#27909771 - [MYSQL 8.0 GA DEBUG BUILD] ASSERTION `(*IDX_EL_IT)->IS_PREFIX() == STATIC_CAST<B
+--echo #
+
+SET SQL_MODE='';
+CREATE TABLE t1 SELECT 100000000000000000000000000000000000000000000000000000000000000001 AS c1;
+ALTER TABLE t1 ADD INDEX (c1);
+DROP TABLE t1;
+SET SQL_MODE=default;
+
+--echo #
+--echo # BUG#26848813: INDEXED COLUMN CAN'T BE CHANGED FROM VARCHAR(15)
+--echo #               TO VARCHAR(40) INSTANTANEOUSLY
+
+SET @orig_sql_mode = @@sql_mode;
+
+--echo # Tests where an error is reported under strict mode when the index
+--echo # limit exceeds the maximum supported length by SE.
+
+--error ER_TOO_LONG_KEY
+CREATE TABLE t1 (fld1 VARCHAR(768), KEY(fld1)) CHARSET latin1 ENGINE =InnoDB
+ROW_FORMAT= COMPACT;
+
+--error ER_TOO_LONG_KEY
+CREATE TABLE t2 (fld1 VARCHAR(3073), KEY(fld1)) CHARSET latin1 ENGINE= InnoDB;
+
+--echo # Test with innodb prefix indexes where the index limit is 767 bytes
+CREATE TABLE t1 (fld1 VARCHAR(767), KEY(fld1)) CHARSET latin1 ENGINE=INNODB
+ROW_FORMAT=COMPACT;
+
+--error ER_TOO_LONG_KEY
+ALTER TABLE t1 MODIFY fld1 VARCHAR(768), ALGORITHM= INPLACE;
+
+--error ER_TOO_LONG_KEY
+ALTER TABLE t1 MODIFY fld1 VARCHAR(768), ALGORITHM= COPY;
+
+--echo # Test with innodb prefix indexes where the index limit is 3072 bytes
+CREATE TABLE t2 (fld1 VARCHAR(3072), KEY(fld1)) CHARSET latin1 ENGINE=INNODB
+ROW_FORMAT=DYNAMIC;
+
+--error ER_TOO_LONG_KEY
+ALTER TABLE t2 MODIFY fld1 VARCHAR(3073), ALGORITHM= INPLACE;
+
+--error ER_TOO_LONG_KEY
+ALTER TABLE t2 MODIFY fld1 VARCHAR(3073), ALGORITHM= COPY;
+
+DROP TABLE t1, t2;
+
+SET sql_mode= '';
+
+--enable_warnings
+
+--echo # Test where the indexes are truncated to fit the index limit and
+--echo # a warning is reported under non-strict mode when the index exceeds
+--echo # the SE limit.
+CREATE TABLE t1 (fld1 VARCHAR(768), KEY(fld1)) ENGINE= InnoDB
+ROW_FORMAT=COMPACT;
+CREATE TABLE t2 (fld1 VARCHAR(3073), KEY(fld1)) ENGINE= InnoDB;
+
+--echo # Test with innodb prefix indexes where the index limit is 767 bytes.
+CREATE TABLE t3 (fld1 VARCHAR(767), KEY(fld1))ENGINE=INNODB ROW_FORMAT=COMPACT;
+
+ALTER TABLE t3 MODIFY fld1 VARCHAR(768), ALGORITHM= INPLACE;
+
+ALTER TABLE t3 MODIFY fld1 VARCHAR(800), ALGORITHM= COPY;
+
+--echo # Test with innodb prefix indexes where the index limit is 3072 bytes.
+CREATE TABLE t4 (fld1 VARCHAR(3072), KEY(fld1))ENGINE=INNODB
+ROW_FORMAT=DYNAMIC;
+
+ALTER TABLE t4 MODIFY fld1 VARCHAR(3073), ALGORITHM= INPLACE;
+
+ALTER TABLE t4 MODIFY fld1 VARCHAR(3074), ALGORITHM= COPY;
+
+--echo # For unique and primary keys, an error is reported even in non-strict
+--echo # mode.
+
+--error ER_TOO_LONG_KEY
+CREATE TABLE t5(fld1 VARCHAR(768) PRIMARY KEY) ENGINE= InnoDB
+ROW_FORMAT=COMPACT;
+
+--error ER_TOO_LONG_KEY
+CREATE TABLE t5(fld1 VARCHAR(3073), UNIQUE KEY(fld1)) ENGINE= InnoDB;
+
+DROP TABLE t1, t2, t3, t4;
+
+SET sql_mode= @orig_sql_mode;
+
+--echo # Tests added for coverage.
+CREATE TABLE t1(fld1 VARCHAR(3), KEY(fld1)) ENGINE=MYISAM;
+
+--echo # Conversion of unpacked keys to packed keys reports
+--echo # error for INPLACE Alter.
+--error ER_ALTER_OPERATION_NOT_SUPPORTED
+ALTER TABLE t1 MODIFY fld1 VARCHAR(10), ALGORITHM=INPLACE;
+
+--echo # Succeeds with index rebuild.
+ALTER TABLE t1 MODIFY fld1 VARCHAR(10), ALGORITHM=COPY;
+
+--echo # Succeeds since the row format is dynamic.
+CREATE TABLE t2(fld1 VARCHAR(768), KEY(fld1)) ENGINE= InnoDB ROW_FORMAT= DYNAMIC;
+
+--echo # An error is reported when the index exceeds the column size
+--echo # in both strict and non-strict mode.
+--error ER_WRONG_SUB_KEY
+ALTER TABLE t2 ADD INDEX idx1(fld1(769));
+
+SET sql_mode= '';
+
+--error ER_WRONG_SUB_KEY
+ALTER TABLE t2 ADD INDEX idx1(fld1(769));
+
+--echo # Cleanup.
+DROP TABLE t1, t2;
+SET sql_mode= @orig_sql_mode;
+
+
+--echo #
+--echo # BUG#27164393: ALTER COLUMN SET DEFAULT DOES NOT RETURN ERROR
+--echo #               ON GENERATED COLUMNS
+
+
+CREATE TABLE t1(fld1 INT, fld2 INT GENERATED ALWAYS AS (-fld1) VIRTUAL,
+                fld3 INT GENERATED ALWAYS AS (-fld1) STORED); 
+
+--echo # Without patch, does not report an error.
+--error ER_WRONG_USAGE
+ALTER TABLE t1 ALTER COLUMN fld2 SET DEFAULT -1;
+
+--error ER_WRONG_USAGE
+ALTER TABLE t1 ALTER COLUMN fld3 SET DEFAULT -1;
+
+--echo # Tests added for coverage
+--error ER_WRONG_USAGE
+ALTER TABLE t1 CHANGE fld2 fld2 INT GENERATED ALWAYS AS (-fld1) DEFAULT -1;
+
+--error ER_WRONG_USAGE
+ALTER TABLE t1 MODIFY fld3 INT GENERATED ALWAYS AS (-fld1) STORED DEFAULT -1;
+
+DROP TABLE t1;
+
+
+--echo #
+--echo # BUG#27788685: NO WARNING WHEN TRUNCATING A STRING WITH DATA LOSS
+--echo #
+
+--enable_warnings
+SET GLOBAL max_allowed_packet=17825792;
+
+--connect(con1, localhost, root,,)
+CREATE TABLE t1 (t1_fld1 TEXT) ENGINE=InnoDB;
+CREATE TABLE t2 (t2_fld1 MEDIUMTEXT) ENGINE=InnoDB;
+CREATE TABLE t3 (t3_fld1 LONGTEXT) ENGINE=InnoDB;
+
+INSERT INTO t1 VALUES (REPEAT('a',300));
+INSERT INTO t2 VALUES (REPEAT('b',65680));
+INSERT INTO t3 VALUES (REPEAT('c',16777300));
+
+SELECT LENGTH(t1_fld1) FROM t1;
+SELECT LENGTH(t2_fld1) FROM t2;
+SELECT LENGTH(t3_fld1) FROM t3;
+
+--echo # With strict mode
+SET SQL_MODE='STRICT_ALL_TABLES';
+
+--error ER_DATA_TOO_LONG
+ALTER TABLE t1 CHANGE `t1_fld1` `my_t1_fld1` TINYTEXT;
+--error ER_DATA_TOO_LONG
+ALTER TABLE t2 CHANGE `t2_fld1` `my_t2_fld1` TEXT;
+--error ER_DATA_TOO_LONG
+ALTER TABLE t3 CHANGE `t3_fld1` `my_t3_fld1` MEDIUMTEXT;
+
+--echo # With non-strict mode
+SET SQL_MODE='';
+
+ALTER TABLE t1 CHANGE `t1_fld1` `my_t1_fld1` TINYTEXT;
+ALTER TABLE t2 CHANGE `t2_fld1` `my_t2_fld1` TEXT;
+ALTER TABLE t3 CHANGE `t3_fld1` `my_t3_fld1` MEDIUMTEXT;
+
+SELECT LENGTH(my_t1_fld1) FROM t1;
+SELECT LENGTH(my_t2_fld1) FROM t2;
+SELECT LENGTH(my_t3_fld1) FROM t3;
+
+# Cleanup
+--disconnect con1
+--source include/wait_until_disconnected.inc
+
+--connection default
+DROP TABLE t1, t2, t3;
+
+SET SQL_MODE=default;
+SET GLOBAL max_allowed_packet=default;
+
+
+--echo #
+--echo # Testing wl#11605: Alter table with character set conversion as
+--echo # inplace operation, Step 1, NO INDEX
+--echo #
+
+SET NAMES UTF8MB4;
+--echo # VARCHAR(512): SWE7 -> BINARY
+CREATE TABLE t1(c1 VARCHAR(512) CHARSET SWE7);
+ALTER TABLE t1 MODIFY COLUMN c1 VARCHAR(512) CHARSET BINARY,
+ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+--echo # VARCHAR(512): ASCII -> BINARY
+CREATE TABLE t1(c1 VARCHAR(512) CHARSET ASCII);
+ALTER TABLE t1 MODIFY COLUMN c1 VARCHAR(512) CHARSET BINARY,
+ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+--echo # VARCHAR(512): UTF8MB4 -> BINARY
+--echo # Not allowed because 512 binary chars cannot hold all 512 char
+--echo # utf8mb4 strings
+CREATE TABLE t1(c1 VARCHAR(512) CHARSET UTF8MB4);
+INSERT INTO t1 VALUES (CONCAT(0xc3a6, 0xc3b8, 0xc3a5));
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c1 VARCHAR(512) CHARSET BINARY,
+ALGORITHM = INPLACE;
+
+--echo # VARCHAR(512) CHARSET UTF8MB4 -> VARCHAR(2048) CHARSET BINARY:
+--echo # Converting to BINARY and increasing the VARCHAR size accordingly is ok
+ALTER TABLE t1 MODIFY COLUMN c1 VARCHAR(2048) CHARSET BINARY,
+ALGORITHM = INPLACE;
+INSERT INTO t1 VALUES (0xf0909080);
+SELECT * FROM t1;
+DROP TABLE t1;
+
+--echo # Conversions requiring COPY algorithm
+CREATE TABLE t1(c1 VARCHAR(512) CHARSET ASCII);
+INSERT INTO t1 VALUES ('a string');
+
+--echo # VARCHAR(512): ASCII -> SWE7
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c1 VARCHAR(512) CHARSET SWE7, ALGORITHM = INPLACE;
+
+--echo # VARCHAR(512): ASCII -> UCS2
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c1 VARCHAR(512) CHARSET UCS2, ALGORITHM = INPLACE;
+
+--echo # VARCHAR(512): ASCII -> UTF8MB4
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c1 VARCHAR(512) CHARSET UTF8MB4,
+ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+--echo # VARCHAR(512): UTF8MB3 -> UTF8MB4
+CREATE TABLE t1(c1 VARCHAR(512) CHARSET UTF8MB3);
+INSERT INTO t1 VALUES (CONCAT(0xc3a6, 0xc3b8, 0xc3a5, "text"));
+ALTER TABLE t1 MODIFY COLUMN c1 VARCHAR(512) CHARSET UTF8MB4,
+ALGORITHM = INPLACE;
+--echo # Insert chars that only can be represented in utf8mb4
+INSERT INTO t1 VALUES (0xf0909080);
+SELECT * FROM t1;
+DROP TABLE t1;
+
+--echo # CHAR(1): UTF8MB3 -> UTF8MB4
+CREATE TABLE t1(c1 CHAR(1) CHARSET UTF8MB3);
+INSERT INTO t1 VALUES (0xc3a6), (0xc3b8);
+ALTER TABLE t1 MODIFY COLUMN c1 CHAR(1) CHARSET UTF8MB4, ALGORITHM = INPLACE;
+SELECT * FROM t1;
+INSERT INTO t1 VALUES (0xf0909080);
+SELECT * FROM t1;
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+
+--echo # CHAR(31): UTF8MB3 -> UTF8MB4
+CREATE TABLE t1(c1 CHAR(31) CHARSET UTF8MB3);
+INSERT INTO t1 VALUES (CONCAT(0xc3a6, 0xc3b8, 0xc3a5, "text"));
+ALTER TABLE t1 MODIFY COLUMN c1 CHAR(31) CHARSET UTF8MB4, ALGORITHM = INPLACE;
+--echo # Insert chars that only can be represented in utf8mb4
+INSERT INTO t1 VALUES (0xf0909080);
+SELECT * FROM t1;
+DROP TABLE t1;
+
+--echo # Crossing the boundary of 256 bytes usage, cannot be INPLACE.
+--echo # 85*3 -> 85*4 and 64*3 -> 64*4
+CREATE TABLE t1(c1 CHAR(85) CHARSET UTF8MB3);
+INSERT INTO t1 VALUES (CONCAT(0xc3a6, 0xc3b8, 0xc3a5, "text"));
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c1 CHAR(85) CHARSET UTF8MB4, ALGORITHM = INPLACE;
+DROP TABLE t1;
+CREATE TABLE t1(c1 CHAR(64) CHARSET UTF8MB3);
+INSERT INTO t1 VALUES (CONCAT(0xc3a6, 0xc3b8, 0xc3a5, "text"));
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c1 CHAR(64) CHARSET UTF8MB4, ALGORITHM = INPLACE;
+SELECT * FROM t1;
+DROP TABLE t1;
+
+--echo # Increase in column size above 256 bytes should be inplace.
+--echo # 86*3 -> 86*4
+CREATE TABLE t1(c1 CHAR(86) CHARSET UTF8MB3);
+INSERT INTO t1 VALUES (CONCAT(0xc3a6, 0xc3b8, 0xc3a5, "text"));
+ALTER TABLE t1 MODIFY COLUMN c1 CHAR(86) CHARSET UTF8MB4, ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+--echo # Increase in column size within 256 bytes should be inplace.
+--echo # 63*3 -> 63*4
+CREATE TABLE t1(c1 CHAR(63) CHARSET UTF8MB3);
+INSERT INTO t1 VALUES (CONCAT(0xc3a6, 0xc3b8, 0xc3a5, "text"));
+ALTER TABLE t1 MODIFY COLUMN c1 CHAR(63) CHARSET UTF8MB4, ALGORITHM = INPLACE;
+INSERT INTO t1 VALUES (0xf0909080);
+SELECT * FROM t1;
+DROP TABLE t1;
+
+--echo # TINYTEXT: UTF8MB3 -> UTF8MB4
+CREATE TABLE t1(c1 TINYTEXT CHARSET UTF8MB3);
+INSERT INTO t1 VALUES (CONCAT(0xc3a6, 0xc3b8, 0xc3a5, "text"));
+ALTER TABLE t1 MODIFY COLUMN c1 TINYTEXT CHARSET UTF8MB4, ALGORITHM = INPLACE;
+--echo # Insert chars that only can be represented in utf8mb4
+INSERT INTO t1 VALUES (0xf0909080);
+SELECT * FROM t1;
+DROP TABLE t1;
+
+--echo # TEXT: UTF8MB3 -> UTF8MB4
+CREATE TABLE t1(c1 TEXT CHARSET UTF8MB3);
+INSERT INTO t1 VALUES (CONCAT(0xc3a6, 0xc3b8, 0xc3a5, "text"));
+ALTER TABLE t1 MODIFY COLUMN c1 TEXT CHARSET UTF8MB4, ALGORITHM = INPLACE;
+--echo # Insert chars that only can be represented in utf8mb4
+INSERT INTO t1 VALUES (0xf0909080);
+SELECT * FROM t1;
+DROP TABLE t1;
+
+--echo # MEDIUMTEXT: UTF8MB3 -> UTF8MB4
+CREATE TABLE t1(c1 MEDIUMTEXT CHARSET UTF8MB3);
+INSERT INTO t1 VALUES (CONCAT(0xc3a6, 0xc3b8, 0xc3a5, "text"));
+ALTER TABLE t1 MODIFY COLUMN c1 MEDIUMTEXT CHARSET UTF8MB4, ALGORITHM = INPLACE;
+--echo # Insert chars that only can be represented in utf8mb4
+INSERT INTO t1 VALUES (0xf0909080);
+SELECT * FROM t1;
+DROP TABLE t1;
+
+--echo # LONGTEXT: UTF8MB3 -> UTF8MB4
+CREATE TABLE t1(c1 LONGTEXT CHARSET UTF8MB3);
+INSERT INTO t1 VALUES (CONCAT(0xc3a6, 0xc3b8, 0xc3a5, "text"));
+ALTER TABLE t1 MODIFY COLUMN c1 LONGTEXT CHARSET UTF8MB4, ALGORITHM = INPLACE;
+--echo # Insert chars that only can be represented in utf8mb4
+INSERT INTO t1 VALUES (0xf0909080);
+SELECT * FROM t1;
+DROP TABLE t1;
+
+--echo # ENUM: UTF8MB3 -> UTF8MB4
+CREATE TABLE t1(c1 ENUM('a','b','c') CHARSET UTF8MB3);
+INSERT INTO t1 VALUES ('a');
+ALTER TABLE t1 MODIFY COLUMN c1 ENUM('a','b','c', 0xf0909080) CHARSET UTF8MB4,
+ALGORITHM = INPLACE;
+--echo # Insert chars that only can be represented in utf8mb4
+INSERT INTO t1 VALUES (0xf0909080);
+SELECT * FROM t1;
+DROP TABLE t1;
+
+
+--echo # ENUM: UTF8MB3 -> UTF8MB4: Inplace rejected, new value not at the end
+CREATE TABLE t1(c1 ENUM(0xc3a6,0xc3b8,0xc3a5) CHARSET UTF8MB3);
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c1 ENUM(0xc3a6,0xf0909080,0xc3b8,0xc3a5)
+CHARSET UTF8MB4, ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+--echo # ENUM: ASCII -> BINARY
+CREATE TABLE t1(c1 ENUM('a', 'b','c') CHARSET ASCII);
+ALTER TABLE t1 MODIFY COLUMN c1 ENUM('a','b','c') CHARSET BINARY,
+ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+--echo # ENUM: SWE7 -> BINARY
+CREATE TABLE t1(c1 ENUM('a','b','c') CHARSET SWE7);
+ALTER TABLE t1 MODIFY COLUMN c1 ENUM('a','b','c') CHARSET BINARY,
+ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+--echo # ENUM: UTF8MB3 -> BINARY
+CREATE TABLE t1(c1 ENUM('a','b','c') CHARSET UTF8MB3);
+ALTER TABLE t1 MODIFY COLUMN c1 ENUM('a','b','c') CHARSET BINARY,
+ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+--echo # ENUM: UTF8MB4 -> BINARY
+CREATE TABLE t1(c1 ENUM('a','b','c') CHARSET UTF8MB4);
+ALTER TABLE t1 MODIFY COLUMN c1 ENUM('a','b','c') CHARSET BINARY,
+ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+
+--echo # SET: UTF8MB3 -> UTF8MB4
+CREATE TABLE t1(c1 SET('b',0xc3a6,0xc3b8,0xc3a5) CHARSET UTF8MB3);
+INSERT INTO t1 VALUES (CONCAT('b,', 0xc3a6));
+ALTER TABLE t1 MODIFY COLUMN c1 SET('b',0xc3a6,0xc3b8,0xc3a5,0xf0909080)
+CHARSET UTF8MB4, ALGORITHM = INPLACE;
+--echo # Insert set value which can only be represented in utf8mb4
+INSERT INTO t1 VALUES (CONCAT('b,', 0xf0909080, ',', 0xc3b8));
+SELECT * FROM t1;
+DROP TABLE t1;
+
+--echo # SET: UTF8MB3 -> UTF8MB4: Inplace rejected, new value not at the end
+CREATE TABLE t1(c1 SET(0xc3a6,0xc3b8,0xc3a5) CHARSET UTF8MB3);
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c1 SET(0xc3a6,0xf0909080,0xc3b8,0xc3a5)
+CHARSET UTF8MB4, ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+--echo # SET: ASCII -> BINARY
+CREATE TABLE t1(c1 SET('a','b','c') CHARSET ASCII);
+ALTER TABLE t1 MODIFY COLUMN c1 SET('a','b','c') CHARSET BINARY,
+ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+--echo # SET: SWE7 -> BINARY
+CREATE TABLE t1(c1 SET('a','b','c') CHARSET SWE7);
+ALTER TABLE t1 MODIFY COLUMN c1 SET('a','b','c') CHARSET BINARY,
+ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+--echo # SET: UTF8MB3 -> BINARY
+CREATE TABLE t1(c1 SET('a','b','c') CHARSET UTF8MB3);
+ALTER TABLE t1 MODIFY COLUMN c1 SET('a','b','c') CHARSET BINARY,
+ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+--echo # SET: UTF8MB4 -> BINARY
+CREATE TABLE t1(c1 SET('a','b','c') CHARSET UTF8MB4);
+ALTER TABLE t1 MODIFY COLUMN c1 SET('a','b','c') CHARSET BINARY,
+ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+--echo # SET operations
+CREATE TABLE t1 (a SET('a1','a2'));
+INSERT INTO t1 VALUES ('a1'),('a2');
+
+--echo # No copy: Add new to the end
+ALTER TABLE t1 MODIFY COLUMN a SET('a1','a2','a3'), ALGORITHM = INPLACE;
+INSERT INTO t1 VALUES ('a2,a3');
+SELECT a FROM t1;
+
+--echo # Copy: Modify and add new to the end
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN a SET('a1','a2','xx','a5'), ALGORITHM = INPLACE;
+
+--echo # Copy: Remove from the end
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN a SET('a1','a2'), ALGORITHM = INPLACE;
+
+--echo # Copy: Add new member in the middle
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN a SET('a1','a2','a0','a3'), ALGORITHM = INPLACE;
+
+--echo # No copy: Add new to the end
+ALTER TABLE t1 MODIFY COLUMN a SET('a1','a2','a3','a4'), ALGORITHM = INPLACE;
+INSERT INTO t1 VALUES ('a3,a4');
+SELECT a FROM t1;
+
+--echo # Numerical increase (pack length), but adding to the end
+--echo # It should be possible to do this inplace, but leads to crash in
+--echo # DML on altered table.
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN a
+SET('a1','a2','a3','a4','a5','a6','a7','a8','a9','a10'), ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+
+--echo # Change charset for Instantly added column
+--echo # UTF8MB3 -> UTF8MB4
+CREATE TABLE t1(c1 int, c2 CHAR(1) CHARSET ASCII);
+INSERT INTO t1 VALUES(1,'a');
+ALTER TABLE t1 ADD COLUMN c3 VARCHAR(1) CHARSET UTF8MB3 DEFAULT 'b', ALGORITHM = INSTANT;
+SELECT * FROM t1;
+ALTER TABLE t1 MODIFY COLUMN c3 VARCHAR(1) CHARSET UTF8MB4, ALGORITHM = INPLACE;
+SELECT * FROM t1;
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+
+
+--echo # Change charset of columns used in virtual column
+--echo # UTF8MB3 -> UTF8MB4
+
+CREATE TABLE t1(c1 int,
+                c2 VARCHAR(1) CHARSET UTF8MB3,
+                c3 VARCHAR(1) CHARSET UTF8MB3,
+                c4 VARCHAR(2) GENERATED ALWAYS AS (CONCAT(c2,c3)) virtual);
+INSERT INTO t1(c1,c2,c3) VALUES(1,'a','b');
+SELECT * FROM t1;
+ALTER TABLE t1
+  MODIFY COLUMN c2 VARCHAR(1) CHARSET UTF8MB4,
+  MODIFY COLUMN c3 VARCHAR(1) CHARSET UTF8MB4, ALGORITHM = INPLACE;
+SELECT * FROM t1;
+SHOW CREATE TABLE t1;
+DROP TABLE t1;
+
+
+--echo # There are few negative scenarios
+--echo # char length cannot be changed during inplace
+CREATE TABLE t1(c CHAR(1) CHARSET ASCII);
+INSERT INTO t1 VALUES('a');
+SELECT * FROM t1;
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c CHAR(4) CHARSET BINARY, ALGORITHM = INPLACE;
+ALTER TABLE t1 MODIFY COLUMN c CHAR(1) CHARSET BINARY, ALGORITHM = INPLACE;
+SELECT * FROM t1;
+DROP TABLE t1;
+
+
+--echo # Charset cannot be changed inplace for indexed columns
+CREATE TABLE t1(c VARCHAR(1) CHARSET ASCII UNIQUE KEY);
+INSERT INTO t1 VALUES('a');
+SELECT * FROM t1;
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c VARCHAR(1) CHARSET BINARY, ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+--echo # Collation cannot be changed inplace for indexed columns even
+--echo # if the character set stays the same (see bug#30386119).
+CREATE TABLE t1(c VARCHAR(1) CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci PRIMARY KEY);
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c VARCHAR(1) CHARSET utf8mb4 COLLATE utf8mb4_0900_as_ci, ALGORITHM = INPLACE;
+--echo # Using the copy algorithm works.
+ALTER TABLE t1 MODIFY COLUMN c VARCHAR(1) CHARSET utf8mb4 COLLATE utf8mb4_0900_as_ci, ALGORITHM = COPY;
+DROP TABLE t1;
+
+--echo # Collation cannot be changed inplace for non-indexed columns if an index
+--echo # on the column is added in the same statement.
+CREATE TABLE t1(c VARCHAR(1) CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci);
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c VARCHAR(1) CHARSET utf8mb4 COLLATE utf8mb4_0900_as_ci, ADD UNIQUE INDEX(c), ALGORITHM = INPLACE;
+--echo # Using the copy algorithm works.
+ALTER TABLE t1 MODIFY COLUMN c VARCHAR(1) CHARSET utf8mb4 COLLATE utf8mb4_0900_as_ci, ADD UNIQUE INDEX(c), ALGORITHM = COPY;
+DROP TABLE t1;
+
+--echo # Add a composite index using a prefix key part.
+CREATE TABLE t1(i INT, c VARCHAR(10) CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci);
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c VARCHAR(10) CHARSET utf8mb4 COLLATE utf8mb4_0900_as_ci, ADD INDEX idx(i, c(5)), ALGORITHM = INPLACE;
+--echo # Using the copy algorithm works.
+ALTER TABLE t1 MODIFY COLUMN c VARCHAR(10) CHARSET utf8mb4 COLLATE utf8mb4_0900_as_ci, ADD INDEX idx(i, c(5)), ALGORITHM = COPY;
+DROP TABLE t1;
+
+--echo # Collation can be changed inplace for indexed columns if the index is dropped
+--echo # in the same statement.
+CREATE TABLE t1(c VARCHAR(1) CHARSET utf8mb4 COLLATE utf8mb4_0900_ai_ci, UNIQUE INDEX idx(c));
+ALTER TABLE t1 MODIFY COLUMN c VARCHAR(1) CHARSET utf8mb4 COLLATE utf8mb4_0900_as_ci, DROP INDEX idx, ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+--echo # No change (charset or otherwise) which makes
+--echo # Field::max_display_length exceed 255, can be done inplace
+CREATE TABLE t1(c VARCHAR(1) CHARSET ASCII);
+INSERT INTO t1 VALUES('a');
+SELECT * FROM t1;
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c VARCHAR(256) CHARSET BINARY, ALGORITHM = INPLACE;
+ALTER TABLE t1 MODIFY COLUMN c VARCHAR(255) CHARSET BINARY, ALGORITHM = INPLACE;
+DROP TABLE t1;
+
+
+--echo # table level charset change
+CREATE TABLE t1(c VARCHAR(1)) CHARSET ASCII;
+INSERT INTO t1 VALUES('a');
+SELECT * FROM t1;
+ALTER TABLE t1 CONVERT TO CHARSET BINARY, ALGORITHM = INPLACE;
+SELECT * FROM t1;
+DROP TABLE t1;
+
+SET NAMES default;
+
+--echo #
+--echo #  Bug #31361838 WRONG RESULT FOR COLUMN CHANGED TO CASE-SENSITIVE COLLATION AFTER ADD INDEX
+--echo #
+
+CREATE TABLE t1 (a INT,b VARCHAR(255),KEY(a))ENGINE=INNODB;
+SHOW CREATE TABLE t1;
+INSERT INTO t1 VALUES (100,'1A204A9228E5201A36122351DA1744AF');
+INSERT INTO t1 VALUES (100,'1a204a9228e5201a36122351da1744af');
+ALTER TABLE t1 MODIFY b VARCHAR(255) COLLATE UTF8MB4_BIN;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 ADD KEY(b);
+SELECT b FROM t1 USE INDEX (b) WHERE  b='1A204A9228E5201A36122351DA1744AF';
+DROP TABLE t1;
+
+CREATE TABLE t1 (a INT,b TEXT(255),KEY(a))ENGINE=INNODB;
+SHOW CREATE TABLE t1;
+INSERT INTO t1 VALUES (100,'1A204A9228E5201A36122351DA1744AF');
+INSERT INTO t1 VALUES (100,'1a204a9228e5201a36122351da1744af');
+ALTER TABLE t1 MODIFY b TEXT(255) COLLATE UTF8MB4_BIN;
+SHOW CREATE TABLE t1;
+ALTER TABLE t1 ADD KEY(b(255));
+SELECT b FROM t1 USE INDEX (b) WHERE  b='1A204A9228E5201A36122351DA1744AF';
+DROP TABLE t1;
+
+--echo #
+--echo # Bug #29501324	ADD VIRTUAL FIRST + ADD COLUMN CAUSES ASSERTION FAILURE.
+--echo #
+
+CREATE TABLE t1 (b INT);
+--echo # The below ALTER TABLE causes assertion failure without the fix.
+ALTER TABLE t1 ADD gcol INT AS (b + 1) VIRTUAL FIRST, ADD COLUMN a INT;
+DROP TABLE t1;
+
+
+--echo #
+--echo # Bug#30943642 ERROR 1846 (0A000) AT LINE 1: ALGORITHM=INPLACE IS NOT
+--echo # SUPPORTED. REASON: CANNO
+--echo #
+
+CREATE TABLE t1 (c1
+SET('1234567890123456789a','1234567890123456789b','12345678901234567890c'));
+ALTER TABLE t1 ADD c2 INT NULL AFTER c1, ALGORITHM=INPLACE;
+DROP TABLE t1;
+
+CREATE TABLE t1 (c1
+SET('1234567890123456789a','1234567890123456789b','12345678901234567890cd')
+DEFAULT NULL);
+
+--echo # Verify that it is possible to add column to table with set column
+--echo # having display width in bytes >= 256
+ALTER TABLE t1 ADD c2 INT NULL AFTER c1, ALGORITHM=INPLACE;
+DROP TABLE t1;
+
+--echo # Enums are not affected, because in order for display width in bytes
+--echo # to exceed 255 we need an invidual enum value with this this size,
+--echo # and this is not permitted.
+--error ER_TOO_LONG_SET_ENUM_VALUE
+CREATE TABLE t1 (c1 ENUM ('000', '001',
+'0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'));
+
+CREATE TABLE t1 (c1 SET ('00', '01', '02', '03', '04', '05', '06'));
+
+--echo # Verify that a SET change which requires more space still cannot be
+--echo # done inplace
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c1 SET ('00', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12', '13', '14', '15'), ALGORITHM=INPLACE;
+DROP TABLE t1;
+
+CREATE TABLE t1 (c1 ENUM ('000', '001', '002', '003'));
+
+--echo # Verify that an ENUM change which requires more space still cannot be
+--echo # done inplace
+--error ER_ALTER_OPERATION_NOT_SUPPORTED_REASON
+ALTER TABLE t1 MODIFY COLUMN c1 ENUM (
+'000', '001', '002', '003', '004', '005', '006', '007', '008', '009', '010', '011', '012', '013', '014', '015', '016', '017', '018', '019', '020', '021', '022', '023', '024', '025', '026', '027', '028', '029', '030', '031', '032', '033', '034', '035', '036', '037', '038', '039', '040', '041', '042', '043', '044', '045', '046', '047', '048', '049', '050', '051', '052', '053', '054', '055', '056', '057', '058', '059', '060', '061', '062', '063', '064', '065', '066', '067', '068', '069', '070', '071', '072', '073', '074', '075', '076', '077', '078', '079', '080', '081', '082', '083', '084', '085', '086', '087', '088', '089', '090', '091', '092', '093', '094', '095', '096', '097', '098', '099', '100', '101', '102', '103', '104', '105', '106', '107', '108', '109', '110', '111', '112', '113', '114', '115', '116', '117', '118', '119', '120', '121', '122', '123', '124', '125', '126', '127', '128', '129', '130', '131', '132', '133', '134', '135', '136', '137', '138', '139', '140', '141', '142', '143', '144', '145', '146', '147', '148', '149', '150', '151', '152', '153', '154', '155', '156', '157', '158', '159', '160', '161', '162', '163', '164', '165', '166', '167', '168', '169', '170', '171', '172', '173', '174', '175', '176', '177', '178', '179', '180', '181', '182', '183', '184', '185', '186', '187', '188', '189', '190', '191', '192', '193', '194', '195', '196', '197', '198', '199', '200', '201', '202', '203', '204', '205', '206', '207', '208', '209', '210', '211', '212', '213', '214', '215', '216', '217', '218', '219', '220', '221', '222', '223', '224', '225', '226', '227', '228', '229', '230', '231', '232', '233', '234', '235', '236', '237', '238', '239', '240', '241', '242', '243', '244', '245', '246', '247', '248', '249', '250', '251', '252', '253', '254', '255', '256'), ALGORITHM=INPLACE;
+DROP TABLE t1;
+
+--echo #
+--echo # Bug#31396191: ASSERTION `LEX->SQL_COMMAND != SQLCOM_ALTER_TABLE' FAILED
+--echo #
+
+--error ER_GENERATED_COLUMN_FUNCTION_IS_NOT_ALLOWED
+ALTER TABLE z ADD b INT AS (EXISTS((SELECT 1 UNION DISTINCT SELECT 2) LIMIT 3));
+
+
+--echo #
+--echo # Bug#31330789: "ALTER TABLE ... ADD ... DEFAULT NOW()" GENERATES WRONG
+--echo # TIME AT FIRST INSERT
+--echo # Fixed by WL#9384
+
+--echo # Set a fixed reference TIMESTAMP
+SET TIMESTAMP=1558818549;
+
+--echo # Add column with default now() to table without defaults
+CREATE TABLE t1 (i INT PRIMARY KEY, no_default DATETIME);
+ALTER TABLE t1 ADD alter_default DATETIME DEFAULT (now());
+CREATE TABLE t2(i INT, alter_date DATETIME);
+INSERT INTO t2 VALUES (0, now()), (1, now()), (2, now());
+
+--echo # Advance TIMESTAMP 5 seconds to ensure timestamps have changed
+SET TIMESTAMP=1558818554;
+
+--echo # Insert rows in t1 which should all be newer than t2.alter_time
+INSERT INTO t1 (i, no_default) VALUES (0, now()), (1, now()), (2, now());
+
+--echo # Verify
+SELECT (t1.no_default > t2.alter_date) AS no_default_newer_than_alter,
+(t1.alter_default > t2.alter_date) AS alter_default_newer_than_alter FROM t1
+NATURAL JOIN t2;
+
+DROP TABLE t2;
+DROP TABLE t1;
+
+--echo # Set a fixed reference TIMESTAMP
+SET TIMESTAMP=1558818549;
+
+--echo # Add column with default now() to table with existing column with
+--echo # default now()
+CREATE TABLE t1 (i INT, no_default DATETIME, create_default DATETIME DEFAULT (now()) );
+ALTER TABLE t1 ADD alter_default DATETIME DEFAULT (now());
+CREATE TABLE t2(i INT, alter_date DATETIME);
+INSERT INTO t2 VALUES (0, now()), (1, now()), (2, now());
+
+--echo # Advance TIMESTAMP 5 seconds to ensure timestamps have changed
+SET TIMESTAMP=1558818554;
+INSERT INTO t1 (i, no_default) VALUES (0, now()), (1, now()), (2, now());
+
+--echo # Verify
+SELECT (no_default > alter_date) AS no_default_newer_than_alter,
+(create_default > alter_date) AS create_default_newer_than_alter,
+(alter_default > alter_date) AS alter_default_newer_than_alter FROM t1 NATURAL
+JOIN t2;
+DROP TABLE t2, t1;
+SET TIMESTAMP=default;
+

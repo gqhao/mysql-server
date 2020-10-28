@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -47,6 +47,8 @@ class Tables : public Entity_object_table_impl {
  public:
   static const Tables &instance();
 
+  static const CHARSET_INFO *name_collation();
+
   enum enum_fields {
     FIELD_ID,
     FIELD_SCHEMA_ID,
@@ -81,7 +83,11 @@ class Tables : public Entity_object_table_impl {
     FIELD_VIEW_DEFINER,
     FIELD_VIEW_CLIENT_COLLATION_ID,
     FIELD_VIEW_CONNECTION_COLLATION_ID,
-    FIELD_VIEW_COLUMN_NAMES
+    FIELD_VIEW_COLUMN_NAMES,
+    FIELD_LAST_CHECKED_FOR_UPGRADE_VERSION_ID,
+    FIELD_ENGINE_ATTRIBUTE,
+    FIELD_SECONDARY_ENGINE_ATTRIBUTE,
+    NUMBER_OF_FIELDS  // Always keep this entry at the end of the enum
   };
 
   enum enum_indexes {
@@ -90,14 +96,24 @@ class Tables : public Entity_object_table_impl {
     INDEX_UK_ENGINE_SE_PRIVATE_ID,
     INDEX_K_ENGINE,
     INDEX_K_COLLATION_ID,
-    INDEX_K_TABLESPACE_ID
+    INDEX_K_TABLESPACE_ID,
+    INDEX_K_TYPE,
+    INDEX_K_VIEW_CLIENT_COLLATION_ID,
+    INDEX_K_VIEW_CONNECTION_COLLATION_ID,
+    INDEX_K_TYPE_VIEW_DEFINER
   };
 
-  enum enum_foreign_keys { FK_SCHEMA_ID, FK_COLLATION_ID, FK_TABLESPACE_ID };
+  enum enum_foreign_keys {
+    FK_SCHEMA_ID,
+    FK_COLLATION_ID,
+    FK_TABLESPACE_ID,
+    FK_VIEW_CLIENT_COLLATION_ID,
+    FK_VIEW_CONNECTION_COLLATION_ID
+  };
 
   Tables();
 
-  virtual Abstract_table *create_entity_object(const Raw_record &r) const;
+  Abstract_table *create_entity_object(const Raw_record &r) const override;
 
   static bool update_object_key(Item_name_key *key, Object_id schema_id,
                                 const String_type &table_name);
@@ -111,6 +127,15 @@ class Tables : public Entity_object_table_impl {
   static Object_key *create_key_by_schema_id(Object_id schema_id);
 
   static Object_key *create_key_by_tablespace_id(Object_id tablespace_id);
+
+  /**
+    Create a key to find all views for a given definer.
+
+    @param definer   Name of the definer.
+
+    @returns Pointer to Object_key.
+  */
+  static Object_key *create_key_by_definer(const String_type &definer);
 
   static ulonglong read_se_private_id(const Raw_record &r);
 };

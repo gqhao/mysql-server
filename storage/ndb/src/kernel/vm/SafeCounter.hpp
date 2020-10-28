@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -78,8 +78,12 @@ public:
   Uint32 getSize() const ;
   Uint32 getNoOfFree() const;
 
-  void execNODE_FAILREP(Signal*); 
+  void execNODE_FAILREP(Signal*, const NdbNodeBitmask &failed_nodes); 
   void printNODE_FAILREP(); 
+
+#ifdef ERROR_INSERT
+  void setFakeEmpty(bool val);
+#endif
 
 private:
   struct ActiveCounter { /** sizeof = 7words = 28bytes */ 
@@ -113,9 +117,15 @@ private:
   SimulatedBlock & m_block;
   ActiveCounter_pool m_counterPool;
   ActiveCounter_list m_activeCounters;
+#ifdef ERROR_INSERT
+  bool m_fakeEmpty;
+#endif
 
   BlockReference reference() const;
-  void progError(int line, int err_code, const char* extra = 0, const char* check="");
+  [[noreturn]] void progError(int line,
+                              int err_code,
+                              const char* extra = 0,
+                              const char* check="");
 };
 
 

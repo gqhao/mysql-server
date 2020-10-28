@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -23,6 +23,9 @@
 #ifndef DD__TABLE_INCLUDED
 #define DD__TABLE_INCLUDED
 
+#include "lex_string.h"     // LEX_CSTRING
+#include "mysql_version.h"  // MYSQL_VERSION_ID
+
 #include "sql/dd/sdi_fwd.h"               // Sdi_wcontext
 #include "sql/dd/types/abstract_table.h"  // dd::Abstract_table
 #include "sql/dd/types/foreign_key.h"     // IWYU pragma: keep
@@ -33,6 +36,7 @@ namespace dd {
 
 ///////////////////////////////////////////////////////////////////////////
 
+class Check_constraint;
 class Partition;
 class Table_impl;
 class Trigger;
@@ -47,6 +51,7 @@ class Table : virtual public Abstract_table {
   typedef std::vector<Foreign_key_parent *> Foreign_key_parent_collection;
   typedef Collection<Partition *> Partition_collection;
   typedef Collection<Trigger *> Trigger_collection;
+  typedef Collection<Check_constraint *> Check_constraint_collection;
 
   /*
     The type Partition_collection object 'own' the Partition* object. That
@@ -60,7 +65,7 @@ class Table : virtual public Abstract_table {
 
   // We need a set of functions to update a preallocated se private id key,
   // which requires special handling for table objects.
-  virtual bool update_aux_key(Aux_key *key) const {
+  bool update_aux_key(Aux_key *key) const override {
     return update_aux_key(key, engine(), se_private_id());
   }
 
@@ -68,7 +73,7 @@ class Table : virtual public Abstract_table {
                              Object_id se_private_id);
 
  public:
-  virtual ~Table(){};
+  ~Table() override {}
 
  public:
   enum enum_row_format {
@@ -112,6 +117,13 @@ class Table : virtual public Abstract_table {
 
  public:
   /////////////////////////////////////////////////////////////////////////
+  // is_temporary.
+  /////////////////////////////////////////////////////////////////////////
+
+  virtual bool is_temporary() const = 0;
+  virtual void set_is_temporary(bool is_temporary) = 0;
+
+  /////////////////////////////////////////////////////////////////////////
   // collation.
   /////////////////////////////////////////////////////////////////////////
 
@@ -147,15 +159,21 @@ class Table : virtual public Abstract_table {
   virtual void set_comment(const String_type &comment) = 0;
 
   /////////////////////////////////////////////////////////////////////////
+  // last_checked_for_upgrade_version_id api
+  /////////////////////////////////////////////////////////////////////////
+
+  virtual uint last_checked_for_upgrade_version_id() const = 0;
+  virtual void mark_as_checked_for_upgrade() = 0;
+
+  /////////////////////////////////////////////////////////////////////////
   // se_private_data.
   /////////////////////////////////////////////////////////////////////////
 
   virtual const Properties &se_private_data() const = 0;
 
   virtual Properties &se_private_data() = 0;
-  virtual bool set_se_private_data_raw(
-      const String_type &se_private_data_raw) = 0;
-  virtual void set_se_private_data(const Properties &se_private_data) = 0;
+  virtual bool set_se_private_data(const String_type &se_private_data_raw) = 0;
+  virtual bool set_se_private_data(const Properties &se_private_data) = 0;
 
   /////////////////////////////////////////////////////////////////////////
   // se_private_id.
@@ -163,6 +181,16 @@ class Table : virtual public Abstract_table {
 
   virtual Object_id se_private_id() const = 0;
   virtual void set_se_private_id(Object_id se_private_id) = 0;
+
+  /////////////////////////////////////////////////////////////////////////
+  // SE-specific json attributes
+  /////////////////////////////////////////////////////////////////////////
+
+  virtual LEX_CSTRING engine_attribute() const = 0;
+  virtual void set_engine_attribute(LEX_CSTRING attrs) = 0;
+
+  virtual LEX_CSTRING secondary_engine_attribute() const = 0;
+  virtual void set_secondary_engine_attribute(LEX_CSTRING attrs) = 0;
 
   /////////////////////////////////////////////////////////////////////////
   // Partition related.
@@ -293,8 +321,7 @@ class Table : virtual public Abstract_table {
   /**
     Copy all the triggers from another dd::Table object.
 
-    @param tab_obj* - Pointer to Table from which the triggers
-                      are copied.
+    @param tab_obj Pointer to Table from which the triggers are copied.
   */
 
   virtual void copy_triggers(const Table *tab_obj) = 0;
@@ -373,6 +400,16 @@ class Table : virtual public Abstract_table {
 
   virtual void drop_all_triggers() = 0;
 
+  /////////////////////////////////////////////////////////////////////////
+  // Check constraint collection.
+  /////////////////////////////////////////////////////////////////////////
+
+  virtual Check_constraint *add_check_constraint() = 0;
+
+  virtual const Check_constraint_collection &check_constraints() const = 0;
+
+  virtual Check_constraint_collection *check_constraints() = 0;
+
  public:
   /**
     Allocate a new object graph and invoke the copy contructor for
@@ -380,7 +417,7 @@ class Table : virtual public Abstract_table {
 
     @return pointer to dynamically allocated copy
   */
-  virtual Table *clone() const = 0;
+  Table *clone() const override = 0;
 
   /**
     Converts *this into json.
@@ -415,6 +452,9 @@ class Table : virtual public Abstract_table {
 
 ///////////////////////////////////////////////////////////////////////////
 
+inline bool is_checked_for_upgrade(const Table &t) {
+  return t.last_checked_for_upgrade_version_id() == MYSQL_VERSION_ID;
+}
 }  // namespace dd
 
 #endif  // DD__TABLE_INCLUDED

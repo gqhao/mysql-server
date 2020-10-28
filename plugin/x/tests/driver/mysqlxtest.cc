@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,17 +22,19 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
+#include <cstdint>
 #include <fstream>
 #include <stdexcept>
 
-#include "my_dbug.h"
-#include "my_loglevel.h"
-#include "my_sys.h"
+#include "my_dbug.h"      // NOLINT(build/include_subdir)
+#include "my_loglevel.h"  // NOLINT(build/include_subdir)
+#include "my_sys.h"       // NOLINT(build/include_subdir)
+#include "violite.h"      // NOLINT(build/include_subdir)
+
 #include "plugin/x/tests/driver/driver_command_line_options.h"
 #include "plugin/x/tests/driver/processor/stream_processor.h"
-#include "violite.h"
 
-static void ignore_traces_from_libraries(enum loglevel ll, const char *format,
+static void ignore_traces_from_libraries(enum loglevel ll, uint32_t ecode,
                                          va_list args) {}
 
 bool parse_mysql_connstring(const std::string &connstring,
@@ -110,9 +112,7 @@ int client_connect_and_process(const Driver_command_line_options &options,
                                std::istream &input) {
   Variable_container variables(options.m_variables);
   Console console(options.m_console_options);
-
   Connection_manager cm{options.m_connection_options, &variables, console};
-
   Execution_context context(options.m_context_options, &cm, &variables,
                             console);
 
@@ -121,7 +121,7 @@ int client_connect_and_process(const Driver_command_line_options &options,
 
     cm.connect_default(options.m_cap_expired_password,
                        options.m_client_interactive, options.m_run_without_auth,
-                       options.m_auth_methods);
+                       options.m_connect_attrs);
 
     std::vector<Block_processor_ptr> eaters = create_block_processors(&context);
     int result_code =
@@ -131,7 +131,14 @@ int client_connect_and_process(const Driver_command_line_options &options,
 
     return result_code;
   } catch (const xcl::XError &e) {
+    if (options.is_expected_error_set() &&
+        options.m_expected_error_code == e.error()) {
+      console.print("Application terminated with expected error: ", e.what(),
+                    " (code ", e.error(), ")\n");
+      return 0;
+    }
     console.print_error_red(context.m_script_stack, e, '\n');
+
     return 1;
   }
 }
@@ -146,7 +153,7 @@ std::istream &get_input(Driver_command_line_options *opt, std::ifstream &file,
     }
 
     file.open(opt->m_run_file.c_str());
-    file.rdbuf()->pubsetbuf(NULL, 0);
+    file.rdbuf()->pubsetbuf(nullptr, 0);
 
     if (!file.is_open()) {
       std::cerr << "ERROR: Could not open file " << opt->m_run_file << "\n";
@@ -190,7 +197,7 @@ static void daemonize() {
 
 int main(int argc, char **argv) {
   MY_INIT(argv[0]);
-  DBUG_ENTER("main");
+  DBUG_TRACE;
 
   local_message_hook = ignore_traces_from_libraries;
 
@@ -210,28 +217,27 @@ int main(int argc, char **argv) {
 #ifdef WIN32
   if (!have_tcpip) {
     std::cerr << "OS doesn't have tcpip\n";
-    DBUG_RETURN(1);
+    return 1;
   }
 #endif
 
   ssl_start();
 
-  bool result = 0;
+  bool return_code = false;
   try {
-    result = client_connect_and_process(options, input);
-    if (result == 0)
+    return_code = client_connect_and_process(options, input);
+    const bool is_ok = 0 == return_code;
+
+    if (is_ok)
       std::cerr << "ok\n";
     else
       std::cerr << "not ok\n";
-  } catch (xcl::XError &e) {
-    std::cerr << "ERROR: " << e.what() << "\n";
-    result = 1;
   } catch (std::exception &e) {
     std::cerr << "ERROR: " << e.what() << "\n";
-    result = 1;
+    return_code = true;
   }
 
   vio_end();
   my_end(0);
-  DBUG_RETURN(result);
+  return return_code;
 }

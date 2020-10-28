@@ -1,13 +1,20 @@
-/* Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; version 2 of the License.
+   it under the terms of the GNU General Public License, version 2.0,
+   as published by the Free Software Foundation.
+
+   This program is also distributed with certain software (including
+   but not limited to OpenSSL) that is licensed under separate terms,
+   as designated in a particular file or component or in included license
+   documentation.  The authors of MySQL hereby grant you an additional
+   permission to link the program and your derivative works with the
+   separately licensed software that they have included with MySQL.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
+   GNU General Public License, version 2.0, for more details.
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
@@ -31,13 +38,14 @@
 #include "fil0fil.h"
 #include "log0log.h"
 #include "log0recv.h"
-#include "que0que.h"   /* que_close() */
-#include "row0mysql.h" /* row_mysql_close() */
 #include "srv0srv.h"
 #include "srv0start.h" /* srv_is_being_started */
 #include "ut0byte.h"
 #include "ut0new.h"
 #include "ut0rnd.h"
+
+#include <mysql/components/minimal_chassis.h> /* minimal_chassis_init() */
+#include <mysql/components/service.h>         /* SERVICE_TYPE_NO_CONST */
 
 static std::map<std::string, std::vector<std::string>> log_sync_points = {
     {"log_buffer_exclussive_access",
@@ -52,7 +60,7 @@ static std::map<std::string, std::vector<std::string>> log_sync_points = {
       "log_wait_for_space_in_buf_middle"}},
 
     {"log_buffer_reserve",
-     {"log_buffer_reserve_before_sn_limit_for_end",
+     {"log_buffer_reserve_before_buf_limit_sn",
       "log_buffer_reserve_before_confirmation"}},
 
     {"log_buffer_write",
@@ -66,11 +74,10 @@ static std::map<std::string, std::vector<std::string>> log_sync_points = {
       "log_advance_ready_for_write_before_update", "log_writer_write_begin",
       "log_writer_before_write_from_log_buffer",
       "log_writer_before_copy_to_write_ahead_buffer",
+      "log_writer_before_write_new_incomplete_block",
       "log_writer_before_write_ahead", "log_writer_after_checkpoint_check",
       "log_writer_after_archiver_check", "log_writer_before_lsn_update",
-      "log_writer_before_limits_update", "log_writer_write_end",
-      "log_update_limits_middle_1", "log_update_limits_middle_2",
-      "log_update_limits_middle_3"}},
+      "log_writer_before_buf_limit_update", "log_writer_write_end"}},
 
     {"log_closer",
      {"log_advance_dpa_before_reclaim", "log_advance_dpa_before_update"}},
@@ -119,6 +126,7 @@ static bool log_test_general_init() {
   srv_log_flush_events = 64;
   srv_log_recent_written_size = 4 * 4096;
   srv_log_recent_closed_size = 4 * 4096;
+  srv_log_writer_threads = true;
   srv_log_wait_for_write_spin_delay = 0;
   srv_log_wait_for_flush_timeout = 100000;
   srv_log_write_max_size = 4096;
@@ -141,10 +149,12 @@ static bool log_test_general_init() {
   srv_n_read_io_threads = 1;
   srv_n_write_io_threads = 1;
 
-  srv_boot();
-
+  os_event_global_init();
+  sync_check_init(srv_max_n_threads);
+  recv_sys_var_init();
+  os_thread_open();
+  ut_crc32_init();
   os_create_block_cache();
-
   clone_init();
 
   const size_t max_n_pending_sync_ios = 100;
@@ -171,6 +181,8 @@ static bool log_test_general_init() {
   ut_ad(fil_validate());
   return (true);
 }
+
+extern SERVICE_TYPE_NO_CONST(registry) * srv_registry;
 
 static bool log_test_init() {
   if (!log_test_general_init()) {
@@ -247,7 +259,11 @@ static bool log_test_init() {
 
   log_start(log, 1, lsn, lsn);
 
+  /* Below function will initialize the srv_registry variable which is
+  required for the mysql_plugin_registry_acquire() */
+  minimal_chassis_init(&srv_registry, NULL);
   log_start_background_threads(log);
+  minimal_chassis_deinit(srv_registry, NULL);
 
   srv_is_being_started = false;
   return (true);
@@ -257,6 +273,7 @@ static bool log_test_recovery() {
   srv_is_being_started = true;
   recv_sys_create();
 
+  /** DBLWR directory is the current directory. */
   recv_sys_init(4 * 1024 * 1024);
 
   const bool result = log_sys_init(srv_n_log_files, srv_log_file_size,
@@ -268,12 +285,6 @@ static bool log_test_recovery() {
 
   dberr_t err = recv_recovery_from_checkpoint_start(log, LOG_START_LSN);
 
-  extern bool recv_writer_thread_active;
-
-  while (!recv_writer_thread_active) {
-    os_thread_sleep(100);
-  }
-
   srv_is_being_started = false;
 
   if (err == DB_SUCCESS) {
@@ -284,7 +295,7 @@ static bool log_test_recovery() {
     srv_shutdown_state = SRV_SHUTDOWN_FLUSH_PHASE;
 
     /* XXX: Shouldn't this be guaranteed within log0recv.cc ? */
-    while (recv_writer_thread_active) {
+    while (srv_thread_is_active(srv_threads.m_recv_writer)) {
       os_thread_sleep(100 * 1000);
     }
   }
@@ -355,7 +366,7 @@ static lsn_t write_single_mlog_test(Log_test::Key key) {
 
   log_buffer_write_completed(log, handle, handle.start_lsn, end_lsn);
 
-  log_buffer_write_completed_before_dirty_pages_added(log, handle);
+  log_wait_for_space_in_log_recent_closed(log, handle.start_lsn);
 
   Log_test::Page page;
   page.key = key;
@@ -365,7 +376,7 @@ static lsn_t write_single_mlog_test(Log_test::Key key) {
 
   log_test->add_dirty_page(page);
 
-  log_buffer_write_completed_and_dirty_pages_added(log, handle);
+  log_buffer_close(log, handle);
 
   return (end_lsn);
 }
@@ -460,7 +471,7 @@ static lsn_t write_multi_mlog_tests(Log_test::Key key, size_t n) {
   ut_a(group_end_lsn == end_lsn);
   ut_a(left_to_write == 0);
 
-  log_buffer_write_completed_before_dirty_pages_added(log, handle);
+  log_wait_for_space_in_log_recent_closed(log, handle.start_lsn);
 
   Log_test::Page page;
   page.key = key;
@@ -470,7 +481,7 @@ static lsn_t write_multi_mlog_tests(Log_test::Key key, size_t n) {
 
   log_test->add_dirty_page(page);
 
-  log_buffer_write_completed_and_dirty_pages_added(log, handle);
+  log_buffer_close(log, handle);
 
   return (group_end_lsn);
 }
@@ -480,7 +491,6 @@ static void log_test_run() {
 
   run_threads(
       [max_dirty_page_age](size_t thread_no) {
-
         static_cast<void>(max_dirty_page_age);  // clang -Wunused-lambda-capture
         log_t &log = *log_sys;
 
@@ -516,25 +526,16 @@ static void log_test_run() {
             log_write_up_to(log, end_lsn, true);
           }
         }
-
       },
       LOG_TEST_N_THREADS);
 }
 
-void dict_ind_free();
-
 static void log_test_general_close() {
-  trx_pool_close();
+  clone_free();
 
-  dict_ind_free();
+  undo_spaces_deinit();
 
   os_aio_free();
-
-  que_close();
-
-  row_mysql_close();
-
-  srv_free();
 
   fil_close_all_files();
 
@@ -544,6 +545,8 @@ static void log_test_general_close() {
 
   sync_check_close();
 
+  os_event_global_destroy();
+
   srv_shutdown_state = SRV_SHUTDOWN_NONE;
 
   free(srv_log_group_home_dir);
@@ -552,13 +555,6 @@ static void log_test_general_close() {
 
 static void log_test_close() {
   log_t &log = *log_sys;
-
-  clone_free();
-
-  /* If log_stop_background_threads did not provide this
-  guarantee then we would need to ask for flush here. */
-
-  // log_buffer_flush_to_disk(log);
 
   log_stop_background_threads(log);
 
@@ -659,46 +655,25 @@ for context switch. However that's good enough for now. */
                                         std::move(sync_point_handler));
 }
 
-static void test_combinations(const std::string &group1,
-                              const std::string &group2) {
-  for (auto pt1 : log_sync_points[group1]) {
-    for (auto pt2 : log_sync_points[group2]) {
-      log_test.reset(new Log_test);
-
-      configure_delay_for_sync_point(pt1, 20, 20);
-      configure_delay_for_sync_point(pt2, 20, 20);
-
-      execute_test();
-    }
-  }
-}
-
-static void test_random_delays(const std::vector<std::string> &groups) {
-  log_test.reset(new Log_test);
-
-  for (auto group : groups) {
-    for (auto pt : log_sync_points[group]) {
-      configure_delay_for_sync_point(pt, 0, 20);
-    }
-  }
-
-  execute_test();
-}
-
 static void test_single(const std::string &group) {
+  const uint64_t max_delay =
+      std::max(uint64_t{10}, uint64_t{500 / log_sync_points[group].size()});
+
   for (auto pt : log_sync_points[group]) {
     log_test.reset(new Log_test);
 
-    configure_delay_for_sync_point(pt, 20, 20);
+    configure_delay_for_sync_point(pt, 10, max_delay);
 
     execute_test();
   }
-}
 
-static void test_pair(const std::string &group1, const std::string &group2) {
-  test_combinations(group1, group2);
+  log_test.reset(new Log_test);
 
-  test_random_delays({group1, group2});
+  for (auto pt : log_sync_points[group]) {
+    configure_delay_for_sync_point(pt, 0, 500);
+  }
+
+  execute_test();
 }
 
 class Log_test_disturber {
@@ -821,26 +796,3 @@ TEST(log0log, log_users) { test_single("log_users"); }
 TEST(log0log, log_closer) { test_single("log_closer"); }
 
 TEST(log0log, log_checkpointer) { test_single("log_checkpointer"); }
-
-TEST(log0log, log_buffer_reserve_vs_log_writer) {
-  test_pair("log_buffer_reserve", "log_writer");
-}
-
-TEST(log0log, log_buffer_write_vs_log_writer) {
-  test_pair("log_buffer_write", "log_writer");
-}
-
-TEST(log0log, log_buffer_write_vs_checkpoints) {
-  test_combinations("log_buffer_write", "log_closer");
-  test_combinations("log_buffer_write", "log_checkpointer");
-
-  test_random_delays({"log_buffer_write", "log_closer", "log_checkpointer"});
-}
-
-TEST(log0log, log_flush_notify) {
-  test_combinations("log_users", "log_flusher");
-  test_combinations("log_flusher", "log_flush_notifier");
-  test_combinations("log_flush_notifier", "log_users");
-
-  test_random_delays({"log_users", "log_flusher", "log_flush_notifier"});
-}

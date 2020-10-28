@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2009, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -59,6 +59,8 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Properties;
+import java.util.TimeZone;
+import java.util.concurrent.TimeUnit;
 
 import junit.framework.TestCase;
 
@@ -243,7 +245,12 @@ public abstract class AbstractClusterJTest extends TestCase {
     protected void verifyException(String message, Exception ex, String exceptionPattern) {
         if(ex == null) {
             error(message + ", didn't fail.");
-        } else if(!ex.getMessage().matches(exceptionPattern)) {
+            return;
+        }
+        // Some exception messages have multiple lines.
+        // Enable single line mode in the expectedPattern regex to get a proper match.
+        exceptionPattern = "(?s)" + exceptionPattern;
+        if(!ex.getMessage().matches(exceptionPattern)) {
             error(message + ", failed with wrong exception :");
             error(ex.getMessage());
         }
@@ -270,31 +277,11 @@ public abstract class AbstractClusterJTest extends TestCase {
         }
     }
 
-    /** Get a connection with special properties. If the connection is open,
-     * close it and get a new one.
-     * 
-     */
-    protected void getConnection(Properties extraProperties) {
-        // characterEncoding = utf8 property is especially useful
-        Properties properties = new Properties(props);
-        properties.putAll(extraProperties);
-        try {
-            if (connection != null && !connection.isClosed()) {
-                connection.close();
-                connection = null;
-            }
-            if (debug) System.out.println("Getting new connection with properties " + properties);
-            connection = DriverManager.getConnection(jdbcURL, properties);
-        } catch (SQLException ex) {
-            ex.printStackTrace();
-            throw new ClusterJException("Exception getting connection to " + jdbcURL + "; username " + jdbcUsername, ex);
-        }
-    }
-
     /** Get a connection with properties from the Properties instance.
      * 
      */
     protected Connection getConnection() {
+        Properties props = modifyProperties();
         if (connection == null) {
             try {
                 Class.forName(jdbcDriverName, true, ABSTRACT_CLUSTERJ_TEST_CLASS_LOADER);
@@ -306,21 +293,6 @@ public abstract class AbstractClusterJTest extends TestCase {
             }
         }
         return connection;
-    }
-
-    /** Get a connection with properties from a file.
-     * 
-     * @param propertiesFileName the name of the properties file
-     */
-    protected void getConnection(String propertiesFileName) {
-        Properties props = getProperties(propertiesFileName);
-        String url = props.getProperty(JDBC_URL);
-        try {
-            connection = DriverManager.getConnection(url, props);
-            setAutoCommit(connection, false);
-        } catch (SQLException e) {
-            throw new RuntimeException("Could not get Connection: " + url, e);
-        }
     }
 
     /**
@@ -481,6 +453,23 @@ public abstract class AbstractClusterJTest extends TestCase {
         }
     }
 
+    /** Generate the timezone in UTC offset of format +/-HH:MM */
+    private static String getTimeZoneInUTCOffset() {
+        long now = System.currentTimeMillis();
+        long timeZoneOffset = TimeZone.getDefault().getOffset(now);
+        long offsetHours = TimeUnit.MILLISECONDS.toHours(timeZoneOffset);
+        long offsetMinutes = TimeUnit.MILLISECONDS.toMinutes(timeZoneOffset -
+                               TimeUnit.HOURS.toMillis(offsetHours));
+        // prevent cases like -02:-02
+        offsetMinutes = Math.abs(offsetMinutes);
+        String timeZoneUTCOffset = "";
+        if (timeZoneOffset >= 0) {
+            timeZoneUTCOffset += "+";
+        }
+        timeZoneUTCOffset += String.format("%02d:%02d", offsetHours, offsetMinutes);
+        return timeZoneUTCOffset;
+    }
+
     /** Load properties from clusterj.properties */
     protected void loadProperties() {
         props = getProperties(PROPS_FILE_NAME);
@@ -491,6 +480,8 @@ public abstract class AbstractClusterJTest extends TestCase {
         if (jdbcPassword == null) {
             jdbcPassword = "";
         }
+        // Set the time zone of the current session through sessionVariables
+        props.put("sessionVariables", "time_zone='" + getTimeZoneInUTCOffset() + "'");
         props.put("useSSL", "false");
         props.put("user", jdbcUsername);
         props.put("password",jdbcPassword);
@@ -591,6 +582,8 @@ System.out.println(this.getClass().getName());
         }
         session = null;
         sessionFactory = null;
+        // close the jdbc connection
+        closeConnection();
     }
 
     protected void removeAll(Class<?> cls) {

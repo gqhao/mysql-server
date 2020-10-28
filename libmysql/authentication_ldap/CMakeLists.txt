@@ -1,5 +1,5 @@
-# Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
-# 
+# Copyright (c) 2016, 2020, Oracle and/or its affiliates.
+#
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0,
 # as published by the Free Software Foundation.
@@ -24,53 +24,116 @@
 # Configuration for building LDAP SASL Authentication Plugin (client-side)
 #
 
+# The client authentication plugin is part of the community build.
+# Build it if we have found the necessary libraries.
+IF(NOT SASL_FOUND OR NOT LDAP_FOUND)
+  MESSAGE(WARNING "Skipping the LDAP client authentication plugin")
+  RETURN()
+ENDIF()
+
+IF(FREEBSD AND KERBEROS_SYSTEM_LIBRARY)
+  INCLUDE_DIRECTORIES(SYSTEM /usr/local/include)
+ENDIF()
+
+IF(FREEBSD AND SASL_INCLUDE_DIR)
+  INCLUDE_DIRECTORIES(BEFORE SYSTEM ${SASL_INCLUDE_DIR})
+ENDIF()
+
 INCLUDE(CheckIncludeFiles)
 
-IF(CMAKE_SYSTEM_NAME MATCHES "FreeBSD")
-  INCLUDE_DIRECTORIES(SYSTEM /usr/local/include)
-  LIST(APPEND CMAKE_REQUIRED_INCLUDES "/usr/local/include")
+# Several sasl_() functions are deprecated
+IF(APPLE)
+  STRING_APPEND(CMAKE_CXX_FLAGS " -Wno-deprecated-declarations")
 ENDIF()
 
-CHECK_INCLUDE_FILES(sasl/sasl.h HAVE_SASL_H)
-CHECK_INCLUDE_FILES(lber.h HAVE_LBER_H)
+DISABLE_MISSING_PROFILE_WARNING()
 
-# If cmake was invoked with -DWITH_AUTHENTICATION_LDAP=1
-# then fail if we are unable to build the LDAP plugin.
-MACRO(CROAK_AND_RETURN)
-  IF (WITH_AUTHENTICATION_LDAP)
-    MESSAGE(SEND_ERROR ${ARGV})
-  ELSE()
-    MESSAGE(STATUS ${ARGV} " Skipping the LDAP SASL client authentication plugin.")
-    RETURN()
+IF(KERBEROS_FOUND)
+  MESSAGE(STATUS
+    "Building authentication_ldap_sasl_client with Kerberos")
+  IF(KERBEROS_INCLUDE_DIR)
+    INCLUDE_DIRECTORIES(SYSTEM ${KERBEROS_INCLUDE_DIR})
   ENDIF()
-ENDMACRO()
-
-IF(HAVE_SASL_H)
-  SET(CMAKE_EXTRA_INCLUDE_FILES sasl/sasl.h)
+  SET(AUTH_LDAP_KERBEROS_CC auth_ldap_kerberos.cc)
+  # mysys is required to use my_free and my_strdup when getting
+  # Kerberos user name.
+  # Adding mysys only when build has Kerberos support
+  SET(MY_SYS "mysys")
 ELSE()
-  CROAK_AND_RETURN("Required SASL header is missing.")
-ENDIF()
-IF(HAVE_LBER_H)
-  SET(CMAKE_EXTRA_INCLUDE_FILES lber.h)
-ELSE()
-  CROAK_AND_RETURN("Required LBER header is missing.")
+  MESSAGE(STATUS
+    "Building authentication_ldap_sasl_client WITHOUT Kerberos")
 ENDIF()
 
-IF (CMAKE_SYSTEM_NAME MATCHES "SunOS")
-  FIND_LIBRARY(SASL_LIBRARY_PATH NAMES "sasl")
-ELSE ()
-  FIND_LIBRARY(SASL_LIBRARY_PATH NAMES "sasl2")
-ENDIF ()
-
-IF(NOT SASL_LIBRARY_PATH)
-  SET(SASL_LIBRARY_PATH /usr/lib64/libsasl2.so)
-ENDIF ()
-MESSAGE(STATUS "SASL_LIBRARY_PATH = ${SASL_LIBRARY_PATH}")
-
-# LDAP authentication SASL client will not build on windows, as windows don't have cyrus sasl.
-# IF someone like can build the cyrus sasl library on windows and build LDAP authentication sasl client as well.
 MYSQL_ADD_PLUGIN(authentication_ldap_sasl_client
-                 auth_ldap_sasl_client.cc log_client.cc
-                 LINK_LIBRARIES ${SASL_LIBRARY_PATH}
-                 CLIENT_ONLY MODULE_ONLY
-                 MODULE_OUTPUT_NAME "authentication_ldap_sasl_client")
+  auth_ldap_sasl_client.cc
+  auth_ldap_sasl_mechanism.cc
+  ${AUTH_LDAP_KERBEROS_CC}
+  log_client.cc
+  LINK_LIBRARIES
+  ${SASL_LIBRARY}
+  # Uncomment to verify that all symbols are found.
+  # ${LINK_FLAG_NO_UNDEFINED}
+  ${KERBEROS_LIBRARIES}
+  ${SSL_LIBRARIES}
+  ${LIBDL}
+  ${MY_SYS}
+  CLIENT_ONLY
+  MODULE_ONLY
+  MODULE_OUTPUT_NAME "authentication_ldap_sasl_client")
+
+# MYSQL_ADD_PLUGIN may have decided not to build it.
+IF(NOT TARGET authentication_ldap_sasl_client)
+  RETURN()
+ENDIF()
+
+IF(KERBEROS_FOUND)
+  SET(PLUGIN_VERSION_FILE
+    ${CMAKE_CURRENT_SOURCE_DIR}/authentication_ldap_sasl_client.ver)
+  # Hide all symbols in mysys, to avoid ODR violations.
+  # There is *one* visible symbol: _mysql_client_plugin_declaration_
+  MY_TARGET_LINK_OPTIONS(authentication_ldap_sasl_client
+    "LINKER:--version-script=${PLUGIN_VERSION_FILE}"
+    )
+ENDIF()
+
+IF(LINUX_STANDALONE AND SASL_CUSTOM_LIBRARY)
+  TARGET_COMPILE_DEFINITIONS(authentication_ldap_sasl_client
+    PRIVATE SASL_CUSTOM_LIBRARY)
+  ADD_DEPENDENCIES(authentication_ldap_sasl_client ${sasl_target})
+ENDIF()
+
+IF(LINUX_STANDALONE AND KERBEROS_CUSTOM_LIBRARY)
+  ADD_DEPENDENCIES(authentication_ldap_sasl_client ${kerberos_target})
+ENDIF()
+
+IF(WIN32)
+  GET_FILENAME_COMPONENT(SASL_DLL_NAME ${SASL_LIBRARY_DLL} NAME)
+  GET_FILENAME_COMPONENT(SASL_SCRAM_PLUGIN_NAME "${SASL_SCRAM_PLUGIN}" NAME)
+
+  MESSAGE(STATUS "SASL_INCLUDE_DIR  = ${SASL_INCLUDE_DIR}")
+  MESSAGE(STATUS "SASL_LIBRARY_DLL  = ${SASL_LIBRARY_DLL}")
+  MESSAGE(STATUS "SASL_SCRAM_PLUGIN = ${SASL_SCRAM_PLUGIN}")
+
+  # Note that "libsasl.dll" and "saslSCRAM.dll" go into the "bin" directory
+  # where "mysql.exe" and other client executables are located.
+  INSTALL(FILES "${SASL_LIBRARY_DLL}"
+          DESTINATION ${INSTALL_BINDIR}
+          COMPONENT SharedLibraries)
+  INSTALL(FILES "${SASL_SCRAM_PLUGIN}"
+          DESTINATION ${INSTALL_BINDIR}
+          COMPONENT SharedLibraries)
+
+  # To run client executables that load the plug-in from the build tree we need
+  # to copy the SASL library DLL and SASL SCRAM library DLL to the same
+  # directory as the client executables.
+  ADD_CUSTOM_COMMAND(TARGET authentication_ldap_sasl_client POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${SASL_LIBRARY_DLL}"
+      "${CMAKE_BINARY_DIR}/runtime_output_directory/${CMAKE_CFG_INTDIR}/${SASL_DLL_NAME}"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${SASL_SCRAM_PLUGIN}"
+      "${CMAKE_BINARY_DIR}/runtime_output_directory/${CMAKE_CFG_INTDIR}/${SASL_SCRAM_PLUGIN_NAME}"
+  )
+  ADD_DEPENDENCIES(authentication_ldap_sasl_client mysqltest)
+
+ENDIF()

@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -129,7 +129,13 @@ extern EventLogger * g_eventLogger;
 
 const
 ParserRow<MgmApiSession> commands[] = {
-  MGM_CMD("get config", &MgmApiSession::getConfig, ""),
+  MGM_CMD("get config", &MgmApiSession::getConfig_v1, ""),
+    MGM_ARG("version", Int, Mandatory, "Configuration version number"),
+    MGM_ARG("node", Int, Optional, "Node ID"),
+    MGM_ARG("nodetype", Int, Optional, "Type of requesting node"),
+    MGM_ARG("from_node", Int, Optional, "Node to get config from"),
+
+  MGM_CMD("get config_v2", &MgmApiSession::getConfig_v2, ""),
     MGM_ARG("version", Int, Mandatory, "Configuration version number"),
     MGM_ARG("node", Int, Optional, "Node ID"),
     MGM_ARG("nodetype", Int, Optional, "Type of requesting node"),
@@ -149,6 +155,11 @@ ParserRow<MgmApiSession> commands[] = {
     MGM_ARG("log_event", Int, Optional, "Log failure in cluster log"),
 
   MGM_CMD("get version", &MgmApiSession::getVersion, ""),
+
+  MGM_CMD("set clientversion", &MgmApiSession::setClientVersion, ""),
+    MGM_ARG("major", Int, Mandatory, "Client major version"),
+    MGM_ARG("minor", Int, Mandatory, "Client minor version"),
+    MGM_ARG("build", Int, Mandatory, "Client build version"),
 
   MGM_CMD("get status", &MgmApiSession::getStatus, ""),
     MGM_ARG("types", String, Optional, "Types"), 
@@ -203,6 +214,10 @@ ParserRow<MgmApiSession> commands[] = {
     MGM_ARG("completed", Int, Optional ,"Wait until completed"),
     MGM_ARG("backupid", Int, Optional ,"User input backup id"),
     MGM_ARG("backuppoint", Int, Optional ,"backup snapshot at start time or complete time"),
+    MGM_ARG("encryption_password", LongString, Optional,
+            "Encryption password to encrypt the backup files"),
+    MGM_ARG("password_length", Int, Optional,
+            "Length of encryption password in bytes"),
 
   MGM_CMD("abort backup", &MgmApiSession::abortBackup, ""),
     MGM_ARG("id", Int, Mandatory, "Backup id"),
@@ -291,7 +306,12 @@ ParserRow<MgmApiSession> commands[] = {
   MGM_CMD("get session", &MgmApiSession::getSession, ""),
     MGM_ARG("id", Int, Mandatory, "SessionID"),
 
-  MGM_CMD("set config", &MgmApiSession::setConfig, ""),
+  MGM_CMD("set config", &MgmApiSession::setConfig_v1, ""),
+    MGM_ARG("Content-Length", Int, Mandatory, "Length of config"),
+    MGM_ARG("Content-Type", String, Mandatory, "Type of config"),
+    MGM_ARG("Content-Transfer-Encoding", String, Mandatory, "encoding"),
+
+  MGM_CMD("set config_v2", &MgmApiSession::setConfig_v2, ""),
     MGM_ARG("Content-Length", Int, Mandatory, "Length of config"),
     MGM_ARG("Content-Type", String, Mandatory, "Type of config"),
     MGM_ARG("Content-Transfer-Encoding", String, Mandatory, "encoding"),
@@ -342,17 +362,22 @@ MgmApiSession::MgmApiSession(class MgmtSrvr & mgm, NDB_SOCKET_TYPE sock, Uint64 
   m_ctx= NULL;
   m_mutex= NdbMutex_Create();
   m_errorInsert= 0;
+  m_vMajor = m_vMinor = m_vBuild = 0;
 
-  struct sockaddr_in addr;
+  struct sockaddr_in6 addr;
   ndb_socket_len_t addrlen= sizeof(addr);
   if (ndb_getpeername(sock, (struct sockaddr*)&addr, &addrlen) == 0)
   {
     char addr_buf[NDB_ADDR_STRLEN];
-    char *addr_str = Ndb_inet_ntop(AF_INET,
-                                   static_cast<void*>(&addr.sin_addr),
+    char *addr_str = Ndb_inet_ntop(AF_INET6,
+                                   static_cast<void*>(&addr.sin6_addr),
                                    addr_buf,
                                    sizeof(addr_buf));
-    m_name.assfmt("%s:%d", addr_str, ntohs(addr.sin_port));
+    char buf[512];
+    char *sockaddr_string = Ndb_combine_address_port(buf, sizeof(buf),
+                                                     addr_str,
+                                                     ntohs(addr.sin6_port));
+    m_name.assfmt("%s", sockaddr_string);
   }
   DBUG_PRINT("info", ("new connection from: %s", m_name.c_str()));
 
@@ -529,7 +554,7 @@ MgmApiSession::get_nodeid(Parser_t::Context &,
     return;
   }
 
-  struct sockaddr_in addr;
+  struct sockaddr_in6 addr;
   {
     ndb_socket_len_t addrlen= sizeof(addr);
     int r = ndb_getpeername(m_socket, (struct sockaddr*)&addr, &addrlen);
@@ -553,7 +578,7 @@ MgmApiSession::get_nodeid(Parser_t::Context &,
 
   NodeId tmp= nodeid;
   BaseString error_string;
-  int error_code;
+  int error_code = 0;
   if (!m_mgmsrv.alloc_node_id(tmp,
                               (ndb_mgm_node_type)nodetype,
                               (struct sockaddr*)&addr,
@@ -580,16 +605,31 @@ MgmApiSession::get_nodeid(Parser_t::Context &,
 }
 
 void
+MgmApiSession::getConfig_v1(Parser_t::Context &ctx,
+                            const class Properties &args)
+{
+  getConfig(ctx, args, false);
+}
+void
+MgmApiSession::getConfig_v2(Parser_t::Context &ctx,
+                            const class Properties &args)
+{
+  getConfig(ctx, args, true);
+}
+
+void
 MgmApiSession::getConfig(Parser_t::Context &,
-                         const class Properties &args)
+                         const class Properties &args,
+                         bool v2)
 {
   Uint32 nodetype = NDB_MGM_NODE_TYPE_UNKNOWN;
   Uint32 from_node = 0;
+  Uint32 node_id = 0;
 
   // Ignoring mandatory parameter "version"
-  // Ignoring optional parameter "node"
   args.get("nodetype", &nodetype);
   args.get("from_node", &from_node);
+  args.get("node", &node_id);
 
   SLEEP_ERROR_INSERTED(1);
   m_output->println("get config reply");
@@ -600,9 +640,14 @@ MgmApiSession::getConfig(Parser_t::Context &,
 
   bool success = (from_node > 0) ?
                  m_mgmsrv.get_packed_config_from_node(from_node,
-                                                      pack64, error) :
+                                                      pack64,
+                                                      error,
+                                                      v2) :
                  m_mgmsrv.get_packed_config((ndb_mgm_node_type)nodetype,
-                                            pack64, error);
+                                            pack64,
+                                            error,
+                                            v2,
+                                            node_id);
 
   if (!success)
   {
@@ -698,6 +743,28 @@ MgmApiSession::getVersion(Parser<MgmApiSession>::Context &,
 }
 
 void
+MgmApiSession::setClientVersion(Parser<MgmApiSession>::Context &,
+                                Properties const& args)
+{
+  DBUG_ENTER("MgmApiSession::setClientVersion");
+
+  args.get("major", &m_vMajor);
+  args.get("minor", &m_vMinor);
+  args.get("build", &m_vBuild);
+
+  fprintf(stderr, "MGMD set client %p version to %u.%u.%u \n",
+          this,
+          m_vMajor,
+          m_vMinor,
+          m_vBuild);
+
+  m_output->println("set clientversion reply");
+  m_output->println("result: Ok");
+  m_output->println("%s", "");
+  DBUG_VOID_RETURN;
+}
+
+void
 MgmApiSession::startBackup(Parser<MgmApiSession>::Context &,
 			   Properties const &args) {
   DBUG_ENTER("MgmApiSession::startBackup");
@@ -705,6 +772,8 @@ MgmApiSession::startBackup(Parser<MgmApiSession>::Context &,
   unsigned input_backupId= 0;
   unsigned backuppoint= 0;
   Uint32 completed= 2;
+  const char* encryption_password = nullptr;
+  Uint32 password_length = 0;
   int result;
 
   args.get("completed", &completed);
@@ -713,8 +782,15 @@ MgmApiSession::startBackup(Parser<MgmApiSession>::Context &,
     args.get("backupid", &input_backupId);
   if(args.contains("backuppoint"))
     args.get("backuppoint", &backuppoint);
-
-  result = m_mgmsrv.startBackup(backupId, completed, input_backupId, backuppoint);
+  if (args.contains("encryption_password"))
+  {
+    args.get("encryption_password", &encryption_password);
+    assert(args.contains("password_length"));
+    args.get("password_length", &password_length);
+  }
+  result = m_mgmsrv.startBackup(backupId, completed, input_backupId,
+                                backuppoint, encryption_password,
+                                password_length);
 
   m_output->println("start backup reply");
   if(result != 0)
@@ -1007,7 +1083,8 @@ MgmApiSession::restartAll(Parser<MgmApiSession>::Context &,
 static void
 printNodeStatus(OutputStream *output,
 		MgmtSrvr &mgmsrv,
-		enum ndb_mgm_node_type type) {
+		enum ndb_mgm_node_type type,
+                bool include_single_user_state) {
   NodeId nodeId = 0;
   while(mgmsrv.getNextNodeId(&nodeId, type)) {
     enum ndb_mgm_node_status status;
@@ -1017,6 +1094,7 @@ printNodeStatus(OutputStream *output,
       nodeGroup = 0,
       connectCount = 0;
     bool system;
+    bool is_single_user = false;
     const char *address= NULL;
     char addr_buf[NDB_ADDR_STRLEN];
 
@@ -1024,7 +1102,7 @@ printNodeStatus(OutputStream *output,
 		  &system, &dynamicId, &nodeGroup, &connectCount,
 		  &address,
                   addr_buf,
-                  sizeof(addr_buf));
+                  sizeof(addr_buf), &is_single_user);
     output->println("node.%d.type: %s",
 		      nodeId,
 		      ndb_mgm_get_node_type_string(type));
@@ -1038,6 +1116,10 @@ printNodeStatus(OutputStream *output,
     output->println("node.%d.node_group: %d", nodeId, nodeGroup);
     output->println("node.%d.connect_count: %d", nodeId, connectCount);
     output->println("node.%d.address: %s", nodeId, address ? address : "");
+    if (include_single_user_state)
+    {
+      output->println("node.%d.is_single_user: %d", nodeId, is_single_user);
+    }
   }
 }
 
@@ -1047,6 +1129,23 @@ MgmApiSession::getStatus(Parser<MgmApiSession>::Context &,
   Uint32 i;
   int noOfNodes = 0;
   BaseString typestring;
+  bool include_single_user_state = false;
+
+  /**
+   * Check whether MGMAPI client version info is known
+   * and whether it understands the single user mode info
+   */
+  if (m_vMajor != 0)
+  {
+    if (NDB_MAKE_VERSION(m_vMajor,
+                         m_vMinor,
+                         m_vBuild) >=
+        NDB_MAKE_VERSION(8, 0, 22))
+    {
+      /* Support single user mode info in client */
+      include_single_user_state = true;
+    }
+  }
 
   enum ndb_mgm_node_type types[10];
   if (args.get("types", typestring))
@@ -1081,7 +1180,7 @@ MgmApiSession::getStatus(Parser<MgmApiSession>::Context &,
   for (i = 0; types[i] != NDB_MGM_NODE_TYPE_UNKNOWN; i++)
   {
     SLEEP_ERROR_INSERTED(int(7+i));
-    printNodeStatus(m_output, m_mgmsrv, types[i]);
+    printNodeStatus(m_output, m_mgmsrv, types[i], include_single_user_state);
   }
   m_output->println("%s", "");
 }
@@ -1849,7 +1948,7 @@ MgmApiSession::report_event(Parser_t::Context &ctx,
     sscanf(item[i].c_str(), "%u", data+i);
   }
 
-  m_mgmsrv.eventReport(data, length);
+  m_mgmsrv.eventReport(data, length, data);
   m_output->println("report event reply");
   m_output->println("result: ok");
   m_output->println("%s", "");
@@ -2072,7 +2171,18 @@ clear_dynamic_ports_from_config(Config* config)
 }
 
 
-void MgmApiSession::setConfig(Parser_t::Context &ctx, Properties const &args)
+void MgmApiSession::setConfig_v1(Parser_t::Context &ctx, Properties const &args)
+{
+  setConfig(ctx, args, false);
+}
+
+void MgmApiSession::setConfig_v2(Parser_t::Context &ctx, Properties const &args)
+{
+  setConfig(ctx, args, true);
+}
+void MgmApiSession::setConfig(Parser_t::Context &ctx,
+                              Properties const &args,
+                              bool v2)
 {
   BaseString result("Ok");
   Uint32 len64 = 0;
@@ -2122,16 +2232,19 @@ void MgmApiSession::setConfig(Parser_t::Context &ctx, Properties const &args)
 
     if (decoded_len == -1)
     {
-      result.assfmt("Failed to unpack config");
+      result.assfmt("Failed to decode config");
       delete[] decoded;
       goto done;
     }
 
     ConfigValuesFactory cvf;
-    if(!cvf.unpack(decoded, decoded_len))
+    bool ret = v2 ?
+      cvf.unpack_v2((const Uint32*)decoded, decoded_len) :
+      cvf.unpack_v1((const Uint32*)decoded, decoded_len);
+    if (!ret)
     {
       delete[] decoded;
-      result.assfmt("Failed to unpack config");
+      result.assfmt("Failed to unpack config, error: %u", cvf.get_error_code());
       goto done;
     }
     delete[] decoded;

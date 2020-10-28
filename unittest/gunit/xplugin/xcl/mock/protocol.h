@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,14 +22,15 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-#ifndef XPLUGIN_XCL_MOCK_PROTOCOL_H_
-#define XPLUGIN_XCL_MOCK_PROTOCOL_H_
+#ifndef UNITTEST_GUNIT_XPLUGIN_XCL_MOCK_PROTOCOL_H_
+#define UNITTEST_GUNIT_XPLUGIN_XCL_MOCK_PROTOCOL_H_
 
 #include <gmock/gmock.h>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "plugin/x/client/mysqlxclient/xprotocol.h"
 
@@ -59,6 +60,12 @@ class Mock_protocol : public XProtocol {
                          XError *out_error));
   MOCK_METHOD2(recv_single_message_raw,
                Message *(Server_message_type_id *out_mid, XError *out_error));
+
+  MOCK_METHOD2(send_compressed_frame,
+               XError(const Client_message_type_id mid, const Message &msg));
+  MOCK_METHOD1(send_compressed_multiple_frames,
+               XError(const std::vector<std::pair<Client_message_type_id,
+                                                  const Message *>> &messages));
   MOCK_METHOD2(send,
                XError(const Client_message_type_id mid, const Message &msg));
   MOCK_METHOD3(send, XError(const Header_message_type_id mid,
@@ -80,6 +87,12 @@ class Mock_protocol : public XProtocol {
   MOCK_METHOD1(send, XError(const Mysqlx::Connection::CapabilitiesGet &m));
   MOCK_METHOD1(send, XError(const Mysqlx::Connection::CapabilitiesSet &m));
   MOCK_METHOD1(send, XError(const Mysqlx::Connection::Close &m));
+  MOCK_METHOD1(send, XError(const Mysqlx::Cursor::Open &m));
+  MOCK_METHOD1(send, XError(const Mysqlx::Cursor::Close &m));
+  MOCK_METHOD1(send, XError(const Mysqlx::Cursor::Fetch &m));
+  MOCK_METHOD1(send, XError(const Mysqlx::Prepare::Prepare &m));
+  MOCK_METHOD1(send, XError(const Mysqlx::Prepare::Execute &m));
+  MOCK_METHOD1(send, XError(const Mysqlx::Prepare::Deallocate &m));
   MOCK_METHOD0(recv_ok, XError());
   MOCK_METHOD0(execute_close, XError());
   MOCK_METHOD1(execute_fetch_capabilities_raw,
@@ -108,6 +121,20 @@ class Mock_protocol : public XProtocol {
   MOCK_METHOD2(execute_delete_raw,
                XQuery_result *(const Mysqlx::Crud::Delete &m,
                                XError *out_error));
+  MOCK_METHOD2(execute_prep_stmt_raw,
+               XQuery_result *(const Mysqlx::Prepare::Execute &m,
+                               XError *out_error));
+  MOCK_METHOD2(execute_cursor_open_raw,
+               XQuery_result *(const Mysqlx::Cursor::Open &m,
+                               XError *out_error));
+  MOCK_METHOD3(execute_cursor_fetch_raw,
+               XQuery_result *(const Mysqlx::Cursor::Fetch &m,
+                               std::unique_ptr<XQuery_result> &cursor_open_res,
+                               XError *out_error));
+
+  MOCK_METHOD1(use_compression, void(const Compression_algorithm algo));
+  MOCK_METHOD2(use_compression,
+               void(const Compression_algorithm algo, const int32_t level));
 
  private:
   using XQuery_result_ptr = std::unique_ptr<XQuery_result>;
@@ -155,6 +182,18 @@ class Mock_protocol : public XProtocol {
     return XQuery_result_ptr(execute_find_raw(m, out_error));
   }
 
+  XQuery_result_ptr execute_cursor_open(const Mysqlx::Cursor::Open &m,
+                                        XError *out_error) override {
+    return XQuery_result_ptr(execute_cursor_open_raw(m, out_error));
+  }
+
+  XQuery_result_ptr execute_cursor_fetch(const Mysqlx::Cursor::Fetch &m,
+                                         XQuery_result_ptr cursor_open_result,
+                                         XError *out_error) override {
+    return XQuery_result_ptr(
+        execute_cursor_fetch_raw(m, cursor_open_result, out_error));
+  }
+
   XQuery_result_ptr execute_update(const Mysqlx::Crud::Update &m,
                                    XError *out_error) override {
     return XQuery_result_ptr(execute_update_raw(m, out_error));
@@ -169,9 +208,14 @@ class Mock_protocol : public XProtocol {
                                    XError *out_error) override {
     return XQuery_result_ptr(execute_delete_raw(m, out_error));
   }
+
+  XQuery_result_ptr execute_prep_stmt(const Mysqlx::Prepare::Execute &m,
+                                      XError *out_error) override {
+    return XQuery_result_ptr(execute_prep_stmt_raw(m, out_error));
+  }
 };
 
 }  // namespace test
 }  // namespace xcl
 
-#endif  // XPLUGIN_XCL_MOCK_PROTOCOL_H_
+#endif  // UNITTEST_GUNIT_XPLUGIN_XCL_MOCK_PROTOCOL_H_

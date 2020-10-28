@@ -15,8 +15,6 @@
 #                                                                             #
 ###############################################################################
 
---source include/have_ssl.inc
---source include/have_openssl.inc
 --source include/mysql_upgrade_preparation.inc
 
 # This test will intentionally generate errors in the server error log
@@ -474,20 +472,6 @@ connect(con107,localhost,Tanjotuser1,"&",,);
 connect(con108,127.0.0.1,Tanjotuser2,"&",,);
 --enable_query_log
 
-
-# Below section is hashed till the bug16040690 is fixed.
-
-#--error ER_SERVER_IS_IN_SECURE_AUTH_MODE
-#connect(con113,localhost,Tanjotuser1,"abc ",,);
-#--error ER_SERVER_IS_IN_SECURE_AUTH_MODE
-#connect(con114,127.0.0.1,Tanjotuser2,"abc ",,);
-
-#--error ER_SERVER_IS_IN_SECURE_AUTH_MODE
-#connect(con115,localhost,Tanjotuser1," abc",,);
-#--error ER_SERVER_IS_IN_SECURE_AUTH_MODE
-#connect(con116,127.0.0.1,Tanjotuser2," abc",,);
-
-
 --replace_result $MASTER_MYSOCK MASTER_MYSOCK
 --replace_result "NO" "" "YES" ""
 --disable_query_log
@@ -700,3 +684,7 @@ connection default;
 
 DROP USER 'Tanjotuser1'@'localhost';
 DROP USER 'Tanjotuser2'@'127.0.0.1';
+
+# Restore default settings in opt file and clean up
+--let $restart_parameters = restart:
+--source include/restart_mysqld.inc

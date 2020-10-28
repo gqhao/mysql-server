@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -52,10 +52,10 @@
   memory expects it. Otherwise these functions will try to use the memory,
   leading to segfaults if memory allocation was not successful.
 
-  @note This allocator cannot be used for std::basic_string before GCC 5
-  because of this libstdc++ bug:
-  http://gcc.gnu.org/bugzilla/show_bug.cgi?id=56437
-  "basic_string assumes that allocators are default-constructible"
+  @note This allocator cannot be used for std::basic_string with RHEL 6/7
+  because of this bug:
+  https://bugzilla.redhat.com/show_bug.cgi?id=1546704
+  "Define _GLIBCXX_USE_CXX11_ABI gets ignored by gcc in devtoolset-7"
 */
 
 template <class T = void *>
@@ -89,15 +89,14 @@ class Malloc_allocator {
     DBUG_ASSERT(m_key == other.psi_key());  // Don't swap key.
   }
 
-  ~Malloc_allocator() {}
-
-  pointer allocate(size_type n, const_pointer hint MY_ATTRIBUTE((unused)) = 0) {
-    if (n == 0) return NULL;
+  pointer allocate(size_type n,
+                   const_pointer hint MY_ATTRIBUTE((unused)) = nullptr) {
+    if (n == 0) return nullptr;
     if (n > max_size()) throw std::bad_alloc();
 
     pointer p = static_cast<pointer>(
         my_malloc(m_key, n * sizeof(T), MYF(MY_WME | ME_FATALERROR)));
-    if (p == NULL) throw std::bad_alloc();
+    if (p == nullptr) throw std::bad_alloc();
     return p;
   }
 
@@ -105,7 +104,7 @@ class Malloc_allocator {
 
   template <class U, class... Args>
   void construct(U *p, Args &&... args) {
-    DBUG_ASSERT(p != NULL);
+    DBUG_ASSERT(p != nullptr);
     try {
       ::new ((void *)p) U(std::forward<Args>(args)...);
     } catch (...) {
@@ -114,7 +113,7 @@ class Malloc_allocator {
   }
 
   void destroy(pointer p) {
-    DBUG_ASSERT(p != NULL);
+    DBUG_ASSERT(p != nullptr);
     try {
       p->~T();
     } catch (...) {

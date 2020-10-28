@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2005, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -28,8 +28,8 @@
 #include <utility>
 
 #include "base64.h"  // base64_needed_decoded_length
-#include "binlog_event.h"
 #include "lex_string.h"
+#include "libbinlogevents/include/binlog_event.h"
 #include "m_string.h"
 #include "my_byteorder.h"
 #include "my_dbug.h"
@@ -39,6 +39,7 @@
 #include "mysqld_error.h"
 #include "sql/auth/auth_acls.h"
 #include "sql/auth/sql_security_ctx.h"
+#include "sql/binlog_reader.h"
 #include "sql/log_event.h"  // Format_description_log_event
 #include "sql/psi_memory_key.h"
 #include "sql/rpl_info_factory.h"  // Rpl_info_factory
@@ -63,8 +64,13 @@ static int check_event_type(int type, Relay_log_info *rli) {
         We need a preliminary FD event in order to parse the FD event,
         if we don't already have one.
       */
-      if (!fd_event)
-        rli->set_rli_description_event(new Format_description_log_event());
+      if (!fd_event) {
+        fd_event = new Format_description_log_event();
+        if (rli->set_rli_description_event(fd_event)) {
+          delete fd_event;
+          return 1;
+        }
+      }
 
       /* It is always allowed to execute FD events. */
       return 0;
@@ -120,7 +126,7 @@ static int check_event_type(int type, Relay_log_info *rli) {
 */
 
 void mysql_client_binlog_statement(THD *thd) {
-  DBUG_ENTER("mysql_client_binlog_statement");
+  DBUG_TRACE;
   DBUG_PRINT("info", ("binlog base64: '%*s'",
                       (int)(thd->lex->binlog_stmt_arg.length < 2048
                                 ? thd->lex->binlog_stmt_arg.length
@@ -129,15 +135,17 @@ void mysql_client_binlog_statement(THD *thd) {
 
   Security_context *sctx = thd->security_context();
   if (!(sctx->check_access(SUPER_ACL) ||
-        sctx->has_global_grant(STRING_WITH_LEN("BINLOG_ADMIN")).first)) {
-    my_error(ER_SPECIFIC_ACCESS_DENIED_ERROR, MYF(0), "SUPER or BINLOG_ADMIN");
-    DBUG_VOID_RETURN;
+        sctx->has_global_grant(STRING_WITH_LEN("BINLOG_ADMIN")).first ||
+        sctx->has_global_grant(STRING_WITH_LEN("REPLICATION_APPLIER")).first)) {
+    my_error(ER_SPECIFIC_ACCESS_DENIED_ERROR, MYF(0),
+             "SUPER, BINLOG_ADMIN or REPLICATION_APPLIER");
+    return;
   }
 
   size_t coded_len = thd->lex->binlog_stmt_arg.length;
   if (!coded_len) {
     my_error(ER_SYNTAX_ERROR, MYF(0));
-    DBUG_VOID_RETURN;
+    return;
   }
   size_t decoded_len = base64_needed_decoded_length(coded_len);
 
@@ -169,10 +177,10 @@ void mysql_client_binlog_statement(THD *thd) {
     }
   }
 
-  const char *error = 0;
+  const char *error = nullptr;
   char *buf = (char *)my_malloc(key_memory_binlog_statement_buffer, decoded_len,
                                 MYF(MY_WME));
-  Log_event *ev = 0;
+  Log_event *ev = nullptr;
 
   /*
     Out of memory check
@@ -187,12 +195,13 @@ void mysql_client_binlog_statement(THD *thd) {
   for (char const *strptr = thd->lex->binlog_stmt_arg.str;
        strptr <
        thd->lex->binlog_stmt_arg.str + thd->lex->binlog_stmt_arg.length;) {
-    char const *endptr = 0;
+    char const *endptr = nullptr;
     int64 bytes_decoded = base64_decode(strptr, coded_len, buf, &endptr,
                                         MY_BASE64_DECODE_ALLOW_MULTIPLE_CHUNKS);
 
-    DBUG_PRINT("info", ("bytes_decoded: %lld  strptr: %p  endptr: %p ('%c':%d)",
-                        bytes_decoded, strptr, endptr, *endptr, *endptr));
+    DBUG_PRINT("info",
+               ("bytes_decoded: %" PRId64 "  strptr: %p  endptr: %p ('%c':%d)",
+                bytes_decoded, strptr, endptr, *endptr, *endptr));
 
     if (bytes_decoded < 0) {
       my_error(ER_BASE64_DECODE_ERROR, MYF(0));
@@ -216,8 +225,9 @@ void mysql_client_binlog_statement(THD *thd) {
       order to be able to read exactly what is necessary.
     */
 
-    DBUG_PRINT("info", ("binlog base64 decoded_len: %lu  bytes_decoded: %lld",
-                        (ulong)decoded_len, bytes_decoded));
+    DBUG_PRINT("info",
+               ("binlog base64 decoded_len: %lu  bytes_decoded: %" PRId64,
+                (ulong)decoded_len, bytes_decoded));
 
     /*
       Now we start to read events of the buffer, until there are no
@@ -234,16 +244,17 @@ void mysql_client_binlog_statement(THD *thd) {
         my_error(ER_SYNTAX_ERROR, MYF(0));
         goto end;
       }
-      DBUG_PRINT("info", ("event_len=%lu, bytes_decoded=%lld", event_len,
+      DBUG_PRINT("info", ("event_len=%lu, bytes_decoded=%" PRId64, event_len,
                           bytes_decoded));
 
       if (check_event_type(bufptr[EVENT_TYPE_OFFSET], rli)) goto end;
 
-      ev = Log_event::read_log_event(bufptr, event_len, &error,
-                                     rli->get_rli_description_event(), 0);
-
-      DBUG_PRINT("info", ("binlog base64 err=%s", error));
-      if (!ev) {
+      Binlog_read_error binlog_read_error = binlog_event_deserialize(
+          reinterpret_cast<unsigned char *>(bufptr), event_len,
+          rli->get_rli_description_event(), false, &ev);
+      if (binlog_read_error.has_error()) {
+        DBUG_PRINT("info",
+                   ("binlog base64 err=%s", binlog_read_error.get_str()));
         /*
           This could actually be an out-of-memory, but it is more likely
           caused by a bad statement
@@ -277,7 +288,7 @@ void mysql_client_binlog_statement(THD *thd) {
       if (ev->get_type_code() != binary_log::FORMAT_DESCRIPTION_EVENT &&
           ev->get_type_code() != binary_log::ROWS_QUERY_LOG_EVENT) {
         delete ev;
-        ev = NULL;
+        ev = nullptr;
       }
       if (err) {
         /*
@@ -297,11 +308,10 @@ end:
   if (rli) {
     if ((error || err) && rli->rows_query_ev) {
       delete rli->rows_query_ev;
-      rli->rows_query_ev = NULL;
+      rli->rows_query_ev = nullptr;
     }
     rli->slave_close_thread_tables(thd);
   }
   thd->variables.option_bits = thd_options;
   my_free(buf);
-  DBUG_VOID_RETURN;
 }

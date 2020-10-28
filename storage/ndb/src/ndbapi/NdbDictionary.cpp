@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -29,6 +29,7 @@
 #include <signaldata/CreateHashMap.hpp>
 #include <NdbBlob.hpp>
 #include "decimal.h"
+#include "m_ctype.h"
 
 /* NdbRecord static helper methods */
 
@@ -723,26 +724,6 @@ NdbDictionary::Table::setSingleUserMode(enum NdbDictionary::Table::SingleUserMod
   m_impl.m_single_user_mode = (Uint8)mode;
 }
 
-#if 0
-int
-NdbDictionary::Table::setTablespaceNames(const void *data, Uint32 len)
-{
-  return m_impl.setTablespaceNames(data, len);
-}
-
-const void*
-NdbDictionary::Table::getTablespaceNames()
-{
-  return m_impl.getTablespaceNames();
-}
-
-Uint32
-NdbDictionary::Table::getTablespaceNamesLen() const
-{
-  return m_impl.getTablespaceNamesLen();
-}
-#endif
-
 void
 NdbDictionary::Table::setLinearFlag(Uint32 flag)
 {
@@ -1159,6 +1140,18 @@ bool
 NdbDictionary::Table::getFullyReplicated() const
 {
   return m_impl.m_fully_replicated;
+}
+
+void
+NdbDictionary::Table::setRowChecksum(Uint32 val)
+{
+  m_impl.m_row_checksum = val;
+}
+
+Uint32
+NdbDictionary::Table::getRowChecksum()
+{
+  return m_impl.m_row_checksum;
 }
 
 /*****************************************************************
@@ -3408,17 +3401,7 @@ pretty_print_string(NdbOut& out,
 {
   const unsigned char* ref = (const unsigned char*)aref;
   int i, len, printable= 1;
-  // trailing zeroes are not printed
-  for (i=sz-1; i >= 0; i--)
-    if (ref[i] == 0) sz--;
-    else break;
-  if (!is_binary)
-  {
-    // trailing spaces are not printed
-    for (i=sz-1; i >= 0; i--)
-      if (ref[i] == 32) sz--;
-      else break;
-  }
+
   if (is_binary && f.hex_format)
   {
     if (sz == 0)
@@ -3430,6 +3413,18 @@ pretty_print_string(NdbOut& out,
     for (len = 0; len < (int)sz; len++)
       out.print("%02X", (int)ref[len]);
     return;
+  }
+
+  // trailing zeroes are not printed
+  for (i=sz-1; i >= 0; i--)
+    if (ref[i] == 0) sz--;
+    else break;
+  if (!is_binary)
+  {
+    // trailing spaces are not printed
+    for (i=sz-1; i >= 0; i--)
+      if (ref[i] == 32) sz--;
+      else break;
   }
   if (sz == 0) return; // empty
 
@@ -3548,7 +3543,7 @@ NdbDictionary::printFormattedValue(NdbOut& out,
       break;
     }
     case NdbDictionary::Column::Mediumunsigned:
-      out << (const Uint32) uint3korr(val_p);
+      out << (static_cast<Uint32>(uint3korr(val_p)));
       break;
     case NdbDictionary::Column::Smallunsigned:
       out << *((const Uint16*) val);
@@ -3663,11 +3658,7 @@ NdbDictionary::printFormattedValue(NdbOut& out,
       char decStr[MaxDecimalStrLen];
       assert(decimal_string_size(&tmpDec) <= MaxDecimalStrLen);
       int len= MaxDecimalStrLen;
-      if ((rc= decimal2string(&tmpDec, decStr, 
-                              &len,
-                              0,   // 0 = Var length output length
-                              0,   // 0 = Var length fractional part
-                              0))) // Filler char for fixed length
+      if ((rc= decimal2string(&tmpDec, decStr, &len)))
       {
         out.print("***Error : bad decimal2string conversion %d ***",
                   rc);
@@ -3817,7 +3808,7 @@ NdbDictionary::NdbDataPrintFormat::NdbDataPrintFormat()
   null_string= "[NULL]";
   hex_format= 0;
 }
-NdbDictionary::NdbDataPrintFormat::~NdbDataPrintFormat() {};
+NdbDictionary::NdbDataPrintFormat::~NdbDataPrintFormat() {}
 
 
 NdbOut&
@@ -4583,6 +4574,21 @@ void NdbDictionary::Dictionary::print(NdbOut& ndbout, NdbDictionary::Table const
   if (getHashMap(hashmap, &tab) != -1)
   {
     ndbout << "HashMap: " << hashmap.getName() << endl;
+  }
+
+  Uint32 tablespace_id;
+  if (tab.getTablespace(&tablespace_id))
+  {
+    ndbout << "Tablespace id: " << tablespace_id << endl;
+
+    // Look up tablespace by id and show the name
+    // NOTE! The tablespace name of a table object which
+    // has been fetched from NDB is not assigned any value.
+    const NdbDictionary::Tablespace ts = getTablespace(tablespace_id);
+    if (getNdbError().code == 0)
+    {
+      ndbout << "Tablespace: " << ts.getName() << endl;
+    }
   }
 
   ndbout << "-- Attributes --" << endl;

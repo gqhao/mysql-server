@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -75,7 +75,13 @@ struct Semijoin_mat_optimize {
   they can be processed as inner joins instead of outer joins.
 */
 struct NESTED_JOIN {
-  List<TABLE_LIST> join_list;   /* list of elements in the nested join */
+  NESTED_JOIN()
+      : join_list(*THR_MALLOC),
+        sj_outer_exprs(*THR_MALLOC),
+        sj_inner_exprs(*THR_MALLOC) {}
+
+  mem_root_deque<TABLE_LIST *>
+      join_list;                /* list of elements in the nested join */
   table_map used_tables{0};     /* bitmap of tables in the nested join */
   table_map not_null_tables{0}; /* tables that rejects nulls           */
   /**
@@ -110,10 +116,14 @@ struct NESTED_JOIN {
   /**
     Tables outside the semi-join that are used within the semi-join's
     ON condition (ie. the subquery WHERE clause and optional IN equalities).
+    Also contains lateral dependencies from materialized derived tables
+    contained inside the semi-join inner tables.
   */
   table_map sj_depends_on{0};
   /**
-    Outer non-trivially correlated tables, a true subset of sj_depends_on
+    Outer non-trivially correlated tables, a true subset of sj_depends_on.
+    Also contains lateral dependencies from materialized derived tables
+    contained inside the semi-join inner tables.
   */
   table_map sj_corr_tables{0};
   /**
@@ -128,7 +138,7 @@ struct NESTED_JOIN {
     Lists of trivially-correlated expressions from the outer and inner tables
     of the semi-join, respectively.
   */
-  List<Item> sj_outer_exprs, sj_inner_exprs;
+  mem_root_deque<Item *> sj_outer_exprs, sj_inner_exprs;
   Semijoin_mat_optimize sjm;
 };
 

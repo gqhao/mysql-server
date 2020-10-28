@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+  Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -102,22 +102,20 @@ void Sql_formatter::format_row_group(Row_group_dump_task *row_group) {
 
   CHARSET_INFO *charset_info = this->get_charset();
 
-  std::vector<bool> is_blob_to_hex;
+  std::vector<bool> is_blob;
   for (std::vector<Mysql_field>::const_iterator it =
            row_group->m_fields.begin();
        it != row_group->m_fields.end(); ++it) {
-    is_blob_to_hex.push_back(m_options->m_hex_blob &&
-                             it->get_character_set_nr() ==
-                                 my_charset_bin.number &&
-                             (it->get_type() == MYSQL_TYPE_BIT ||
-                              it->get_type() == MYSQL_TYPE_STRING ||
-                              it->get_type() == MYSQL_TYPE_VAR_STRING ||
-                              it->get_type() == MYSQL_TYPE_VARCHAR ||
-                              it->get_type() == MYSQL_TYPE_BLOB ||
-                              it->get_type() == MYSQL_TYPE_LONG_BLOB ||
-                              it->get_type() == MYSQL_TYPE_MEDIUM_BLOB ||
-                              it->get_type() == MYSQL_TYPE_TINY_BLOB ||
-                              it->get_type() == MYSQL_TYPE_GEOMETRY));
+    is_blob.push_back(it->get_character_set_nr() == my_charset_bin.number &&
+                      (it->get_type() == MYSQL_TYPE_BIT ||
+                       it->get_type() == MYSQL_TYPE_STRING ||
+                       it->get_type() == MYSQL_TYPE_VAR_STRING ||
+                       it->get_type() == MYSQL_TYPE_VARCHAR ||
+                       it->get_type() == MYSQL_TYPE_BLOB ||
+                       it->get_type() == MYSQL_TYPE_LONG_BLOB ||
+                       it->get_type() == MYSQL_TYPE_MEDIUM_BLOB ||
+                       it->get_type() == MYSQL_TYPE_TINY_BLOB ||
+                       it->get_type() == MYSQL_TYPE_GEOMETRY));
   }
 
   for (std::vector<Row *>::const_iterator row_iterator =
@@ -153,11 +151,12 @@ void Sql_formatter::format_row_group(Row_group_dump_task *row_group) {
           row_string += '\'';
         } else
           row_string.append(column_data, column_length);
-      } else if (is_blob_to_hex[column]) {
+      } else if (m_options->m_hex_blob && is_blob[column]) {
         row_string += "0x";
         Mysql::Tools::Base::Mysql_query_runner::append_hex_string(
             &row_string, column_data, column_length);
       } else {
+        if (is_blob[column]) row_string += "_binary ";
         row_string += '\"';
         if (m_escaping_runner)
           m_escaping_runner->append_escape_string(&row_string, column_data,
@@ -174,6 +173,17 @@ void Sql_formatter::format_row_group(Row_group_dump_task *row_group) {
   row_string += ";\n";
 
   this->append_output(row_string);
+  /*
+    user account is dumped in the form of INSERT statements, thus need
+    to append FLUSH PRIVILEGES
+  */
+  if (!use_show_create_user) {
+    std::string schema = row_group->m_source_table->get_schema();
+    std::string name = row_group->m_source_table->get_name();
+    if ((schema == "mysql") && (name == "user")) {
+      this->append_output("/*! FLUSH PRIVILEGES */;\n");
+    }
+  }
 }
 
 void Sql_formatter::format_table_indexes(
@@ -346,7 +356,7 @@ void Sql_formatter::format_dump_start(
 void Sql_formatter::format_plain_sql_object(
     Abstract_plain_sql_object_dump_task *plain_sql_dump_task) {
   View *new_view_task = dynamic_cast<View *>(plain_sql_dump_task);
-  if (new_view_task != NULL) {
+  if (new_view_task != nullptr) {
     /*
      DROP VIEW statement followed by CREATE VIEW must be written to output
      as an atomic operation, else there is a possibility of bug#21399236.
@@ -364,16 +374,16 @@ void Sql_formatter::format_plain_sql_object(
 
   Mysql_function *new_func_task =
       dynamic_cast<Mysql_function *>(plain_sql_dump_task);
-  if (new_func_task != NULL)
+  if (new_func_task != nullptr)
     format_sql_objects_definer(plain_sql_dump_task, "FUNCTION");
 
   Stored_procedure *new_proc_task =
       dynamic_cast<Stored_procedure *>(plain_sql_dump_task);
-  if (new_proc_task != NULL)
+  if (new_proc_task != nullptr)
     format_sql_objects_definer(plain_sql_dump_task, "PROCEDURE");
 
   Privilege *new_priv_task = dynamic_cast<Privilege *>(plain_sql_dump_task);
-  if (new_priv_task != NULL) {
+  if (new_priv_task != nullptr) {
     if (m_options->m_drop_user)
       this->append_output(
           "DROP USER " +
@@ -383,7 +393,7 @@ void Sql_formatter::format_plain_sql_object(
 
   Column_statistic *new_col_stats_task =
       dynamic_cast<Column_statistic *>(plain_sql_dump_task);
-  if (new_col_stats_task != NULL) {
+  if (new_col_stats_task != nullptr) {
     if (m_options->m_column_statistics)
       this->append_output(plain_sql_dump_task->get_sql_formatted_definition() +
                           ";\n");
@@ -420,11 +430,10 @@ void Sql_formatter::format_sql_objects_definer(
 /**
   Check if the table is innodb stats table in mysql database.
 
-   @param [in] db           Database name
-   @param [in] table        Table name
+  @param [in] db           Database name
+  @param [in] table        Table name
 
-  @return
-    @retval true if it is innodb stats table else false
+  @retval true if it is innodb stats table else false
 */
 bool Sql_formatter::innodb_stats_tables(std::string db, std::string table) {
   return ((db == "mysql") &&

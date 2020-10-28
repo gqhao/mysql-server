@@ -1,5 +1,5 @@
 /*
-  Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+  Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -32,6 +32,7 @@
 
 #include "my_compiler.h"
 #include "my_dbug.h"
+#include "sql/field.h"
 #include "sql/plugin_table.h"
 #include "sql/rpl_info.h"
 #include "sql/rpl_mi.h"
@@ -65,8 +66,8 @@ Plugin_table table_replication_applier_global_filters::m_table_def(
 PFS_engine_table_share table_replication_applier_global_filters::m_share = {
     &pfs_readonly_acl,
     table_replication_applier_global_filters::create,
-    NULL, /* write_row */
-    NULL, /* delete_all_rows */
+    nullptr, /* write_row */
+    nullptr, /* delete_all_rows */
     table_replication_applier_global_filters::get_row_count,
     sizeof(pos_t), /* ref length */
     &m_table_lock,
@@ -107,14 +108,14 @@ ha_rows table_replication_applier_global_filters::get_row_count() {
 
 int table_replication_applier_global_filters::rnd_next(void) {
   int res = HA_ERR_END_OF_FILE;
-  Rpl_pfs_filter *rpl_pfs_filter = NULL;
+  Rpl_pfs_filter *rpl_pfs_filter = nullptr;
 
   rpl_global_filter.rdlock();
   for (m_pos.set_at(&m_next_pos); res != 0; m_pos.next()) {
     /* Get ith rpl_pfs_filter from global replication filters. */
     rpl_pfs_filter = rpl_global_filter.get_filter_at_pos(m_pos.m_index);
 
-    if (rpl_pfs_filter == NULL) {
+    if (rpl_pfs_filter == nullptr) {
       break;
     } else {
       make_row(rpl_pfs_filter);
@@ -129,7 +130,7 @@ int table_replication_applier_global_filters::rnd_next(void) {
 
 int table_replication_applier_global_filters::rnd_pos(const void *pos) {
   int res = HA_ERR_RECORD_DELETED;
-  Rpl_pfs_filter *rpl_pfs_filter = NULL;
+  Rpl_pfs_filter *rpl_pfs_filter = nullptr;
   set_position(pos);
 
   rpl_global_filter.rdlock();
@@ -152,8 +153,9 @@ void table_replication_applier_global_filters::make_row(
   memcpy(m_row.filter_name, rpl_pfs_filter->get_filter_name(),
          m_row.filter_name_length);
 
-  if (!rpl_pfs_filter->get_filter_rule().is_empty())
+  if (!rpl_pfs_filter->get_filter_rule().is_empty()) {
     m_row.filter_rule.copy(rpl_pfs_filter->get_filter_rule());
+  }
 
   m_row.configured_by =
       rpl_pfs_filter->get_rpl_filter_statistics()->get_configured_by();
@@ -168,15 +170,17 @@ int table_replication_applier_global_filters::read_row_values(
     TABLE *table, unsigned char *buf, Field **fields, bool read_all) {
   Field *f;
 
-  if (unlikely(!m_row_exists)) return HA_ERR_RECORD_DELETED;
+  if (unlikely(!m_row_exists)) {
+    return HA_ERR_RECORD_DELETED;
+  }
 
   /* Set the null bits */
   DBUG_ASSERT(table->s->null_bytes == 0);
   buf[0] = 0;
 
   for (; (f = *fields); fields++) {
-    if (read_all || bitmap_is_set(table->read_set, f->field_index)) {
-      switch (f->field_index) {
+    if (read_all || bitmap_is_set(table->read_set, f->field_index())) {
+      switch (f->field_index()) {
         case 0: /* filter_name */
           set_field_char_utf8(f, m_row.filter_name, m_row.filter_name_length);
           break;

@@ -1,4 +1,4 @@
-/* Copyright (c) 2001, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2001, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -32,6 +32,8 @@
 #include "my_inttypes.h"
 #include "my_macros.h"
 #include "storage/myisam/ftdefs.h"
+#include "storage/myisam/myisamdef.h"
+#include "template_utils.h"
 
 /* search with natural language queries */
 
@@ -61,16 +63,17 @@ struct FT_SUPERDOC {
   double tmp_weight;
 };
 
-static int FT_SUPERDOC_cmp(const void *cmp_arg MY_ATTRIBUTE((unused)),
-                           const void *a, const void *b) {
-  FT_SUPERDOC *p1 = (FT_SUPERDOC *)a;
-  FT_SUPERDOC *p2 = (FT_SUPERDOC *)b;
+static int FT_SUPERDOC_cmp(const void *, const void *a, const void *b) {
+  const FT_SUPERDOC *p1 = pointer_cast<const FT_SUPERDOC *>(a);
+  const FT_SUPERDOC *p2 = pointer_cast<const FT_SUPERDOC *>(b);
   if (p1->doc.dpos < p2->doc.dpos) return -1;
   if (p1->doc.dpos == p2->doc.dpos) return 0;
   return 1;
 }
 
-static int walk_and_match(FT_WORD *word, uint32 count, ALL_IN_ONE *aio) {
+static int walk_and_match(void *v_word, uint32 count, void *v_aio) {
+  FT_WORD *word = static_cast<FT_WORD *>(v_word);
+  ALL_IN_ONE *aio = static_cast<ALL_IN_ONE *>(v_aio);
   int subkeys = 0, r;
   uint keylen, doc_cnt;
   FT_SUPERDOC sdoc, *sptr;
@@ -84,7 +87,7 @@ static int walk_and_match(FT_WORD *word, uint32 count, ALL_IN_ONE *aio) {
   uint extra = HA_FT_WLEN + info->s->rec_reflength;
   float tmp_weight;
 
-  DBUG_ENTER("walk_and_match");
+  DBUG_TRACE;
 
   word->weight = LWS_FOR_QUERY;
 
@@ -116,11 +119,11 @@ static int walk_and_match(FT_WORD *word, uint32 count, ALL_IN_ONE *aio) {
   while (!r && gweight) {
     if (keylen && ha_compare_text(aio->charset, info->lastkey + 1,
                                   info->lastkey_length - extra - 1, keybuff + 1,
-                                  keylen - 1, 0))
+                                  keylen - 1, false))
       break;
 
     if (subkeys < 0) {
-      if (doc_cnt) DBUG_RETURN(1); /* index is corrupted */
+      if (doc_cnt) return 1; /* index is corrupted */
       /*
         TODO here: unsafe optimization, should this word
         be skipped (based on subkeys) ?
@@ -134,16 +137,15 @@ static int walk_and_match(FT_WORD *word, uint32 count, ALL_IN_ONE *aio) {
       r = _mi_search_first(info, keyinfo, key_root);
       goto do_skip;
     }
-    ft_floatXget(tmp_weight, info->lastkey + info->lastkey_length - extra);
+    tmp_weight = ft_floatXget(info->lastkey + info->lastkey_length - extra);
     /* The following should be safe, even if we compare doubles */
-    if (tmp_weight == 0)
-      DBUG_RETURN(doc_cnt); /* stopword, doc_cnt should be 0 */
+    if (tmp_weight == 0) return doc_cnt; /* stopword, doc_cnt should be 0 */
 
     sdoc.doc.dpos = info->lastpos;
 
     /* saving document matched into dtree */
     if (!(selem = tree_insert(&aio->dtree, &sdoc, 0, aio->dtree.custom_arg)))
-      DBUG_RETURN(1);
+      return 1;
 
     sptr = (FT_SUPERDOC *)ELEMENT_KEY((&aio->dtree), selem);
 
@@ -181,30 +183,31 @@ static int walk_and_match(FT_WORD *word, uint32 count, ALL_IN_ONE *aio) {
   }
   word->weight = gweight;
 
-  DBUG_RETURN(0);
+  return 0;
 }
 
-static int walk_and_copy(FT_SUPERDOC *from, uint32 count MY_ATTRIBUTE((unused)),
-                         FT_DOC **to) {
-  DBUG_ENTER("walk_and_copy");
+static int walk_and_copy(void *v_from, uint32, void *v_to) {
+  FT_SUPERDOC *from = static_cast<FT_SUPERDOC *>(v_from);
+  FT_DOC **to = static_cast<FT_DOC **>(v_to);
+  DBUG_TRACE;
   from->doc.weight += from->tmp_weight * from->word_ptr->weight;
   (*to)->dpos = from->doc.dpos;
   (*to)->weight = from->doc.weight;
   (*to)++;
-  DBUG_RETURN(0);
+  return 0;
 }
 
-static int walk_and_push(FT_SUPERDOC *from, uint32 count MY_ATTRIBUTE((unused)),
-                         QUEUE *best) {
-  DBUG_ENTER("walk_and_copy");
+static int walk_and_push(void *v_from, uint32, void *v_best) {
+  FT_SUPERDOC *from = static_cast<FT_SUPERDOC *>(v_from);
+  QUEUE *best = static_cast<QUEUE *>(v_best);
+  DBUG_TRACE;
   from->doc.weight += from->tmp_weight * from->word_ptr->weight;
-  set_if_smaller(best->elements, ft_query_expansion_limit - 1);
+  best->elements = std::min(best->elements, uint(ft_query_expansion_limit - 1));
   queue_insert(best, (uchar *)&from->doc);
-  DBUG_RETURN(0);
+  return 0;
 }
 
-static int FT_DOC_cmp(const void *unused MY_ATTRIBUTE((unused)),
-                      const void *a_arg, const void *b_arg) {
+static int FT_DOC_cmp(void *, uchar *a_arg, uchar *b_arg) {
   FT_DOC *a = (FT_DOC *)a_arg;
   FT_DOC *b = (FT_DOC *)b_arg;
   double c = b->weight - a->weight;
@@ -216,15 +219,15 @@ FT_INFO *ft_init_nlq_search(MI_INFO *info, uint keynr, uchar *query,
   TREE wtree;
   ALL_IN_ONE aio;
   FT_DOC *dptr;
-  st_ft_info_nlq *dlist = NULL;
+  st_ft_info_nlq *dlist = nullptr;
   my_off_t saved_lastpos = info->lastpos;
   struct st_mysql_ftparser *parser;
   MYSQL_FTPARSER_PARAM *ftparser_param;
-  DBUG_ENTER("ft_init_nlq_search");
+  DBUG_TRACE;
 
   /* black magic ON */
-  if ((int)(keynr = _mi_check_index(info, keynr)) < 0) DBUG_RETURN(NULL);
-  if (_mi_readinfo(info, F_RDLCK, 1)) DBUG_RETURN(NULL);
+  if ((int)(keynr = _mi_check_index(info, keynr)) < 0) return nullptr;
+  if (_mi_readinfo(info, F_RDLCK, 1)) return nullptr;
   /* black magic OFF */
 
   aio.info = info;
@@ -236,8 +239,8 @@ FT_INFO *ft_init_nlq_search(MI_INFO *info, uint keynr, uchar *query,
 
   memset(&wtree, 0, sizeof(wtree));
 
-  init_tree(&aio.dtree, 0, 0, sizeof(FT_SUPERDOC), &FT_SUPERDOC_cmp, 0, NULL,
-            NULL);
+  init_tree(&aio.dtree, 0, sizeof(FT_SUPERDOC), &FT_SUPERDOC_cmp, false,
+            nullptr, nullptr);
 
   ft_parse_init(&wtree, aio.charset);
   ftparser_param->flags = 0;
@@ -245,16 +248,13 @@ FT_INFO *ft_init_nlq_search(MI_INFO *info, uint keynr, uchar *query,
                &wtree.mem_root))
     goto err;
 
-  if (tree_walk(&wtree, (tree_walk_action)&walk_and_match, &aio,
-                left_root_right))
-    goto err;
+  if (tree_walk(&wtree, &walk_and_match, &aio, left_root_right)) goto err;
 
   if (flags & FT_EXPAND && ft_query_expansion_limit) {
     QUEUE best;
-    init_queue(&best, key_memory_QUEUE, ft_query_expansion_limit, 0, 0,
-               (queue_compare)&FT_DOC_cmp, 0);
-    tree_walk(&aio.dtree, (tree_walk_action)&walk_and_push, &best,
-              left_root_right);
+    init_queue(&best, key_memory_QUEUE, ft_query_expansion_limit, 0, false,
+               &FT_DOC_cmp, nullptr);
+    tree_walk(&aio.dtree, &walk_and_push, &best, left_root_right);
     while (best.elements) {
       my_off_t docid = ((FT_DOC *)queue_remove(&best, 0))->dpos;
       if (!(*info->read_record)(info, docid, record)) {
@@ -269,9 +269,7 @@ FT_INFO *ft_init_nlq_search(MI_INFO *info, uint keynr, uchar *query,
     }
     delete_queue(&best);
     reset_tree(&aio.dtree);
-    if (tree_walk(&wtree, (tree_walk_action)&walk_and_match, &aio,
-                  left_root_right))
-      goto err;
+    if (tree_walk(&wtree, &walk_and_match, &aio, left_root_right)) goto err;
   }
 
   /*
@@ -285,14 +283,13 @@ FT_INFO *ft_init_nlq_search(MI_INFO *info, uint keynr, uchar *query,
       MYF(0));
   if (!dlist) goto err;
 
-  dlist->please = (struct _ft_vft *)&_ft_vft_nlq;
+  dlist->please = const_cast<struct _ft_vft *>(&_ft_vft_nlq);
   dlist->ndocs = aio.dtree.elements_in_tree;
   dlist->curdoc = -1;
   dlist->info = aio.info;
   dptr = dlist->doc;
 
-  tree_walk(&aio.dtree, (tree_walk_action)&walk_and_copy, &dptr,
-            left_root_right);
+  tree_walk(&aio.dtree, &walk_and_copy, &dptr, left_root_right);
 
   if (flags & FT_SORTED)
     std::sort(
@@ -303,7 +300,7 @@ err:
   delete_tree(&aio.dtree);
   delete_tree(&wtree);
   info->lastpos = saved_lastpos;
-  DBUG_RETURN((FT_INFO *)dlist);
+  return (FT_INFO *)dlist;
 }
 
 int ft_nlq_read_next(FT_INFO *handler_base, char *record) {

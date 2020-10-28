@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2013, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2013, 2019, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -34,7 +34,11 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #ifndef sess0sess_h
 #define sess0sess_h
 
+#include <sql_thd_internal_api.h>
 #include "dict0mem.h"
+#include "log0meb.h"
+#include "srv0tmp.h"
+#include "trx0trx.h"
 #include "univ.i"
 #include "ut0new.h"
 
@@ -49,7 +53,7 @@ class dict_intrinsic_table_t {
   }
 
   /** Destructor */
-  ~dict_intrinsic_table_t() { m_handler = NULL; }
+  ~dict_intrinsic_table_t() { m_handler = nullptr; }
 
  public:
   /* Table Handler holding other metadata information commonly needed
@@ -66,16 +70,28 @@ typedef std::map<
 class innodb_session_t {
  public:
   /** Constructor */
-  innodb_session_t() : m_trx(), m_open_tables() { /* Do nothing. */
+  innodb_session_t()
+      : m_trx(), m_open_tables(), m_usr_temp_tblsp(), m_intrinsic_temp_tblsp() {
+    /* Do nothing. */
   }
 
   /** Destructor */
   ~innodb_session_t() {
-    m_trx = NULL;
+    m_trx = nullptr;
 
     for (table_cache_t::iterator it = m_open_tables.begin();
          it != m_open_tables.end(); ++it) {
       delete (it->second);
+    }
+
+    meb::redo_log_archive_session_end(this);
+
+    if (m_usr_temp_tblsp != nullptr) {
+      ibt::free_tmp(m_usr_temp_tblsp);
+    }
+
+    if (m_intrinsic_temp_tblsp != nullptr) {
+      ibt::free_tmp(m_intrinsic_temp_tblsp);
     }
   }
 
@@ -83,7 +99,7 @@ class innodb_session_t {
   @param[in]	table_name	name of the table
   @param[in,out]	table		table handler to register */
   void register_table_handler(const char *table_name, dict_table_t *table) {
-    ut_ad(lookup_table_handler(table_name) == NULL);
+    ut_ad(lookup_table_handler(table_name) == nullptr);
     m_open_tables.insert(table_cache_t::value_type(
         table_name, new dict_intrinsic_table_t(table)));
   }
@@ -92,7 +108,7 @@ class innodb_session_t {
   @param[in]	table_name	name of the table to lookup */
   dict_table_t *lookup_table_handler(const char *table_name) {
     table_cache_t::iterator it = m_open_tables.find(table_name);
-    return ((it == m_open_tables.end()) ? NULL : it->second->m_handler);
+    return ((it == m_open_tables.end()) ? nullptr : it->second->m_handler);
   }
 
   /** Remove table handler entry.
@@ -113,6 +129,24 @@ class innodb_session_t {
     return (static_cast<uint>(m_open_tables.size()));
   }
 
+  ibt::Tablespace *get_usr_temp_tblsp() {
+    if (m_usr_temp_tblsp == nullptr) {
+      my_thread_id id = thd_thread_id(m_trx->mysql_thd);
+      m_usr_temp_tblsp = ibt::tbsp_pool->get(id, ibt::TBSP_USER);
+    }
+
+    return (m_usr_temp_tblsp);
+  }
+
+  ibt::Tablespace *get_instrinsic_temp_tblsp() {
+    if (m_intrinsic_temp_tblsp == nullptr) {
+      my_thread_id id = thd_thread_id(m_trx->mysql_thd);
+      m_intrinsic_temp_tblsp = ibt::tbsp_pool->get(id, ibt::TBSP_INTRINSIC);
+    }
+
+    return (m_intrinsic_temp_tblsp);
+  }
+
  public:
   /** transaction handler. */
   trx_t *m_trx;
@@ -121,6 +155,13 @@ class innodb_session_t {
   to InnoDB dictionary as they are session specific.
   Currently, limited to intrinsic temporary tables only. */
   table_cache_t m_open_tables;
+
+ private:
+  /** Current session's user temp tablespace */
+  ibt::Tablespace *m_usr_temp_tblsp;
+
+  /** Current session's optimizer temp tablespace */
+  ibt::Tablespace *m_intrinsic_temp_tblsp;
 };
 
 #endif /* sess0sess_h */

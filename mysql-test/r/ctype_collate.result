@@ -303,7 +303,7 @@ z
 ü
 SELECT latin1_f COLLATE koi8r_general_ci  AS latin1_f_as FROM t1 ORDER BY latin1_f_as;
 ERROR 42000: COLLATION 'koi8r_general_ci' is not valid for CHARACTER SET 'latin1'
-SELECT latin1_f,count(*) FROM t1 GROUP BY latin1_f ASC;
+SELECT latin1_f,count(*) FROM t1 GROUP BY latin1_f ORDER BY latin1_f;
 latin1_f	count(*)
 A	2
 AD	2
@@ -318,7 +318,7 @@ Z	2
 Å	2
 Ä	2
 ß	1
-SELECT latin1_f,count(*) FROM t1 GROUP BY latin1_f COLLATE latin1_swedish_ci ASC;
+SELECT latin1_f,count(*) FROM t1 GROUP BY latin1_f COLLATE latin1_swedish_ci ORDER BY latin1_f COLLATE latin1_swedish_ci;
 latin1_f	count(*)
 A	2
 AD	2
@@ -333,7 +333,7 @@ Z	2
 Å	2
 Ä	2
 ß	1
-SELECT latin1_f,count(*) FROM t1 GROUP BY latin1_f COLLATE latin1_german2_ci ASC;
+SELECT latin1_f,count(*) FROM t1 GROUP BY latin1_f COLLATE latin1_german2_ci ORDER BY latin1_f COLLATE latin1_german2_ci;
 latin1_f	count(*)
 A	4
 AD	2
@@ -345,7 +345,7 @@ U	2
 UE	4
 Y	2
 Z	2
-SELECT latin1_f,count(*) FROM t1 GROUP BY latin1_f COLLATE latin1_general_ci ASC;
+SELECT latin1_f,count(*) FROM t1 GROUP BY latin1_f COLLATE latin1_general_ci ORDER BY latin1_f COLLATE latin1_general_ci;
 latin1_f	count(*)
 A	2
 AD	2
@@ -361,7 +361,7 @@ UE	2
 Ü	2
 Y	2
 Z	2
-SELECT latin1_f,count(*) FROM t1 GROUP BY latin1_f COLLATE latin1_bin ASC;
+SELECT latin1_f,count(*) FROM t1 GROUP BY latin1_f COLLATE latin1_bin ORDER BY latin1_f COLLATE latin1_bin;
 latin1_f	count(*)
 A	1
 AD	1
@@ -753,6 +753,9 @@ SET NAMES latin1;
 CREATE TABLE t1(a TINYINT, b SMALLINT, c MEDIUMINT, d INT, e BIGINT);
 CREATE TABLE t2(a DECIMAL(5,2));
 CREATE TABLE t3(a FLOAT(5,2), b DOUBLE(5,2));
+Warnings:
+Warning	1681	Specifying number of digits for floating point data types is deprecated and will be removed in a future release.
+Warning	1681	Specifying number of digits for floating point data types is deprecated and will be removed in a future release.
 INSERT INTO t1 VALUES(1, 2, 3, 4, 100);
 INSERT INTO t1 VALUES(2, 3, 4, 100, 1);
 INSERT INTO t1 VALUES(3, 4, 100, 1, 2);

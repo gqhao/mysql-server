@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2.0,
@@ -53,12 +53,13 @@ REQUIRES_SERVICE_PLACEHOLDER(udf_registration_aggregate);
 
 /* This function returns the sum of all arguments */
 
-long long myfunc_int(UDF_INIT *, UDF_ARGS *args, char *, char *) {
+long long myfunc_int(UDF_INIT *, UDF_ARGS *args, unsigned char *,
+                     unsigned char *) {
   long long val = 0;
   unsigned i;
 
   for (i = 0; i < args->arg_count; i++) {
-    if (args->args[i] == NULL) continue;
+    if (args->args[i] == nullptr) continue;
     switch (args->arg_type[i]) {
       case STRING_RESULT: /* Add string lengths */
         val += args->lengths[i];
@@ -76,15 +77,15 @@ long long myfunc_int(UDF_INIT *, UDF_ARGS *args, char *, char *) {
   return val;
 }
 
-bool myfunc_int_init(UDF_INIT *, UDF_ARGS *, char *) { return 0; }
+bool myfunc_int_init(UDF_INIT *, UDF_ARGS *, char *) { return false; }
 
 /**************************************************************************************/
 
 static mysql_service_status_t init() {
   bool ret_int = false;
   ret_int = mysql_service_udf_registration->udf_register(
-      "myfunc_int", INT_RESULT, (Udf_func_any)myfunc_int,
-      (Udf_func_init)myfunc_int_init, NULL);
+      "myfunc_int", INT_RESULT, (Udf_func_any)myfunc_int, myfunc_int_init,
+      nullptr);
   return ret_int;
 }
 

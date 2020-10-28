@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -35,14 +35,16 @@
 #include "my_sys.h"
 #include "my_time.h"
 #include "mysql_com.h"
-#include "mysqld_error.h"                  // ER_*
-#include "sql/dd/dd.h"                     // create_object
-#include "sql/dd/impl/dictionary_impl.h"   // Dictionary_impl
-#include "sql/dd/impl/raw/raw_record.h"    // Raw_record
-#include "sql/dd/impl/sdi_impl.h"          // sdi read/write functions
-#include "sql/dd/impl/tables/schemata.h"   // Schemata
-#include "sql/dd/impl/transaction_impl.h"  // Open_dictionary_tables_ctx
+#include "mysqld_error.h"                         // ER_*
+#include "sql/dd/dd.h"                            // create_object
+#include "sql/dd/impl/bootstrap/bootstrap_ctx.h"  // dd::bootstrap::DD_bootstrap_ctx
+#include "sql/dd/impl/dictionary_impl.h"          // Dictionary_impl
+#include "sql/dd/impl/raw/raw_record.h"           // Raw_record
+#include "sql/dd/impl/sdi_impl.h"                 // sdi read/write functions
+#include "sql/dd/impl/tables/schemata.h"          // Schemata
+#include "sql/dd/impl/transaction_impl.h"         // Open_dictionary_tables_ctx
 #include "sql/dd/impl/types/object_table_definition_impl.h"
+#include "sql/dd/impl/utils.h"       // dd::my_time_t_to_ull_datetime()
 #include "sql/dd/types/event.h"      // Event
 #include "sql/dd/types/function.h"   // Function
 #include "sql/dd/types/procedure.h"  // Procedure
@@ -68,9 +70,16 @@ using dd::tables::Tables;
 
 namespace dd {
 
+static const std::set<String_type> default_valid_option_keys = {"read_only"};
+
 ///////////////////////////////////////////////////////////////////////////
 // Schema_impl implementation.
 ///////////////////////////////////////////////////////////////////////////
+
+Schema_impl::Schema_impl()
+    : m_se_private_data(),
+      m_options(default_valid_option_keys),
+      m_default_collation_id(INVALID_OBJECT_ID) {}
 
 bool Schema_impl::validate() const {
   if (m_default_collation_id == INVALID_OBJECT_ID) {
@@ -80,6 +89,22 @@ bool Schema_impl::validate() const {
   }
 
   return false;
+}
+
+/////////////////////////////////////////////////////////////////////////
+
+bool Schema_impl::read_only() const {
+  bool state = false;
+  if (options().exists("read_only") && options().get("read_only", &state)) {
+    return false;
+  }
+  return state;
+}
+
+/////////////////////////////////////////////////////////////////////////
+
+void Schema_impl::set_read_only(bool state) {
+  options().set("read_only", state);
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -93,6 +118,24 @@ bool Schema_impl::restore_attributes(const Raw_record &r) {
 
   m_default_collation_id = r.read_ref_id(Schemata::FIELD_DEFAULT_COLLATION_ID);
 
+  // m_default_encryption is added in 80016
+  if (bootstrap::DD_bootstrap_ctx::instance().is_dd_upgrade_from_before(
+          bootstrap::DD_VERSION_80016)) {
+    m_default_encryption = enum_encryption_type::ET_NO;
+  } else {
+    m_default_encryption = static_cast<enum_encryption_type>(
+        r.read_int(Schemata::FIELD_DEFAULT_ENCRYPTION));
+  }
+
+  // m_se_private_data is added in 80017
+  if (bootstrap::DD_bootstrap_ctx::instance().is_dd_upgrade_from_before(
+          bootstrap::DD_VERSION_80017)) {
+    set_se_private_data("");
+  } else {
+    set_se_private_data(r.read_str(Schemata::FIELD_SE_PRIVATE_DATA, ""));
+  }
+
+  set_options(r.read_str(Schemata::FIELD_OPTIONS, ""));
   return false;
 }
 
@@ -102,13 +145,29 @@ bool Schema_impl::store_attributes(Raw_record *r) {
   Object_id default_catalog_id =
       Dictionary_impl::instance()->default_catalog_id();
 
+  // Store m_default_encryption only if we're not upgrading
+  if (!bootstrap::DD_bootstrap_ctx::instance().is_dd_upgrade_from_before(
+          bootstrap::DD_VERSION_80016) &&
+      r->store(Schemata::FIELD_DEFAULT_ENCRYPTION,
+               static_cast<int>(m_default_encryption))) {
+    return true;
+  }
+
+  // Store m_se_private_data only if we're not upgrading from before 8.0.17
+  if (!bootstrap::DD_bootstrap_ctx::instance().is_dd_upgrade_from_before(
+          bootstrap::DD_VERSION_80017) &&
+      r->store(Schemata::FIELD_SE_PRIVATE_DATA, m_se_private_data)) {
+    return true;
+  }
+
   return store_id(r, Schemata::FIELD_ID) ||
          store_name(r, Schemata::FIELD_NAME) ||
          r->store(Schemata::FIELD_CATALOG_ID, default_catalog_id) ||
          r->store_ref_id(Schemata::FIELD_DEFAULT_COLLATION_ID,
                          m_default_collation_id) ||
          r->store(Schemata::FIELD_CREATED, m_created) ||
-         r->store(Schemata::FIELD_LAST_ALTERED, m_last_altered);
+         r->store(Schemata::FIELD_LAST_ALTERED, m_last_altered) ||
+         r->store(Schemata::FIELD_OPTIONS, m_options);
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -132,9 +191,8 @@ Event *Schema_impl::create_event(THD *thd) const {
   f->set_schema_id(this->id());
 
   // Get statement start time.
-  MYSQL_TIME curtime;
-  my_tz_OFFSET0->gmt_sec_to_TIME(&curtime, thd->query_start_in_secs());
-  ulonglong ull_curtime = TIME_to_ulonglong_datetime(&curtime);
+  ulonglong ull_curtime =
+      dd::my_time_t_to_ull_datetime(thd->query_start_in_secs());
 
   f->set_created(ull_curtime);
   f->set_last_altered(ull_curtime);
@@ -149,9 +207,8 @@ Function *Schema_impl::create_function(THD *thd) const {
   f->set_schema_id(this->id());
 
   // Get statement start time.
-  MYSQL_TIME curtime;
-  my_tz_OFFSET0->gmt_sec_to_TIME(&curtime, thd->query_start_in_secs());
-  ulonglong ull_curtime = TIME_to_ulonglong_datetime(&curtime);
+  ulonglong ull_curtime =
+      dd::my_time_t_to_ull_datetime(thd->query_start_in_secs());
 
   f->set_created(ull_curtime);
   f->set_last_altered(ull_curtime);
@@ -166,9 +223,8 @@ Procedure *Schema_impl::create_procedure(THD *thd) const {
   p->set_schema_id(this->id());
 
   // Get statement start time.
-  MYSQL_TIME curtime;
-  my_tz_OFFSET0->gmt_sec_to_TIME(&curtime, thd->query_start_in_secs());
-  ulonglong ull_curtime = TIME_to_ulonglong_datetime(&curtime);
+  ulonglong ull_curtime =
+      dd::my_time_t_to_ull_datetime(thd->query_start_in_secs());
 
   p->set_created(ull_curtime);
   p->set_last_altered(ull_curtime);
@@ -193,9 +249,8 @@ Table *Schema_impl::create_table(THD *thd) const {
   t->set_collation_id(default_collation_id());
 
   // Get statement start time.
-  MYSQL_TIME curtime;
-  my_tz_OFFSET0->gmt_sec_to_TIME(&curtime, thd->query_start_in_secs());
-  ulonglong ull_curtime = TIME_to_ulonglong_datetime(&curtime);
+  ulonglong ull_curtime =
+      dd::my_time_t_to_ull_datetime(thd->query_start_in_secs());
 
   // Set new table start time.
   t->set_created(ull_curtime);
@@ -220,9 +275,8 @@ View *Schema_impl::create_view(THD *thd) const {
   v->set_schema_id(this->id());
 
   // Get statement start time.
-  MYSQL_TIME curtime;
-  my_tz_OFFSET0->gmt_sec_to_TIME(&curtime, thd->query_start_in_secs());
-  ulonglong ull_curtime = TIME_to_ulonglong_datetime(&curtime);
+  ulonglong ull_curtime =
+      dd::my_time_t_to_ull_datetime(thd->query_start_in_secs());
 
   v->set_created(ull_curtime);
   v->set_last_altered(ull_curtime);
@@ -247,9 +301,8 @@ View *Schema_impl::create_system_view(THD *thd MY_ATTRIBUTE((unused))) const {
   v->set_schema_id(this->id());
 
   // Get statement start time.
-  MYSQL_TIME curtime;
-  my_tz_OFFSET0->gmt_sec_to_TIME(&curtime, thd->query_start_in_secs());
-  ulonglong ull_curtime = TIME_to_ulonglong_datetime(&curtime);
+  ulonglong ull_curtime =
+      dd::my_time_t_to_ull_datetime(thd->query_start_in_secs());
 
   v->set_created(ull_curtime);
   v->set_last_altered(ull_curtime);

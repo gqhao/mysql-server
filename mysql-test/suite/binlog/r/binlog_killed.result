@@ -70,6 +70,8 @@ set @b= 1;
 end if;
 return n;
 end|
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 delete from t4;
 insert into t4 values (1,1), (1,1);
 reset master;
@@ -103,6 +105,8 @@ select
 is not null AS Loaded;
 Loaded
 1
+Warnings:
+Warning	1287	Setting user variables within expressions is deprecated and will be removed in a future release. Consider alternatives: 'SET variable=expression, ...', or 'SELECT expression(s) INTO variables(s)'.
 select 0 /* must return 0 to mean the killed update is in */;
 0
 0
@@ -140,6 +144,8 @@ select
 is not null AS Loaded;
 Loaded
 1
+Warnings:
+Warning	1287	Setting user variables within expressions is deprecated and will be removed in a future release. Consider alternatives: 'SET variable=expression, ...', or 'SELECT expression(s) INTO variables(s)'.
 select 0 /* must return 0 to mean the killed delete is in */;
 0
 0

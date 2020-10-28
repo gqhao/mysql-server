@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -23,11 +23,12 @@
 #ifndef CONNECTION_DELAY_H
 #define CONNECTION_DELAY_H
 
-#include <mysql_com.h> /* USERNAME_LENGTH */
 #include <atomic>
 
-#include "lf.h" /* LF Hash */
+#include "lf.h"          /* LF Hash */
+#include "my_hostname.h" /* HOSTNAME_LENGTH */
 #include "my_inttypes.h"
+#include "mysql_com.h" /* USERNAME_LENGTH */
 #include "plugin/connection_control/connection_control_data.h" /* variables and status */
 #include "plugin/connection_control/connection_control_interfaces.h" /* Observer interface */
 #include "plugin/connection_control/connection_control_memory.h" /* Connection_control_alloc */
@@ -93,7 +94,7 @@ class Connection_delay_event : public Connection_event_records {
   Connection_delay_event();
 
   /** Destructor. Removes all entries from hash before destroying hash */
-  ~Connection_delay_event() {
+  ~Connection_delay_event() override {
     reset_all();
     lf_hash_destroy(&m_entries);
   }
@@ -101,10 +102,10 @@ class Connection_delay_event : public Connection_event_records {
   void fill_IS_table(TABLE_LIST *tables);
 
   /* Overridden function */
-  bool create_or_update_entry(const Sql_string &s);
-  bool remove_entry(const Sql_string &s);
-  bool match_entry(const Sql_string &s, void *value);
-  void reset_all();
+  bool create_or_update_entry(const Sql_string &s) override;
+  bool remove_entry(const Sql_string &s) override;
+  bool match_entry(const Sql_string &s, void *value) override;
+  void reset_all() override;
 
  private:
   /** Hash for storing Connection_event_record per user */
@@ -125,9 +126,9 @@ class Connection_delay_action : public Connection_event_observer,
                           size_t status_vars_size, mysql_rwlock_t *lock);
 
   /** Destructor */
-  ~Connection_delay_action() {
+  ~Connection_delay_action() override {
     deinit();
-    m_lock = 0;
+    m_lock = nullptr;
   }
 
   void init(Connection_event_coordinator_services *coordinator);
@@ -136,10 +137,6 @@ class Connection_delay_action : public Connection_event_observer,
     Set threshold value.
 
     @param threshold [in]        New threshold value
-
-    @returns whether threshold value was changed successfully or not
-      @retval true  Success
-      @retval false Failure. Invalid threshold value specified.
   */
 
   void set_threshold(int64 threshold) {
@@ -189,10 +186,10 @@ class Connection_delay_action : public Connection_event_observer,
   bool notify_event(MYSQL_THD thd,
                     Connection_event_coordinator_services *coordinator,
                     const mysql_event_connection *connection_event,
-                    Error_handler *error_handler);
+                    Error_handler *error_handler) override;
   bool notify_sys_var(Connection_event_coordinator_services *coordinator,
                       opt_connection_control variable, void *new_value,
-                      Error_handler *error_handler);
+                      Error_handler *error_handler) override;
 
  private:
   void deinit();

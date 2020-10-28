@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2015, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -49,9 +49,9 @@
 
 class Locking_service_deadlock_error_handler : public Internal_error_handler {
  public:
-  virtual bool handle_condition(THD *, uint sql_errno, const char *,
-                                Sql_condition::enum_severity_level *,
-                                const char *) {
+  bool handle_condition(THD *, uint sql_errno, const char *,
+                        Sql_condition::enum_severity_level *,
+                        const char *) override {
     if (sql_errno == ER_LOCK_DEADLOCK) {
       my_error(ER_LOCKING_SERVICE_DEADLOCK, MYF(0));
       return true;
@@ -87,7 +87,7 @@ class Release_all_locking_service_locks : public MDL_release_locks_visitor {
  public:
   Release_all_locking_service_locks() {}
 
-  virtual bool release(MDL_ticket *ticket) {
+  bool release(MDL_ticket *ticket) override {
     return ticket->get_key()->mdl_namespace() == MDL_key::LOCKING_SERVICE;
   }
 };
@@ -100,7 +100,7 @@ class Release_locking_service_locks : public MDL_release_locks_visitor {
   explicit Release_locking_service_locks(const char *lock_namespace)
       : m_lock_namespace(lock_namespace) {}
 
-  virtual bool release(MDL_ticket *ticket) {
+  bool release(MDL_ticket *ticket) override {
     return (ticket->get_key()->mdl_namespace() == MDL_key::LOCKING_SERVICE &&
             strcmp(m_lock_namespace, ticket->get_key()->db_name()) == 0);
   }
@@ -110,7 +110,7 @@ int acquire_locking_service_locks(MYSQL_THD opaque_thd,
                                   const char *lock_namespace,
                                   const char **lock_names, size_t lock_num,
                                   enum_locking_service_lock_type lock_type,
-                                  ulong lock_timeout) {
+                                  Timeout_type lock_timeout) {
   if (lock_num == 0) return 0;
 
   // Check that namespace length is acceptable
@@ -177,7 +177,7 @@ void release_all_locking_service_locks(THD *thd) {
 int mysql_acquire_locking_service_locks(
     MYSQL_THD opaque_thd, const char *lock_namespace, const char **lock_names,
     size_t lock_num, enum_locking_service_lock_type lock_type,
-    ulong lock_timeout) {
+    Timeout_type lock_timeout) {
   return acquire_locking_service_locks(opaque_thd, lock_namespace, lock_names,
                                        lock_num, lock_type, lock_timeout);
 }

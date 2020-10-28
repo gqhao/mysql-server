@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2016, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -42,10 +42,6 @@
 //
 // PUBLIC
 //
-EventLoggerBase::~EventLoggerBase()
-{
-  
-}
 
 #define QQQQ char *m_text, size_t m_text_len, const Uint32* theData, Uint32 len
 
@@ -57,8 +53,6 @@ void getTextConnected(QQQQ) {
 void getTextConnectedApiVersion(QQQQ) {
   char tmp[100];
   Uint32 mysql_version = theData[3];
-  if (theData[2] < NDBD_SPLIT_VERSION)
-  mysql_version = 0;
   BaseString::snprintf(m_text, m_text_len, 
 		       "Node %u: API %s",
 		       theData[1],
@@ -94,8 +88,6 @@ void getTextNDBStartStarted(QQQQ) {
 
   char tmp[100];
   Uint32 mysql_version = theData[2];
-  if (theData[1] < NDBD_SPLIT_VERSION)
-    mysql_version = 0;
   BaseString::snprintf(m_text, m_text_len, 
 		       "Start initiated (%s)", 
 		       ndbGetVersionString(theData[1], mysql_version, 0,
@@ -152,7 +144,7 @@ void getTextNDBStopForced(QQQQ) {
       reason_str.appfmt(" (extra info %d)", extra);
   }
   if (sphase < 255)
-    sphase_str.appfmt(" Occured during startphase %u.", sphase);
+    sphase_str.appfmt(" Occurred during startphase %u.", sphase);
   BaseString::snprintf(m_text, m_text_len,
 		       "Forced node shutdown completed%s.%s%s",
 		       action_str.c_str(), sphase_str.c_str(),
@@ -169,8 +161,6 @@ void getTextNDBStartCompleted(QQQQ) {
 
   char tmp[100];
   Uint32 mysql_version = theData[2];
-  if (theData[1] < NDBD_SPLIT_VERSION)
-    mysql_version = 0;
   BaseString::snprintf(m_text, m_text_len, 
 		       "Started (%s)", 
 		       ndbGetVersionString(theData[1], mysql_version, 0,
@@ -408,7 +398,7 @@ void getTextArbitResult(QQQQ) {
 			   "Network partitioning - no arbitrator configured");
       break;
     case ArbitCode::WinWaitExternal:{
-      char buf[8*4*2+1];
+      char buf[NodeBitmask::TextLength + 1];
       sd->mask.getText(buf);
       BaseString::snprintf(m_text, m_text_len,
 			   "Continuing after wait for external arbitration, "
@@ -663,30 +653,6 @@ void getTextTransporterError(QQQQ) {
     {TE_SIGNAL_LOST,"Send failed for unknown reason(signal lost)"},
     //TE_SEND_BUFFER_FULL = 0x16
     {TE_SEND_BUFFER_FULL,"The send buffer was full, but sleeping for a while solved"},
-    //TE_SCI_LINK_ERROR = 0x0017
-    {TE_SCI_LINK_ERROR,"There is no link from this node to the switch"},
-    //TE_SCI_UNABLE_TO_START_SEQUENCE = 0x18 | TE_DO_DISCONNECT
-    {TE_SCI_UNABLE_TO_START_SEQUENCE,"Could not start a sequence, because system resources are exumed or no sequence has been created"},
-    //TE_SCI_UNABLE_TO_REMOVE_SEQUENCE = 0x19 | TE_DO_DISCONNECT
-    {TE_SCI_UNABLE_TO_REMOVE_SEQUENCE,"Could not remove a sequence"},
-    //TE_SCI_UNABLE_TO_CREATE_SEQUENCE = 0x1a | TE_DO_DISCONNECT
-    {TE_SCI_UNABLE_TO_CREATE_SEQUENCE,"Could not create a sequence, because system resources are exempted. Must reboot"},
-    //TE_SCI_UNRECOVERABLE_DATA_TFX_ERROR = 0x1b | TE_DO_DISCONNECT
-    {TE_SCI_UNRECOVERABLE_DATA_TFX_ERROR,"Tried to send data on redundant link but failed"},
-    //TE_SCI_CANNOT_INIT_LOCALSEGMENT = 0x1c | TE_DO_DISCONNECT
-    {TE_SCI_CANNOT_INIT_LOCALSEGMENT,"Cannot initialize local segment"},
-    //TE_SCI_CANNOT_MAP_REMOTESEGMENT = 0x1d | TE_DO_DISCONNEC
-    {TE_SCI_CANNOT_MAP_REMOTESEGMENT,"Cannot map remote segment"},
-    //TE_SCI_UNABLE_TO_UNMAP_SEGMENT = 0x1e | TE_DO_DISCONNECT
-    {TE_SCI_UNABLE_TO_UNMAP_SEGMENT,"Cannot free the resources used by this segment (step 1)"},
-    //TE_SCI_UNABLE_TO_REMOVE_SEGMENT = 0x1f  | TE_DO_DISCONNEC
-    {TE_SCI_UNABLE_TO_REMOVE_SEGMENT,"Cannot free the resources used by this segment (step 2)"},
-    //TE_SCI_UNABLE_TO_DISCONNECT_SEGMENT = 0x20 | TE_DO_DISCONNECT
-    {TE_SCI_UNABLE_TO_DISCONNECT_SEGMENT,"Cannot disconnect from a remote segment"},
-    //TE_SHM_IPC_PERMANENT = 0x21
-    {TE_SHM_IPC_PERMANENT,"Shm ipc Permanent error"},
-    //TE_SCI_UNABLE_TO_CLOSE_CHANNEL = 0x22
-    {TE_SCI_UNABLE_TO_CLOSE_CHANNEL, "Unable to close the sci channel and the resources allocated"},
     //TE_UNSUPPORTED_BYTE_ORDER = 0x23 | TE_DO_DISCONNECT
     {TE_UNSUPPORTED_BYTE_ORDER, "Error found in message (unsupported byte order)"},
     //TE_COMPRESSED_UNSUPPORTED = 0x24 | TE_DO_DISCONNECT
@@ -964,14 +930,27 @@ void getTextBackupFailedToStart(QQQQ) {
 		       refToNode(theData[1]), theData[2]);
 }
 void getTextBackupCompleted(QQQQ) {
+  // Build 64-bit data bytes and records by assembling 32-bit signal parts
+  const Uint64 bytes_hi = theData[11];
+  const Uint64 records_hi = theData[12];
+  const Uint64 data_bytes = (bytes_hi << 32) | theData[5];
+  const Uint64 data_records = (records_hi << 32) | theData[6];
+
+  // Build 64-bit log bytes and records by assembling 32-bit signal parts
+  const Uint64 bytes_hi_log = theData[13];
+  const Uint64 records_hi_log = theData[14];
+  const Uint64 log_bytes = theData[7] | (bytes_hi_log << 32);
+  const Uint64 log_records = theData[8] | (records_hi_log << 32);
+
   BaseString::snprintf(m_text, m_text_len, 
 		       "Backup %u started from node %u completed." 
 		       " StartGCP: %u StopGCP: %u"
-		       " #Records: %u #LogRecords: %u"
-		       " Data: %u bytes Log: %u bytes",
-		       theData[2], refToNode(theData[1]),
-		       theData[3], theData[4], theData[6], theData[8],
-		       theData[5], theData[7]);
+		       " #Records: %llu #LogRecords: %llu"
+		       " Data: %llu bytes Log: %llu bytes",
+                       theData[2], refToNode(theData[1]),
+                       theData[3], theData[4],
+                       data_records, log_records,
+                       data_bytes, log_bytes);
 }
 void getTextBackupStatus(QQQQ) {
   if (theData[1])
@@ -1195,7 +1174,7 @@ void getTextSubscriptionStatus(QQQQ)
   case(1): // SubscriptionStatus::DISCONNECTED
     BaseString::snprintf(m_text, m_text_len,
                          "Disconnecting node %u because it has "
-                         "exceeded MaxBufferedEpochs (%u > %u), epoch %u/%u",
+                         "exceeded MaxBufferedEpochs (%u >= %u), epoch %u/%u",
                          theData[2],
                          theData[5],
                          theData[6],
@@ -1345,8 +1324,8 @@ void getTextConnectCheckStarted(QQQQ)
   Uint32 reason = theData[2];
   Uint32 causing_node = theData[3];
   Uint32 bitmaskSz = theData[4];
-  char otherNodeMask[100];
-  char suspectNodeMask[100];
+  char otherNodeMask[NodeBitmask::TextLength + 1];
+  char suspectNodeMask[NodeBitmask::TextLength + 1];
   BitmaskImpl::getText(bitmaskSz, theData + 5 + (0 * bitmaskSz), otherNodeMask);
   BitmaskImpl::getText(bitmaskSz, theData + 5 + (1 * bitmaskSz), suspectNodeMask);
   Uint32 suspectCount = BitmaskImpl::count(bitmaskSz, theData + 5 + (1 * bitmaskSz));

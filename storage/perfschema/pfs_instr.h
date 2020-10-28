@@ -1,4 +1,4 @@
-/* Copyright (c) 2008, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2008, 2020, Oracle and/or its affiliates. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -56,6 +56,7 @@ class THD;
 #endif
 #include "lf.h"
 #include "my_compiler.h"
+#include "my_hostname.h" /* HOSTNAME_LENGTH */
 #include "sql/mdl.h"
 #include "storage/perfschema/pfs_column_types.h"
 #include "storage/perfschema/pfs_con_slice.h"
@@ -266,7 +267,7 @@ struct PFS_ALIGNED PFS_socket : public PFS_instr {
   /** Owning thread, if applicable */
   PFS_thread *m_thread_owner;
   /** Socket file descriptor */
-  uint m_fd;
+  my_socket m_fd;
   /** Raw socket address */
   struct sockaddr_storage m_sock_addr;
   /** Length of address */
@@ -618,6 +619,8 @@ struct PFS_ALIGNED PFS_thread : PFS_connection_slice {
   PFS_user *m_user;
   PFS_account *m_account;
 
+  /** Remote (peer) port */
+  uint m_peer_port;
   /** Raw socket address */
   struct sockaddr_storage m_sock_addr;
   /** Length of address */
@@ -671,7 +674,7 @@ struct PFS_ALIGNED PFS_thread : PFS_connection_slice {
 
   const PFS_memory_safe_stat *read_instr_class_memory_stats() const {
     if (!m_has_memory_stats) {
-      return NULL;
+      return nullptr;
     }
     return m_instr_class_memory_stats;
   }
@@ -714,18 +717,23 @@ void destroy_cond(PFS_cond *pfs);
 PFS_thread *create_thread(PFS_thread_class *klass, const void *identity,
                           ulonglong processlist_id);
 
-PFS_thread *find_thread(ulonglong thread_id);
+PFS_thread *find_thread_by_processlist_id(ulonglong processlist_id);
+PFS_thread *find_thread_by_internal_id(ulonglong thread_id);
 
 void destroy_thread(PFS_thread *pfs);
 
 PFS_file *find_or_create_file(PFS_thread *thread, PFS_file_class *klass,
                               const char *filename, uint len, bool create);
 
-void find_and_rename_file(PFS_thread *thread, const char *old_filename,
-                          uint old_len, const char *new_filename, uint new_len);
+PFS_file *start_file_rename(PFS_thread *thread, const char *old_name);
+int end_file_rename(PFS_thread *thread, PFS_file *pfs, const char *new_name,
+                    int rename_result);
 
+PFS_file *find_file(PFS_thread *thread, PFS_file_class *klass,
+                    const char *filename, uint len);
 void release_file(PFS_file *pfs);
-void destroy_file(PFS_thread *thread, PFS_file *pfs);
+void delete_file_name(PFS_thread *thread, PFS_file *pfs);
+void destroy_file(PFS_thread *thread, PFS_file *pfs, bool delete_name);
 PFS_table *create_table(PFS_table_share *share, PFS_thread *opening_thread,
                         const void *identity);
 void destroy_table(PFS_table *pfs);
@@ -844,6 +852,10 @@ void update_metadata_derived_flags();
 void update_thread_derived_flags();
 /** Update derived flags for all instruments. */
 void update_instruments_derived_flags();
+
+/** Clear source file pointers for all statements, stages, waits and
+ * transactions. */
+void reset_source_file_pointers();
 
 extern LF_HASH filename_hash;
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,8 +22,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-#ifndef XPLUGIN_XCL_MOCK_CONNECTION_STATE_H_
-#define XPLUGIN_XCL_MOCK_CONNECTION_STATE_H_
+#ifndef UNITTEST_GUNIT_XPLUGIN_XCL_MOCK_CONNECTION_STATE_H_
+#define UNITTEST_GUNIT_XPLUGIN_XCL_MOCK_CONNECTION_STATE_H_
 
 #include <gmock/gmock.h>
 #include <memory>
@@ -43,9 +43,10 @@ class Mock_connection_state : public XConnection::State {
   MOCK_CONST_METHOD0(get_ssl_version, std::string());
   MOCK_CONST_METHOD0(get_ssl_cipher, std::string());
   MOCK_CONST_METHOD0(get_connection_type, Connection_type());
+  MOCK_CONST_METHOD0(has_data, bool());
 };
 
 }  // namespace test
 }  // namespace xcl
 
-#endif  // XPLUGIN_XCL_MOCK_CONNECTION_STATE_H_
+#endif  // UNITTEST_GUNIT_XPLUGIN_XCL_MOCK_CONNECTION_STATE_H_

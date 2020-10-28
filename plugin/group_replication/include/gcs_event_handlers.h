@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -31,17 +31,14 @@
 #include "plugin/group_replication/include/gcs_plugin_messages.h"
 #include "plugin/group_replication/include/gcs_view_modification_notifier.h"
 #include "plugin/group_replication/include/plugin_constants.h"
-#include "plugin/group_replication/include/read_mode_handler.h"
+#include "plugin/group_replication/include/plugin_handlers/read_mode_handler.h"
+#include "plugin/group_replication/include/plugin_messages/group_action_message.h"
+#include "plugin/group_replication/include/plugin_messages/recovery_message.h"
+#include "plugin/group_replication/include/plugin_messages/single_primary_message.h"
 #include "plugin/group_replication/include/recovery.h"
-#include "plugin/group_replication/include/recovery_message.h"
 #include "plugin/group_replication/include/services/notification/notification.h"
 #include "plugin/group_replication/libmysqlgcs/include/mysql/gcs/gcs_communication_event_listener.h"
 #include "plugin/group_replication/libmysqlgcs/include/mysql/gcs/gcs_control_event_listener.h"
-
-/*
- The server version in which member weight was introduced.
- */
-#define PRIMARY_ELECTION_MEMBER_WEIGHT_VERSION 0x050720
 
 /**
   Group_member_info_pointer_comparator to guarantee uniqueness
@@ -67,21 +64,20 @@ class Plugin_gcs_events_handler : public Gcs_communication_event_listener,
   */
   Plugin_gcs_events_handler(Applier_module_interface *applier_module,
                             Recovery_module *recovery_module,
-                            Plugin_gcs_view_modification_notifier *vc_notifier,
                             Compatibility_module *compatibility_manager,
                             ulong components_stop_timeout);
-  virtual ~Plugin_gcs_events_handler();
+  ~Plugin_gcs_events_handler() override;
 
   /*
    Implementation of all callback methods
    */
-  void on_message_received(const Gcs_message &message) const;
+  void on_message_received(const Gcs_message &message) const override;
   void on_view_changed(const Gcs_view &new_view,
-                       const Exchanged_data &exchanged_data) const;
-  Gcs_message_data *get_exchangeable_data() const;
+                       const Exchanged_data &exchanged_data) const override;
+  Gcs_message_data *get_exchangeable_data() const override;
   void on_suspicions(
       const std::vector<Gcs_member_identifier> &members,
-      const std::vector<Gcs_member_identifier> &unreachable) const;
+      const std::vector<Gcs_member_identifier> &unreachable) const override;
 
   /**
     Sets the component stop timeout.
@@ -90,17 +86,38 @@ class Plugin_gcs_events_handler : public Gcs_communication_event_listener,
   */
   void set_stop_wait_timeout(ulong timeout) { stop_wait_timeout = timeout; }
 
+  /**
+    This function disable read-only mode when member version is compatible with
+    group.
+
+    @param[in]  force_check  Compatibility is mandatory re-checked
+  */
+  void disable_read_mode_for_compatible_members(bool force_check = false) const;
+
  private:
   /*
    Individual handling methods for all possible message types
    received via on_message_received(...)
    */
   void handle_transactional_message(const Gcs_message &message) const;
+  void handle_transactional_with_guarantee_message(
+      const Gcs_message &message) const;
+  void handle_transaction_prepared_message(const Gcs_message &message) const;
+  void handle_sync_before_execution_message(const Gcs_message &message) const;
   void handle_certifier_message(const Gcs_message &message) const;
-  void handle_recovery_message(const Gcs_message &message) const;
+  void handle_recovery_message(Plugin_gcs_message *message) const;
   void handle_stats_message(const Gcs_message &message) const;
-  void handle_single_primary_message(const Gcs_message &message) const;
-
+  void handle_single_primary_message(
+      Plugin_gcs_message *processed_message) const;
+  void handle_group_action_message(const Gcs_message &message) const;
+  /**
+    This method passes the message to message listeners
+    @param plugin_message A pointer to the processed plugin gcs message
+    @param message_origin A id of the message originating member
+    @return true if the message should be skipped, false otherwise
+  */
+  bool pre_process_message(Plugin_gcs_message *plugin_message,
+                           const std::string &message_origin) const;
   /*
    Methods to act upon members after a on_view_change(...) is called
    */
@@ -134,37 +151,15 @@ class Plugin_gcs_events_handler : public Gcs_communication_event_listener,
     This method handles the election of a new primary node when the plugin runs
     in single primary mode.
 
+    @param election_mode     election type
+    @param suggested_primary what should be the next primary to elect
+
     @note This function unsets the super read only mode on primary node
           and sets it on secondary nodes
   */
-  void handle_leader_election_if_needed() const;
-
-  /**
-    Sort lower version members based on member weight if member version
-    is greater than equal to PRIMARY_ELECTION_MEMBER_WEIGHT_VERSION or uuid.
-
-    @param all_members_info    the vector with members info
-    @param lowest_version_end  first iterator position where members version
-                               increases.
-   */
-  void sort_members_for_election(
-      std::vector<Group_member_info *> *all_members_info,
-      std::vector<Group_member_info *>::iterator lowest_version_end) const;
-
-  /**
-    Sort members based on member_version and get first iterator position
-    where member version differs.
-
-    @param all_members_info    the vector with members info
-
-    @return  the first iterator position where members version increase.
-
-    @note from the start of the list to the returned iterator, all members have
-          the lowest version in the group.
-   */
-  std::vector<Group_member_info *>::iterator
-  sort_and_get_lowest_version_member_position(
-      std::vector<Group_member_info *> *all_members_info) const;
+  void handle_leader_election_if_needed(
+      enum_primary_election_mode election_mode,
+      std::string &suggested_primary) const;
 
   int process_local_exchanged_data(const Exchanged_data &exchanged_data,
                                    bool is_joining) const;
@@ -234,16 +229,26 @@ class Plugin_gcs_events_handler : public Gcs_communication_event_listener,
       1) GTID assignment block size
       2) Write set hash algorithm
 
-    @return
-      @retval 0     Joiner has the same value as all other members
-      @retval !=0   Otherwise
+    @retval 0     Joiner has the same value as all other members
+    @retval !=0   Otherwise
   */
   int compare_member_option_compatibility() const;
 
   /**
-    This method submits a request to leave the group
+    Check if a member is not entering a group where an action is running
+
+    @retval false     no group action is running
+    @retval true   a group action is running
   */
-  void leave_group_on_error() const;
+  bool is_group_running_a_configuration_change() const;
+
+  /**
+    Check if the group is running a primary election
+
+    @retval false  no primary election is running
+    @retval true   a primary election is running
+  */
+  bool is_group_running_a_primary_election() const;
 
   /**
     This method checks if member was expelled from the group due
@@ -251,9 +256,8 @@ class Plugin_gcs_events_handler : public Gcs_communication_event_listener,
 
     @param[in]  view        the view delivered by the GCS
 
-    @return
-        @retval true   the member was expelled
-        @retval false  otherwise
+    @retval true   the member was expelled
+    @retval false  otherwise
   */
   bool was_member_expelled_from_group(const Gcs_view &view) const;
 
@@ -294,8 +298,6 @@ class Plugin_gcs_events_handler : public Gcs_communication_event_listener,
   */
   std::set<Group_member_info *, Group_member_info_pointer_comparator>
       *temporary_states;
-
-  Plugin_gcs_view_modification_notifier *view_change_notifier;
 
   Compatibility_module *compatibility_manager;
 

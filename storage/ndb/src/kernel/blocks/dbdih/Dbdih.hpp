@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -31,6 +31,7 @@
 #include "Sysfile.hpp"
 #include <SignalCounter.hpp>
 
+#include <signaldata/RedoStateRep.hpp>
 #include <signaldata/MasterLCP.hpp>
 #include <signaldata/CopyGCIReq.hpp>
 #include <blocks/mutexes.hpp>
@@ -63,9 +64,9 @@
 /*#########*/
 /* GENERAL */
 /*#########*/
-#define ZVAR_NO_WORD 1
-#define ZVAR_NO_CRESTART_INFO 20
-#define ZVAR_NO_CRESTART_INFO_TO_FILE 21
+#define ZVAR_NO_WORD 0
+#define ZVAR_NO_CRESTART_INFO 1
+#define ZVAR_NO_CRESTART_INFO_TO_FILE 2
 #define ZVALID 1
 #define ZINVALID 2
 
@@ -751,7 +752,7 @@ public:
     Uint32 noOfWords;
     Uint32 tabRemoveNode;
     Uint32 noOfFragChunks;
-    Uint32 tabErrorCode;
+    Uint32 tabActiveLcpFragments;
 
     struct {
       Uint32 tabUserRef;
@@ -909,7 +910,7 @@ public:
   typedef SLFifoList<TakeOverRecord_pool> TakeOverRecord_fifo;
 
 
-  virtual bool getParam(const char * param, Uint32 * retVal) { 
+  bool getParam(const char * param, Uint32 * retVal) override { 
     if (param && strcmp(param, "ActiveMutexes") == 0)
     {
       if (retVal)
@@ -923,7 +924,7 @@ public:
   
 public:
   Dbdih(Block_context& ctx);
-  virtual ~Dbdih();
+  ~Dbdih() override;
 
   struct RWFragment {
     Uint32 pageIndex;
@@ -995,8 +996,6 @@ private:
   void execDUMP_STATE_ORD(Signal *);
   void execNDB_TAMPER(Signal *);
   void execDEBUG_SIG(Signal *);
-  void execEMPTY_LCP_CONF(Signal *);
-  void execEMPTY_LCP_REP(Signal*);
   void execMASTER_GCPREF(Signal *);
   void execMASTER_GCPREQ(Signal *);
   void execMASTER_GCPCONF(Signal *);
@@ -1050,6 +1049,7 @@ private:
   void execCHECK_LCP_IDLE_ORD(Signal *);
 
   void execDIH_GET_TABINFO_REQ(Signal*);
+  void execSET_UP_MULTI_TRP_CONF(Signal*);
 
   /**
    * A number of functions used to find out if any node is currently is
@@ -1098,7 +1098,6 @@ private:
   void dequeue_lcp_rep(Signal*);
   void start_copy_meta_data(Signal*);
   void start_lcp(Signal*);
-  bool check_if_pause_lcp_possible(void);
   void start_lcp_before_mutex(Signal*);
   void queue_lcp_frag_rep(Signal *signal, LcpFragRep *lcpReport);
   void queue_lcp_complete_rep(Signal *signal, Uint32 lcpId);
@@ -1114,7 +1113,6 @@ private:
    * lcp protocol with all nodes.
    */
   bool c_lcp_runs_with_pause_support; /* Master state */
-  bool c_old_node_waiting_for_lcp_end; /* Master state */
 
   /**
    * This is the state in the master that keeps track of where the master is 
@@ -1298,6 +1296,7 @@ private:
   void execWAIT_GCP_REQ(Signal* signal);
   void execWAIT_GCP_REF(Signal* signal);
   void execWAIT_GCP_CONF(Signal* signal);
+  void execREDO_STATE_REP(Signal* signal);
 
   void execPREP_DROP_TAB_REQ(Signal* signal);
   void execDROP_TAB_REQ(Signal* signal);
@@ -1333,7 +1332,6 @@ private:
   void nullRoutine(Signal *, Uint32 nodeId, Uint32);
   void sendCOPY_GCIREQ(Signal *, Uint32 nodeId, Uint32);
   void sendDIH_SWITCH_REPLICA_REQ(Signal *, Uint32 nodeId, Uint32);
-  void sendEMPTY_LCP_REQ(Signal *, Uint32 nodeId, Uint32);
   void sendEND_TOREQ(Signal *, Uint32 nodeId, Uint32);
   void sendGCP_COMMIT(Signal *, Uint32 nodeId, Uint32);
   void sendGCP_PREPARE(Signal *, Uint32 nodeId, Uint32);
@@ -1412,7 +1410,7 @@ private:
 //------------------------------------
   void checkKeepGci(TabRecordPtr, Uint32, Fragmentstore*, Uint32);
   void checkLcpStart(Signal *, Uint32 lineNo, Uint32 delay);
-  void checkStartMoreLcp(Signal *, Uint32 nodeId);
+  bool checkStartMoreLcp(Signal *, Uint32 nodeId, bool startNext);
   bool reportLcpCompletion(const struct LcpFragRep *);
   void sendLCP_COMPLETE_REP(Signal *);
 
@@ -1487,6 +1485,14 @@ private:
                    NodeGroupRecordPtr NGPtr,
                    FragmentstorePtr regFragptr);
   void sendDihRestartRef(Signal*);
+  void unpack_sysfile_format_v1(bool set_max_node_id);
+  void pack_sysfile_format_v1();
+  void unpack_sysfile_format_v2(bool set_max_node_id);
+  void pack_sysfile_format_v2();
+  void send_COPY_GCIREQ_data_v1(Signal*, Uint32);
+  void send_COPY_GCIREQ_data_v2(Signal*, Uint32);
+  void send_START_MECONF_data_v1(Signal*, Uint32);
+  void send_START_MECONF_data_v2(Signal*, Uint32);
   void selectMasterCandidateAndSend(Signal *);
   void setLcpActiveStatusEnd(Signal*);
   void setLcpActiveStatusStart(Signal *);
@@ -1613,7 +1619,9 @@ private:
   void checkCopyTab(Signal*, NodeRecordPtr failedNodePtr);
 
   Uint32 compute_max_failure_time();
-  void setGCPStopTimeouts(Signal*);
+  void setGCPStopTimeouts(Signal*,
+                          bool set_gcp_save_max_lag = true,
+                          bool set_micro_gcp_max_lag = true);
   void sendINFO_GCP_STOP_TIMER(Signal*);
   void initCommonData();
   void initialiseRecordsLab(Signal *, Uint32 stepNo, Uint32, Uint32);
@@ -1628,7 +1636,6 @@ private:
   void startRemoveFailedNode(Signal *, NodeRecordPtr failedNodePtr);
   void handleGcpTakeOver(Signal *, NodeRecordPtr failedNodePtr);
   void handleLcpTakeOver(Signal *, NodeRecordPtr failedNodePtr);
-  void handleNewMaster(Signal *, NodeRecordPtr failedNodePtr);
   void handleTakeOver(Signal*, Ptr<TakeOverRecord>);
   void handleLcpMasterTakeOver(Signal *, Uint32 nodeId);
 
@@ -2170,6 +2177,8 @@ private:
      */
     NdbSeqLock m_lock;
     Uint64 m_old_gci;
+    // To avoid double send of SUB_GCP_COMPLETE_REP to SUMA via DBLQH.
+    Uint64 m_last_sent_gci;
     Uint64 m_current_gci; // Currently active
     Uint64 m_new_gci;     // Currently being prepared...
     enum State {
@@ -2195,6 +2204,10 @@ private:
       Uint32 m_gci;
       Uint32 m_elapsed_ms; //MilliSec since last GCP_SAVEed
       Uint32 m_max_lag_ms; //Max allowed lag(ms) before 'crashSystem'
+      bool m_need_max_lag_recalc; // Whether max lag need to be recalculated
+#ifdef ERROR_INSERT
+      bool test_set_max_lag; // Testing
+#endif
     } m_gcp_save;
 
     struct
@@ -2202,9 +2215,17 @@ private:
       Uint64 m_gci;
       Uint32 m_elapsed_ms; //MilliSec since last GCP_COMMITed
       Uint32 m_max_lag_ms; //Max allowed lag(ms) before 'crashSystem'
+      bool m_need_max_lag_recalc; // Whether max lag need to be recalculated
+#ifdef ERROR_INSERT
+      bool test_set_max_lag; // Testing
+#endif
     } m_micro_gcp;
 
     NDB_TICKS m_last_check; //Time GCP monitor last checked
+
+#ifdef ERROR_INSERT
+    Uint32 m_savedMaxCommitLag;  // Testing
+#endif
   } m_gcp_monitor;
 
   /*------------------------------------------------------------------------*/
@@ -2352,6 +2373,22 @@ private:
 
     Uint32 m_lastLCP_COMPLETE_REP_id;
     Uint32 m_lastLCP_COMPLETE_REP_ref;
+
+    // Whether the 'lcp' is already completed under the
+    // coordination of the failed master
+    bool already_completed_lcp(Uint32 lcp, Uint32 current_master) const
+    {
+      const Uint32 last_completed_master_node =
+        refToNode(m_lastLCP_COMPLETE_REP_ref);
+      if (m_lastLCP_COMPLETE_REP_id == lcp &&
+          last_completed_master_node != current_master &&
+          last_completed_master_node == m_MASTER_LCPREQ_FailedNodeId)
+      {
+        return true;
+      }
+      return false;
+    }
+
   } c_lcpState;
   
   /*------------------------------------------------------------------------*/
@@ -2391,7 +2428,6 @@ private:
 public:
   enum LcpMasterTakeOverState {
     LMTOS_IDLE = 0,
-    LMTOS_WAIT_EMPTY_LCP = 1,   // Currently doing empty LCP
     LMTOS_WAIT_LCP_FRAG_REP = 2,// Currently waiting for outst. LCP_FRAG_REP
     LMTOS_INITIAL = 3,
     LMTOS_ALL_IDLE = 4,
@@ -2413,9 +2449,7 @@ private:
     Uint32 minTableId;
     Uint32 minFragId;
     Uint32 failedNodeId;
-    bool use_empty_lcp;
   } c_lcpMasterTakeOverState;
-  bool check_if_empty_lcp_needed(void);
   
   Uint16 cmasterNodeId;
 
@@ -2468,7 +2502,6 @@ private:
   SignalCounter c_COPY_TABREQ_Counter;
   SignalCounter c_UPDATE_FRAG_STATEREQ_Counter;
   SignalCounter c_DIH_SWITCH_REPLICA_REQ_Counter;
-  SignalCounter c_EMPTY_LCP_REQ_Counter;
   SignalCounter c_GCP_COMMIT_Counter;
   SignalCounter c_GCP_PREPARE_Counter;
   SignalCounter c_GCP_SAVEREQ_Counter;
@@ -2556,6 +2589,17 @@ private:
     WaitGCPMasterRecord() { clientRef = 0;}
     Uint32 clientData;
     BlockReference clientRef;
+    /**
+     * GCI which must be completed before CONF sent
+     * For WaitEpoch, it is not used, the next
+     * completing epoch sends a CONF.
+     */
+    Uint32 waitGCI;
+
+    /**
+     * Special value indicating a request for shutdown sync
+     */
+    static const Uint32 ShutdownSyncGci = 0xffffffff;
 
     union { Uint32 nextPool; Uint32 nextList; };
     Uint32 prevList;
@@ -2579,8 +2623,13 @@ private:
 
   void checkWaitGCPProxy(Signal*, NodeId failedNodeId);
   void checkWaitGCPMaster(Signal*, NodeId failedNodeId);
+  void checkShutdownSync();
   void emptyWaitGCPMasterQueue(Signal*, Uint64, WaitGCPList&);
-  
+
+  void getNodeBitmap(NdbNodeBitmask& map,
+                     Uint32 listHead,
+                     int (*versionFunction) (Uint32));
+
   /**
    * Stop me
    */
@@ -2594,10 +2643,11 @@ private:
 
   void checkStopMe(Signal *, NodeRecordPtr failedNodePtr);
   
-#define DIH_CDATA_SIZE 128
+#define DIH_CDATA_SIZE _SYSFILE_FILE_SIZE
   /**
-   * This variable must be atleast the size of Sysfile::SYSFILE_SIZE32
+   * This variable must be atleast the size of Sysfile::SYSFILE_SIZE32_v2
    */
+  Uint32 cdata_size_in_words;
   Uint32 cdata[DIH_CDATA_SIZE];       /* TEMPORARY ARRAY VARIABLE */
 
   /**
@@ -2682,7 +2732,8 @@ private:
     enum State {
       LS_INITIAL = 0,
       LS_RUNNING = 1,
-      LS_COMPLETE = 2
+      LS_COMPLETE = 2,
+      LS_RUNNING_MTO_TAB_SAVED = 3
     } m_state;
     
     StartLcpReq m_start_lcp_req;
@@ -2693,6 +2744,7 @@ private:
     
     void reset();
     void init(const StartLcpReq*);
+    void init_master_take_over_idle_to_tab_saved();
     void lcp_frag_rep(const LcpFragRep*);
     void lcp_complete_rep(Uint32 gci);
     
@@ -2728,6 +2780,7 @@ private:
   Uint32 dihGetInstanceKey(Uint32 tabId, Uint32 fragId);
   Uint32 dihGetInstanceKeyCanFail(Uint32 tabId, Uint32 fragId);
 
+  void log_setNoSend();
   /**
    * Get minimum version of nodes in alive-list
    */
@@ -2746,9 +2799,25 @@ private:
 
   bool handle_master_take_over_copy_gci(Signal *signal,
                                         NodeId newMasterNodeId);
+
+  RedoStateRep::RedoAlertState m_node_redo_alert_state[MAX_NDB_NODES];
+  RedoStateRep::RedoAlertState m_global_redo_alert_state;
+  RedoStateRep::RedoAlertState get_global_redo_alert_state();
+  void sendREDO_STATE_REP_to_all(Signal*, Uint32 block, bool send_to_all);
+  bool m_master_lcp_req_lcp_already_completed;
+
+  void complete_restart_nr(Signal*);
+
+  /* The highest data node id in the cluster. */
+  Uint32 m_max_node_id;
+  bool m_set_up_multi_trp_in_node_restart;
+public:
+  bool is_master() { return isMaster(); }
+  
+  NdbNodeBitmask c_shutdownReqNodes;
 };
 
-#if (DIH_CDATA_SIZE < _SYSFILE_SIZE32)
+#if (DIH_CDATA_SIZE < _SYSFILE_SIZE32_v2)
 #error "cdata is to small compared to Sysfile size"
 #endif
 

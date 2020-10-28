@@ -13,12 +13,12 @@ select @@global.binlog_format, @@session.binlog_format;
 [on slave]
 set @old_global_binlog_format=  @@global.binlog_format;
 set @old_session_binlog_format=  @@session.binlog_format;
+include/stop_slave.inc
 SET GLOBAL binlog_format = 'ROW';
 SET SESSION binlog_format = 'ROW';
 select @@global.binlog_format, @@session.binlog_format;
 @@global.binlog_format	ROW
 @@session.binlog_format	ROW
-include/stop_slave.inc
 include/start_slave.inc
 [on master]
 CREATE TABLE t1(id MEDIUMINT NOT NULL AUTO_INCREMENT,
@@ -122,11 +122,11 @@ Master byrange	500
 show create table t3;
 Table	t3
 Create Table	CREATE TABLE `t3` (
-  `id` mediumint(9) NOT NULL AUTO_INCREMENT,
+  `id` mediumint NOT NULL AUTO_INCREMENT,
   `dt` timestamp NULL DEFAULT NULL,
   `user` char(255) DEFAULT NULL,
   `uuidf` longblob,
-  `fkid` mediumint(9) DEFAULT NULL,
+  `fkid` mediumint DEFAULT NULL,
   `filler` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1001 DEFAULT CHARSET=latin1
@@ -158,6 +158,7 @@ DROP PROCEDURE p1;
 DROP PROCEDURE p2;
 DROP PROCEDURE p3;
 [on slave]
+include/stop_slave_sql.inc
 set @@global.binlog_format=  @old_global_binlog_format;
 set @@session.binlog_format=  @old_session_binlog_format;
 include/rpl_end.inc

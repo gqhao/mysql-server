@@ -82,7 +82,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	1
+localhost	2	2
 "================== con1 connected =================="
 "================== Step 2 =================="
 call dump_thread();
@@ -171,7 +171,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	2	2
+localhost	3	3
 select uuid_short() <> 1;
 uuid_short() <> 1
 1
@@ -225,122 +225,21 @@ localhost	stage/sql/checking permissions	4
 localhost	stage/sql/closing tables	6
 localhost	stage/sql/init	4
 localhost	stage/sql/Opening tables	5
-localhost	stage/sql/starting	6
+localhost	stage/sql/starting	8
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	4
 stage/sql/closing tables	6
 stage/sql/init	4
 stage/sql/Opening tables	5
-stage/sql/starting	6
+stage/sql/starting	8
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	4
 stage/sql/closing tables	6
 stage/sql/init	4
 stage/sql/Opening tables	5
-stage/sql/starting	6
-execute dump_statements_account;
-user	host	event_name	count_star
-execute dump_statements_user;
-user	event_name	count_star
-execute dump_statements_host;
-host	event_name	count_star
-localhost	statement/com/Error	0
-localhost	statement/com/Quit	0
-localhost	statement/sp/freturn	1
-localhost	statement/sql/insert	1
-localhost	statement/sql/select	3
-execute dump_statements_global;
-event_name	count_star
-statement/com/Error	0
-statement/com/Quit	0
-statement/sp/freturn	1
-statement/sql/insert	1
-statement/sql/select	3
-execute dump_statements_history;
-event_name	count(event_name)
-statement/sp/freturn	1
-statement/sql/insert	1
-statement/sql/select	3
-execute dump_transactions_account;
-user	host	event_name	count_star
-execute dump_transactions_user;
-user	event_name	count_star
-execute dump_transactions_host;
-host	event_name	count_star
-localhost	transaction	1
-execute dump_transactions_global;
-event_name	count_star
-transaction	1
-execute dump_transactions_history;
-event_name	count(event_name)
-transaction	1
-execute dump_accounts;
-USER	HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-execute dump_users;
-USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-execute dump_hosts;
-HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	2	2
-"================== con2 connected =================="
-"================== Step 4 =================="
-call dump_thread();
-username	event_name	count_star
-user1	wait/io/file/sql/query_log	7
-user1	wait/synch/mutex/sql/LOCK_connection_count	0
-user1	wait/synch/mutex/sql/LOCK_uuid_generator	2
-username	event_name	count_star
-user2	wait/io/file/sql/query_log	1
-user2	wait/synch/mutex/sql/LOCK_connection_count	0
-user2	wait/synch/mutex/sql/LOCK_uuid_generator	0
-username	status
-user3	not found
-username	status
-user4	not found
-execute dump_waits_account;
-user	host	event_name	count_star
-execute dump_waits_user;
-user	event_name	count_star
-execute dump_waits_host;
-host	event_name	count_star
-localhost	wait/io/file/sql/query_log	8
-localhost	wait/synch/mutex/sql/LOCK_connection_count	0
-localhost	wait/synch/mutex/sql/LOCK_uuid_generator	2
-execute dump_waits_global;
-event_name	count_star
-wait/io/file/sql/query_log	8
-wait/synch/mutex/sql/LOCK_connection_count	0
-wait/synch/mutex/sql/LOCK_uuid_generator	2
-execute dump_waits_history;
-event_name	count(event_name)
-wait/io/file/sql/query_log	8
-wait/synch/mutex/sql/LOCK_uuid_generator	2
-execute dump_stages_account;
-user	host	event_name	count_star
-execute dump_stages_user;
-user	event_name	count_star
-execute dump_stages_host;
-host	event_name	count_star
-localhost	stage/sql/checking permissions	4
-localhost	stage/sql/closing tables	6
-localhost	stage/sql/init	4
-localhost	stage/sql/Opening tables	5
-localhost	stage/sql/starting	6
-execute dump_stages_global;
-event_name	count_star
-stage/sql/checking permissions	4
-stage/sql/closing tables	6
-stage/sql/init	4
-stage/sql/Opening tables	5
-stage/sql/starting	6
-execute dump_stages_history;
-event_name	count(event_name)
-stage/sql/checking permissions	4
-stage/sql/closing tables	6
-stage/sql/init	4
-stage/sql/Opening tables	5
-stage/sql/starting	6
+stage/sql/starting	8
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -384,6 +283,107 @@ USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 localhost	3	3
+"================== con2 connected =================="
+"================== Step 4 =================="
+call dump_thread();
+username	event_name	count_star
+user1	wait/io/file/sql/query_log	7
+user1	wait/synch/mutex/sql/LOCK_connection_count	0
+user1	wait/synch/mutex/sql/LOCK_uuid_generator	2
+username	event_name	count_star
+user2	wait/io/file/sql/query_log	1
+user2	wait/synch/mutex/sql/LOCK_connection_count	0
+user2	wait/synch/mutex/sql/LOCK_uuid_generator	0
+username	status
+user3	not found
+username	status
+user4	not found
+execute dump_waits_account;
+user	host	event_name	count_star
+execute dump_waits_user;
+user	event_name	count_star
+execute dump_waits_host;
+host	event_name	count_star
+localhost	wait/io/file/sql/query_log	8
+localhost	wait/synch/mutex/sql/LOCK_connection_count	0
+localhost	wait/synch/mutex/sql/LOCK_uuid_generator	2
+execute dump_waits_global;
+event_name	count_star
+wait/io/file/sql/query_log	8
+wait/synch/mutex/sql/LOCK_connection_count	0
+wait/synch/mutex/sql/LOCK_uuid_generator	2
+execute dump_waits_history;
+event_name	count(event_name)
+wait/io/file/sql/query_log	8
+wait/synch/mutex/sql/LOCK_uuid_generator	2
+execute dump_stages_account;
+user	host	event_name	count_star
+execute dump_stages_user;
+user	event_name	count_star
+execute dump_stages_host;
+host	event_name	count_star
+localhost	stage/sql/checking permissions	4
+localhost	stage/sql/closing tables	6
+localhost	stage/sql/init	4
+localhost	stage/sql/Opening tables	5
+localhost	stage/sql/starting	8
+execute dump_stages_global;
+event_name	count_star
+stage/sql/checking permissions	4
+stage/sql/closing tables	6
+stage/sql/init	4
+stage/sql/Opening tables	5
+stage/sql/starting	8
+execute dump_stages_history;
+event_name	count(event_name)
+stage/sql/checking permissions	4
+stage/sql/closing tables	6
+stage/sql/init	4
+stage/sql/Opening tables	5
+stage/sql/starting	8
+execute dump_statements_account;
+user	host	event_name	count_star
+execute dump_statements_user;
+user	event_name	count_star
+execute dump_statements_host;
+host	event_name	count_star
+localhost	statement/com/Error	0
+localhost	statement/com/Quit	0
+localhost	statement/sp/freturn	1
+localhost	statement/sql/insert	1
+localhost	statement/sql/select	3
+execute dump_statements_global;
+event_name	count_star
+statement/com/Error	0
+statement/com/Quit	0
+statement/sp/freturn	1
+statement/sql/insert	1
+statement/sql/select	3
+execute dump_statements_history;
+event_name	count(event_name)
+statement/sp/freturn	1
+statement/sql/insert	1
+statement/sql/select	3
+execute dump_transactions_account;
+user	host	event_name	count_star
+execute dump_transactions_user;
+user	event_name	count_star
+execute dump_transactions_host;
+host	event_name	count_star
+localhost	transaction	1
+execute dump_transactions_global;
+event_name	count_star
+transaction	1
+execute dump_transactions_history;
+event_name	count(event_name)
+transaction	1
+execute dump_accounts;
+USER	HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
+execute dump_users;
+USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
+execute dump_hosts;
+HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
+localhost	4	4
 select uuid_short() <> 1;
 uuid_short() <> 1
 1
@@ -439,21 +439,21 @@ localhost	stage/sql/checking permissions	8
 localhost	stage/sql/closing tables	12
 localhost	stage/sql/init	8
 localhost	stage/sql/Opening tables	10
-localhost	stage/sql/starting	12
+localhost	stage/sql/starting	16
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	8
 stage/sql/closing tables	12
 stage/sql/init	8
 stage/sql/Opening tables	10
-stage/sql/starting	12
+stage/sql/starting	16
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	8
 stage/sql/closing tables	12
 stage/sql/init	8
 stage/sql/Opening tables	10
-stage/sql/starting	12
+stage/sql/starting	16
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -496,7 +496,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	3	3
+localhost	4	4
 "================== con3 connected =================="
 "================== Step 6 =================="
 call dump_thread();
@@ -542,21 +542,21 @@ localhost	stage/sql/checking permissions	8
 localhost	stage/sql/closing tables	12
 localhost	stage/sql/init	8
 localhost	stage/sql/Opening tables	10
-localhost	stage/sql/starting	12
+localhost	stage/sql/starting	16
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	8
 stage/sql/closing tables	12
 stage/sql/init	8
 stage/sql/Opening tables	10
-stage/sql/starting	12
+stage/sql/starting	16
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	8
 stage/sql/closing tables	12
 stage/sql/init	8
 stage/sql/Opening tables	10
-stage/sql/starting	12
+stage/sql/starting	16
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -599,7 +599,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	4	4
+localhost	5	5
 select uuid_short() <> 1;
 uuid_short() <> 1
 1
@@ -657,21 +657,21 @@ localhost	stage/sql/checking permissions	12
 localhost	stage/sql/closing tables	18
 localhost	stage/sql/init	12
 localhost	stage/sql/Opening tables	15
-localhost	stage/sql/starting	18
+localhost	stage/sql/starting	24
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	12
 stage/sql/closing tables	18
 stage/sql/init	12
 stage/sql/Opening tables	15
-stage/sql/starting	18
+stage/sql/starting	24
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	12
 stage/sql/closing tables	18
 stage/sql/init	12
 stage/sql/Opening tables	15
-stage/sql/starting	18
+stage/sql/starting	24
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -714,7 +714,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	4	4
+localhost	5	5
 "================== con4 connected =================="
 "================== Step 8 =================="
 call dump_thread();
@@ -762,21 +762,21 @@ localhost	stage/sql/checking permissions	12
 localhost	stage/sql/closing tables	18
 localhost	stage/sql/init	12
 localhost	stage/sql/Opening tables	15
-localhost	stage/sql/starting	18
+localhost	stage/sql/starting	24
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	12
 stage/sql/closing tables	18
 stage/sql/init	12
 stage/sql/Opening tables	15
-stage/sql/starting	18
+stage/sql/starting	24
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	12
 stage/sql/closing tables	18
 stage/sql/init	12
 stage/sql/Opening tables	15
-stage/sql/starting	18
+stage/sql/starting	24
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -819,7 +819,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	5	5
+localhost	6	6
 select uuid_short() <> 1;
 uuid_short() <> 1
 1
@@ -879,21 +879,21 @@ localhost	stage/sql/checking permissions	16
 localhost	stage/sql/closing tables	24
 localhost	stage/sql/init	16
 localhost	stage/sql/Opening tables	20
-localhost	stage/sql/starting	24
+localhost	stage/sql/starting	32
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	24
+stage/sql/starting	32
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	24
+stage/sql/starting	32
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -936,7 +936,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	5	5
+localhost	6	6
 "================== con1 disconnected =================="
 "================== Step 10 =================="
 call dump_thread();
@@ -983,21 +983,21 @@ localhost	stage/sql/checking permissions	16
 localhost	stage/sql/closing tables	24
 localhost	stage/sql/init	16
 localhost	stage/sql/Opening tables	20
-localhost	stage/sql/starting	25
+localhost	stage/sql/starting	33
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	25
+stage/sql/starting	33
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	25
+stage/sql/starting	33
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -1041,7 +1041,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	4	5
+localhost	5	6
 "================== con2 disconnected =================="
 "================== Step 11 =================="
 call dump_thread();
@@ -1086,21 +1086,21 @@ localhost	stage/sql/checking permissions	16
 localhost	stage/sql/closing tables	24
 localhost	stage/sql/init	16
 localhost	stage/sql/Opening tables	20
-localhost	stage/sql/starting	26
+localhost	stage/sql/starting	34
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	26
+stage/sql/starting	34
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	26
+stage/sql/starting	34
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -1144,7 +1144,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	3	5
+localhost	4	6
 "================== con3 disconnected =================="
 "================== Step 12 =================="
 call dump_thread();
@@ -1187,21 +1187,21 @@ localhost	stage/sql/checking permissions	16
 localhost	stage/sql/closing tables	24
 localhost	stage/sql/init	16
 localhost	stage/sql/Opening tables	20
-localhost	stage/sql/starting	27
+localhost	stage/sql/starting	35
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	27
+stage/sql/starting	35
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	27
+stage/sql/starting	35
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -1245,7 +1245,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	2	5
+localhost	3	6
 "================== con4 disconnected =================="
 "================== Step 13 =================="
 call dump_thread();
@@ -1286,21 +1286,21 @@ localhost	stage/sql/checking permissions	16
 localhost	stage/sql/closing tables	24
 localhost	stage/sql/init	16
 localhost	stage/sql/Opening tables	20
-localhost	stage/sql/starting	28
+localhost	stage/sql/starting	36
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -1344,7 +1344,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_waits_summary_by_thread_by_event_name;
 "================== WAITS_BY_THREAD truncated =================="
 "================== Step 14 =================="
@@ -1386,21 +1386,21 @@ localhost	stage/sql/checking permissions	16
 localhost	stage/sql/closing tables	24
 localhost	stage/sql/init	16
 localhost	stage/sql/Opening tables	20
-localhost	stage/sql/starting	28
+localhost	stage/sql/starting	36
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -1444,7 +1444,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_waits_summary_by_account_by_event_name;
 "================== WAITS_BY_ACCOUNT truncated =================="
 "================== Step 15 =================="
@@ -1486,21 +1486,21 @@ localhost	stage/sql/checking permissions	16
 localhost	stage/sql/closing tables	24
 localhost	stage/sql/init	16
 localhost	stage/sql/Opening tables	20
-localhost	stage/sql/starting	28
+localhost	stage/sql/starting	36
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -1544,7 +1544,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_waits_summary_by_user_by_event_name;
 "================== WAITS_BY_USER truncated =================="
 "================== Step 16 =================="
@@ -1586,21 +1586,21 @@ localhost	stage/sql/checking permissions	16
 localhost	stage/sql/closing tables	24
 localhost	stage/sql/init	16
 localhost	stage/sql/Opening tables	20
-localhost	stage/sql/starting	28
+localhost	stage/sql/starting	36
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -1644,7 +1644,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_waits_summary_by_host_by_event_name;
 "================== WAITS_BY_HOST truncated =================="
 "================== Step 17 =================="
@@ -1686,21 +1686,21 @@ localhost	stage/sql/checking permissions	16
 localhost	stage/sql/closing tables	24
 localhost	stage/sql/init	16
 localhost	stage/sql/Opening tables	20
-localhost	stage/sql/starting	28
+localhost	stage/sql/starting	36
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -1744,7 +1744,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_waits_summary_global_by_event_name;
 "================== WAITS_GLOBAL truncated =================="
 "================== Step 18 =================="
@@ -1786,21 +1786,21 @@ localhost	stage/sql/checking permissions	16
 localhost	stage/sql/closing tables	24
 localhost	stage/sql/init	16
 localhost	stage/sql/Opening tables	20
-localhost	stage/sql/starting	28
+localhost	stage/sql/starting	36
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -1844,7 +1844,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_stages_summary_by_thread_by_event_name;
 "================== STAGES_BY_THREAD truncated =================="
 "================== Step 19 =================="
@@ -1886,21 +1886,21 @@ localhost	stage/sql/checking permissions	16
 localhost	stage/sql/closing tables	24
 localhost	stage/sql/init	16
 localhost	stage/sql/Opening tables	20
-localhost	stage/sql/starting	28
+localhost	stage/sql/starting	36
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -1944,7 +1944,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_stages_summary_by_account_by_event_name;
 "================== STAGES_BY_ACCOUNT truncated =================="
 "================== Step 20 =================="
@@ -1986,21 +1986,21 @@ localhost	stage/sql/checking permissions	16
 localhost	stage/sql/closing tables	24
 localhost	stage/sql/init	16
 localhost	stage/sql/Opening tables	20
-localhost	stage/sql/starting	28
+localhost	stage/sql/starting	36
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -2044,7 +2044,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_stages_summary_by_user_by_event_name;
 "================== STAGES_BY_USER truncated =================="
 "================== Step 21 =================="
@@ -2086,21 +2086,21 @@ localhost	stage/sql/checking permissions	16
 localhost	stage/sql/closing tables	24
 localhost	stage/sql/init	16
 localhost	stage/sql/Opening tables	20
-localhost	stage/sql/starting	28
+localhost	stage/sql/starting	36
 execute dump_stages_global;
 event_name	count_star
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -2144,7 +2144,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_stages_summary_by_host_by_event_name;
 "================== STAGES_BY_HOST truncated =================="
 "================== Step 22 =================="
@@ -2193,14 +2193,14 @@ stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_stages_history;
 event_name	count(event_name)
 stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -2244,7 +2244,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_stages_summary_global_by_event_name;
 "================== STAGES_GLOBAL truncated =================="
 "================== Step 23 =================="
@@ -2300,7 +2300,7 @@ stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -2344,7 +2344,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_statements_summary_by_thread_by_event_name;
 "================== STATEMENTS_BY_THREAD truncated =================="
 "================== Step 24 =================="
@@ -2400,7 +2400,7 @@ stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -2444,7 +2444,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_statements_summary_by_account_by_event_name;
 "================== STATEMENTS_BY_ACCOUNT truncated =================="
 "================== Step 25 =================="
@@ -2500,7 +2500,7 @@ stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -2544,7 +2544,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_statements_summary_by_user_by_event_name;
 "================== STATEMENTS_BY_USER truncated =================="
 "================== Step 26 =================="
@@ -2600,7 +2600,7 @@ stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -2644,7 +2644,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_statements_summary_by_host_by_event_name;
 "================== STATEMENTS_BY_HOST truncated =================="
 "================== Step 27 =================="
@@ -2700,7 +2700,7 @@ stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -2744,7 +2744,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_statements_summary_global_by_event_name;
 "================== STATEMENTS_GLOBAL truncated =================="
 "================== Step 28 =================="
@@ -2800,7 +2800,7 @@ stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -2844,7 +2844,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_transactions_summary_by_thread_by_event_name;
 "================== TRANSACTIONS_BY_THREAD truncated =================="
 "================== Step 29 =================="
@@ -2900,7 +2900,7 @@ stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -2944,7 +2944,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_transactions_summary_by_account_by_event_name;
 "================== TRANSACTIONS_BY_ACCOUNT truncated =================="
 "================== Step 30 =================="
@@ -3000,7 +3000,7 @@ stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -3044,7 +3044,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_transactions_summary_by_user_by_event_name;
 "================== TRANSACTIONS_BY_USER truncated =================="
 "================== Step 31 =================="
@@ -3100,7 +3100,7 @@ stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -3144,7 +3144,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_transactions_summary_by_host_by_event_name;
 "================== TRANSACTIONS_BY_HOST truncated =================="
 "================== Step 32 =================="
@@ -3200,7 +3200,7 @@ stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -3244,7 +3244,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.events_transactions_summary_global_by_event_name;
 "================== TRANSACTIONS_GLOBAL truncated =================="
 "================== Step 33 =================="
@@ -3300,7 +3300,7 @@ stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -3344,7 +3344,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.accounts;
 "================== ACCOUNTS truncated =================="
 "================== Step 34 =================="
@@ -3400,7 +3400,7 @@ stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -3444,7 +3444,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.users;
 "================== USERS truncated =================="
 "================== Step 35 =================="
@@ -3500,7 +3500,7 @@ stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -3544,7 +3544,7 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	5
+localhost	2	6
 truncate performance_schema.hosts;
 "================== HOSTS truncated =================="
 "================== Step 36 =================="
@@ -3600,7 +3600,7 @@ stage/sql/checking permissions	16
 stage/sql/closing tables	24
 stage/sql/init	16
 stage/sql/Opening tables	20
-stage/sql/starting	28
+stage/sql/starting	36
 execute dump_statements_account;
 user	host	event_name	count_star
 execute dump_statements_user;
@@ -3644,4 +3644,4 @@ execute dump_users;
 USER	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
 execute dump_hosts;
 HOST	CURRENT_CONNECTIONS	TOTAL_CONNECTIONS
-localhost	1	1
+localhost	2	2

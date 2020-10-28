@@ -1,4 +1,4 @@
-/* Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2011, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -27,8 +27,9 @@
 #include <sys/types.h>
 #include <time.h>
 #include <atomic>
+#include <tuple>
 
-#include "binlog_event.h"
+#include "libbinlogevents/include/binlog_event.h"
 #include "my_bitmap.h"
 #include "my_compiler.h"
 #include "my_dbug.h"
@@ -234,13 +235,13 @@ struct Slave_job_group {
   void reset(my_off_t master_pos, ulonglong seqno) {
     master_log_pos = master_pos;
     group_master_log_pos = group_relay_log_pos = 0;
-    group_master_log_name = NULL;  // todo: remove
-    group_relay_log_name = NULL;
+    group_master_log_name = nullptr;  // todo: remove
+    group_relay_log_name = nullptr;
     worker_id = MTS_WORKER_UNDEF;
     total_seqno = seqno;
-    checkpoint_log_name = NULL;
+    checkpoint_log_name = nullptr;
     checkpoint_log_pos = 0;
-    checkpoint_relay_log_name = NULL;
+    checkpoint_relay_log_name = nullptr;
     checkpoint_relay_log_pos = 0;
     checkpoint_seqno = (uint)-1;
     done = 0;
@@ -250,7 +251,7 @@ struct Slave_job_group {
 #endif
     last_committed = SEQ_UNINIT;
     sequence_number = SEQ_UNINIT;
-    new_fd_event = NULL;
+    new_fd_event = nullptr;
   }
 };
 
@@ -514,9 +515,8 @@ class Slave_jobs_queue : public circular_buffer_queue<Slave_job_item> {
 
 class Slave_worker : public Relay_log_info {
  public:
-  Slave_worker(Relay_log_info *rli
+  Slave_worker(Relay_log_info *rli,
 #ifdef HAVE_PSI_INTERFACE
-               ,
                PSI_mutex_key *param_key_info_run_lock,
                PSI_mutex_key *param_key_info_data_lock,
                PSI_mutex_key *param_key_info_sleep_lock,
@@ -524,12 +524,11 @@ class Slave_worker : public Relay_log_info {
                PSI_mutex_key *param_key_info_data_cond,
                PSI_mutex_key *param_key_info_start_cond,
                PSI_mutex_key *param_key_info_stop_cond,
-               PSI_mutex_key *param_key_info_sleep_cond
+               PSI_mutex_key *param_key_info_sleep_cond,
 #endif
-               ,
                uint param_id, const char *param_channel);
 
-  virtual ~Slave_worker();
+  ~Slave_worker() override;
 
   Slave_jobs_queue jobs;    // assignment queue containing events to execute
   mysql_mutex_t jobs_lock;  // mutex for the jobs queue
@@ -539,7 +538,6 @@ class Slave_worker : public Relay_log_info {
   Prealloced_array<db_worker_hash_entry *, SLAVE_INIT_DBS_IN_GROUP>
       curr_group_exec_parts;  // Current Group Executed Partitions
 
-  bool curr_group_seen_begin;  // is set to true with explicit B-event
 #ifndef DBUG_OFF
   bool curr_group_seen_sequence_number;  // is set to true about starts_group()
 #endif
@@ -606,7 +604,8 @@ class Slave_worker : public Relay_log_info {
   ulonglong checkpoint_master_log_pos;
   MY_BITMAP group_executed;  // bitmap describes groups executed after last CP
   MY_BITMAP group_shifted;   // temporary bitmap to compute group_executed
-  ulong checkpoint_seqno;    // the most significant ON bit in group_executed
+  ulong
+      worker_checkpoint_seqno;  // the most significant ON bit in group_executed
   /* Initial value of FD-for-execution version until it's gets known. */
   ulong server_version;
   enum en_running_state {
@@ -644,26 +643,32 @@ class Slave_worker : public Relay_log_info {
   int rli_init_info(bool);
   int flush_info(bool force = false);
   static size_t get_number_worker_fields();
+  /**
+     Sets bits for columns that are allowed to be `NULL`.
+
+     @param nullable_fields the bitmap to hold the nullable fields.
+  */
+  static void set_nullable_fields(MY_BITMAP *nullable_fields);
   void slave_worker_ends_group(Log_event *, int);
   const char *get_master_log_name();
-  ulonglong get_master_log_pos() { return master_log_pos; };
-  ulonglong set_master_log_pos(ulong val) { return master_log_pos = val; };
+  ulonglong get_master_log_pos() { return master_log_pos; }
+  ulonglong set_master_log_pos(ulong val) { return master_log_pos = val; }
   bool commit_positions(Log_event *evt, Slave_job_group *ptr_g, bool force);
   /**
     The method is a wrapper to provide uniform interface with STS and is
     to be called from Relay_log_info and Slave_worker pre_commit() methods.
   */
-  bool commit_positions() {
+  bool commit_positions() override {
     DBUG_ASSERT(current_event);
 
     return commit_positions(
         current_event, c_rli->gaq->get_job_group(current_event->mts_group_idx),
         is_transactional());
-  };
+  }
   /**
     See the comments for STS version of this method.
   */
-  void post_commit(bool on_rollback) {
+  void post_commit(bool on_rollback) override {
     if (on_rollback) {
       if (is_transactional())
         rollback_positions(
@@ -672,7 +677,7 @@ class Slave_worker : public Relay_log_info {
       commit_positions(current_event,
                        c_rli->gaq->get_job_group(current_event->mts_group_idx),
                        true);
-  };
+  }
   /*
     When commit fails clear bitmap for executed worker group. Revert back the
     positions to the old positions that existed before commit using the
@@ -703,41 +708,94 @@ class Slave_worker : public Relay_log_info {
     Relay_log_info class.
 
     @param fdle   pointer to a new Format_description_log_event
+
+    @return 1 if an error was encountered, 0 otherwise.
   */
-  void set_rli_description_event(Format_description_log_event *fdle) {
-    DBUG_ENTER("Slave_worker::set_rli_description_event");
+  int set_rli_description_event(Format_description_log_event *fdle) override {
+    DBUG_TRACE;
 
     if (fdle) {
       /*
         When the master rotates its binary log, set gtid_next to
         NOT_YET_DETERMINED.  This tells the slave thread that:
 
-        - If a Gtid_log_event is read subsequently, gtid_next will be
-          set to the given GTID (this is done in
-          gtid_pre_statement_checks()).
+        - If a Gtid_log_event is read subsequently, gtid_next will be set to the
+          given GTID (this is done in gtid_pre_statement_checks()).
 
-        - If a statement is executed before any Gtid_log_event, then
-          gtid_next is set to anonymous (this is done in
-          Gtid_log_event::do_apply_event().
+        - If a statement is executed before any Gtid_log_event, then gtid_next
+          is set to anonymous (this is done in Gtid_log_event::do_apply_event().
 
-        It is imporant to not set GTID_NEXT=NOT_YET_DETERMINED in the
-        middle of a transaction.  If that would happen when
-        GTID_MODE=ON, the next statement would fail because it
-        implicitly sets GTID_NEXT=ANONYMOUS, which is disallowed when
-        GTID_MODE=ON.  So then there would be no way to end the
-        transaction; any attempt to do so would result in this error.
-        (It is not possible for the slave threads to have
-        gtid_next.type==AUTOMATIC or UNDEFINED in the middle of a
-        transaction, but it is possible for a client thread to have
-        gtid_next.type==AUTOMATIC and issue a BINLOG statement
-        containing this Format_description_log_event.)
+        It is imporant to not set GTID_NEXT=NOT_YET_DETERMINED in the middle of
+        a transaction.  If that would happen when GTID_MODE=ON, the next
+        statement would fail because it implicitly sets GTID_NEXT=ANONYMOUS,
+        which is disallowed when GTID_MODE=ON.  So then there would be no way to
+        end the transaction; any attempt to do so would result in this error.
+
+        There are three possible states when reaching this execution flow point
+        (see further below for a more detailed explanation on each):
+
+        - **No active transaction, and not in a group**: set `gtid_next` to
+          `NOT_YET_DETERMINED`.
+
+        - **No active transaction, and in a group**: do nothing regarding
+          `gtid_next`.
+
+        - **An active transaction exists**: impossible to set `gtid_next` and no
+          reason to process the `Format_description` event so, trigger an error.
+
+        For the sake of correctness, let's defined the meaning of having a
+        transaction "active" or "in a group".
+
+        A transaction is "active" if either BEGIN was executed or autocommit=0
+        and a DML statement was executed (@see
+        THD::in_active_multi_stmt_transaction).
+
+        A transaction is "in a group" if it is applied by the replication
+        applier, and the relay log position is between Gtid_log_event and the
+        committing event (@see Relay_log_info::is_in_group).
+
+        The three different states explained further:
+
+        **No active transaction, and not in a group**: It is normal to have
+        gtid_next=automatic/undefined and have a Format_description_log_event in
+        this condition. We are outside transaction context and should set
+        gtid_next to not_yet_determined.
+
+        **No active transaction, and in a group**: Having
+        gtid_next=automatic/undefined in a group is impossible if master is 5.7
+        or later, because the group always starts with a Gtid_log_event or an
+        Anonymous_gtid_log_event, which will set gtid_next to anonymous or
+        gtid. But it is possible to have gtid_next=undefined when replicating
+        from a 5.6 master with gtid_mode=off, because it does not generate any
+        such event. And then, it is possible to have no active transaction in a
+        group if the master has logged a DDL as a User_var_log_event followed by
+        a Query_log_event. The User_var_log_event will start a group, but not
+        start an active transaction or change gtid_next. In this case, it is
+        possible that a Format_description_log_event occurs, if the group
+        (transaction) is broken on two relay logs, so that User_var_log_event
+        appears at the end of one relay log and Query_log_event at the beginning
+        of the next one. In such cases, we should not set gtid_next.
+
+        **An active transaction exists**: It is possible to have
+        gtid_next=automatic/undefined in an active transaction, only if
+        gtid_next=automatic, which is only possible in a client connection using
+        gtid_next=automatic. In this scenario, there is no reason to execute a
+        Format_description_log_event. So we generate an error.
       */
-      if (!is_in_group() &&
-          (info_thd->variables.gtid_next.type == AUTOMATIC_GTID ||
-           info_thd->variables.gtid_next.type == UNDEFINED_GTID)) {
-        DBUG_PRINT("info",
-                   ("Setting gtid_next.type to NOT_YET_DETERMINED_GTID"));
-        info_thd->variables.gtid_next.set_not_yet_determined();
+      if (info_thd->variables.gtid_next.type == AUTOMATIC_GTID ||
+          info_thd->variables.gtid_next.type == UNDEFINED_GTID) {
+        bool in_active_multi_stmt =
+            info_thd->in_active_multi_stmt_transaction();
+
+        if (!is_in_group() && !in_active_multi_stmt) {
+          DBUG_PRINT("info",
+                     ("Setting gtid_next.type to NOT_YET_DETERMINED_GTID"));
+          info_thd->variables.gtid_next.set_not_yet_determined();
+        } else if (in_active_multi_stmt) {
+          my_error(ER_VARIABLE_NOT_SETTABLE_IN_TRANSACTION, MYF(0),
+                   "gtid_next");
+          return 1;
+        }
       }
       adapt_to_master_version_updown(fdle->get_product_version(),
                                      get_master_server_version());
@@ -755,40 +813,96 @@ class Slave_worker : public Relay_log_info {
     }
     rli_description_event = fdle;
 
-    DBUG_VOID_RETURN;
+    return 0;
   }
 
-  inline void reset_gaq_index() { gaq_index = c_rli->gaq->size; };
+  inline void reset_gaq_index() { gaq_index = c_rli->gaq->size; }
   inline void set_gaq_index(ulong val) {
     if (gaq_index == c_rli->gaq->size) gaq_index = val;
-  };
+  }
 
   int slave_worker_exec_event(Log_event *ev);
+
+  /**
+    Checks if the transaction can be retried, and if not, reports an error.
+
+    @param[in] thd          The THD object of current thread.
+
+    @returns std::tuple<bool, bool, uint> where each element has
+              following meaning:
+
+              first element of tuple is function return value and determines:
+                false  if the transaction should be retried
+                true   if the transaction should not be retried
+
+              second element of tuple determines:
+                the function will set the value to true, in case the retry
+                should be "silent". Silent means that the caller should not
+                report it in performance_schema tables, write to the error log,
+                or sleep. Currently, silent is used by NDB only.
+
+              third element of tuple determines:
+                If the caller should report any other error than that stored in
+                thd->get_stmt_da()->mysql_errno(), then this function will store
+                that error in this third element of the tuple.
+
+  */
+  std::tuple<bool, bool, uint> check_and_report_end_of_retries(THD *thd);
+
+  /**
+    It is called after an error happens. It checks if that is an temporary
+    error and if the transaction should be retried. Then it will retry the
+    transaction if it is allowed. Retry policy and logic is similar to
+    single-threaded slave.
+
+    @param[in] start_relay_number The extension number of the relay log which
+                 includes the first event of the transaction.
+    @param[in] start_relay_pos The offset of the transaction's first event.
+
+    @param[in] end_relay_number The extension number of the relay log which
+               includes the last event it should retry.
+    @param[in] end_relay_pos The offset of the last event it should retry.
+
+    @retval false if transaction succeeds (possibly after a number of retries)
+    @retval true  if transaction fails
+  */
   bool retry_transaction(uint start_relay_number, my_off_t start_relay_pos,
                          uint end_relay_number, my_off_t end_relay_pos);
 
-  bool set_info_search_keys(Rpl_info_handler *to);
+  bool set_info_search_keys(Rpl_info_handler *to) override;
 
   /**
     Get coordinator's RLI. Especially used get the rli from
     a slave thread, like this: thd->rli_slave->get_c_rli();
     thd could be a SQL thread or a worker thread.
   */
-  virtual Relay_log_info *get_c_rli() { return c_rli; }
+  Relay_log_info *get_c_rli() override { return c_rli; }
 
   /**
      return an extension "for channel channel_name"
      for error messages per channel
   */
-  const char *get_for_channel_str(bool upper_case = false) const;
+  const char *get_for_channel_str(bool upper_case = false) const override;
 
   longlong sequence_number() {
     Slave_job_group *ptr_g = c_rli->gaq->get_job_group(gaq_index);
     return ptr_g->sequence_number;
   }
 
-  bool found_order_commit_deadlock() { return m_order_commit_deadlock; }
-  void report_order_commit_deadlock() { m_order_commit_deadlock = true; }
+  /**
+     Return true if slave-preserve-commit-order is enabled and an
+     earlier transaction is waiting for a row-level lock held by this
+     transaction.
+  */
+  bool found_commit_order_deadlock();
+
+  /**
+     Called when slave-preserve-commit-order is enabled, by the worker
+     processing an earlier transaction that waits on a row-level lock
+     held by this worker's transaction.
+  */
+  void report_commit_order_deadlock();
+
   /**
     @return either the master server version as extracted from the last
             installed Format_description_log_event, or when it was not
@@ -801,8 +915,8 @@ class Slave_worker : public Relay_log_info {
   }
 
  protected:
-  virtual void do_report(loglevel level, int err_code, const char *msg,
-                         va_list v_args) const
+  void do_report(loglevel level, int err_code, const char *msg,
+                 va_list v_args) const override
       MY_ATTRIBUTE((format(printf, 4, 0)));
 
  private:
@@ -810,9 +924,9 @@ class Slave_worker : public Relay_log_info {
   ulonglong
       master_log_pos;  // event's cached log_pos for possibile error report
   void end_info();
-  bool read_info(Rpl_info_handler *from);
-  bool write_info(Rpl_info_handler *to);
-  bool m_order_commit_deadlock;
+  bool read_info(Rpl_info_handler *from) override;
+  bool write_info(Rpl_info_handler *to) override;
+  std::atomic<bool> m_commit_order_deadlock;
 
   Slave_worker &operator=(const Slave_worker &info);
   Slave_worker(const Slave_worker &info);
@@ -821,7 +935,7 @@ class Slave_worker : public Relay_log_info {
                              uint end_relay_number, my_off_t end_relay_pos);
   void assign_partition_db(Log_event *ev);
 
-  void reset_order_commit_deadlock() { m_order_commit_deadlock = false; }
+  void reset_commit_order_deadlock();
 
  public:
   /**

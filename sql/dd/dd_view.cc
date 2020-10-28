@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2015, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -25,10 +25,10 @@
 #include <string.h>
 #include <sys/types.h>
 #include <time.h>
+
 #include <memory>
 #include <string>
 
-#include "binary_log_types.h"
 #include "lex_string.h"
 #include "my_alloc.h"
 #include "my_dbug.h"
@@ -48,6 +48,7 @@
 #include "sql/dd/dd_table.h"                 // fill_dd_columns_from_create_*
 #include "sql/dd/dictionary.h"               // dd::Dictionary
 #include "sql/dd/impl/dictionary_impl.h"     // default_catalog_name
+#include "sql/dd/impl/utils.h"               // dd::my_time_t_to_ull_datetime()
 #include "sql/dd/properties.h"               // dd::Properties
 #include "sql/dd/string_type.h"
 #include "sql/dd/types/abstract_table.h"  // dd::enum_table_type
@@ -218,7 +219,7 @@ static dd::View::enum_security_type dd_get_new_view_security_type(
 
 static bool fill_dd_view_columns(THD *thd, View *view_obj,
                                  const TABLE_LIST *view) {
-  DBUG_ENTER("fill_dd_view_columns");
+  DBUG_TRACE;
 
   // Helper class which takes care restoration of THD::variables.sql_mode and
   // delete handler created for dummy table.
@@ -255,19 +256,21 @@ static bool fill_dd_view_columns(THD *thd, View *view_obj,
                                   ha_default_temp_handlerton(thd));
   if (file == nullptr) {
     my_error(ER_STORAGE_ENGINE_NOT_LOADED, MYF(0), view->db, view->table_name);
-    DBUG_RETURN(true);
+    return true;
   }
 
   Context_handler ctx_handler(thd, file);
 
   const dd::Properties &names_dict = view_obj->column_names();
 
-  // Iterate through all the items of first SELECT_LEX of the view query.
-  Item *item;
+  /*
+    Iterate through all the items of first SELECT_LEX if view query is of
+    single query block. Otherwise iterate through all the type holders items
+    created for unioned column types of all the query blocks.
+  */
   List<Create_field> create_fields;
-  List_iterator_fast<Item> it(thd->lex->select_lex->item_list);
   uint i = 0;
-  while ((item = it++) != nullptr) {
+  for (Item *item : VisibleFields(*(thd->lex->unit->get_unit_column_types()))) {
     i++;
     bool is_sp_func_item = false;
     // Create temporary Field object from the item.
@@ -311,11 +314,11 @@ static bool fill_dd_view_columns(THD *thd, View *view_obj,
       Field *from_field, *default_field;
       tmp_field = create_tmp_field(thd, &table, item, item->type(), nullptr,
                                    &from_field, &default_field, false, false,
-                                   false, false);
+                                   false, false, false);
     }
     if (!tmp_field) {
       my_error(ER_OUT_OF_RESOURCES, MYF(ME_FATALERROR));
-      DBUG_RETURN(true);
+      return true;
     }
 
     // We have to take into account both the real table's fields and
@@ -331,34 +334,43 @@ static bool fill_dd_view_columns(THD *thd, View *view_obj,
         new (thd->mem_root) Create_field(tmp_field, orig_field);
     if (cr_field == nullptr) {
       my_error(ER_OUT_OF_RESOURCES, MYF(ME_FATALERROR));
-      DBUG_RETURN(true);
+      return true;
     }
 
-    if (is_sp_func_item) cr_field->field_name = item->item_name.ptr();
     if (!names_dict.empty())  // Explicit names were provided
     {
       std::string i_s = std::to_string(i);
-      String_type value = names_dict.value(String_type(i_s.begin(), i_s.end()));
-      char *name = static_cast<char *>(
-          strmake_root(thd->mem_root, value.c_str(), value.length()));
-      if (!name) DBUG_RETURN(true); /* purecov: inspected */
+      String_type value;
+      char *name = nullptr;
+      if (!names_dict.get(String_type(i_s.begin(), i_s.end()), &value)) {
+        name = static_cast<char *>(
+            strmake_root(thd->mem_root, value.c_str(), value.length()));
+      }
+      if (!name) return true; /* purecov: inspected */
       cr_field->field_name = name;
+    } else if (thd->lex->unit->is_union()) {
+      /*
+        If view query has any duplicate column names then generated unique name
+        is stored only with the first SELECT_LEX. So when Create_field instance
+        is created with type holder item, store name from first SELECT_LEX.
+      */
+      cr_field->field_name =
+          GetNthVisibleField(thd->lex->select_lex->fields, i - 1)
+              ->item_name.ptr();
     }
 
     cr_field->after = nullptr;
     cr_field->offset = 0;
     cr_field->pack_length_override = 0;
-    cr_field->create_length_to_internal_length();
-    cr_field->maybe_null = !(tmp_field->flags & NOT_NULL_FLAG);
-    cr_field->is_zerofill = (tmp_field->flags & ZEROFILL_FLAG);
-    cr_field->is_unsigned = (tmp_field->flags & UNSIGNED_FLAG);
+    cr_field->is_nullable = !tmp_field->is_flag_set(NOT_NULL_FLAG);
+    cr_field->is_zerofill = tmp_field->is_flag_set(ZEROFILL_FLAG);
+    cr_field->is_unsigned = tmp_field->is_flag_set(UNSIGNED_FLAG);
 
     create_fields.push_back(cr_field);
   }
 
   // Fill view columns information from the Create_field objects.
-  DBUG_RETURN(
-      fill_dd_columns_from_create_fields(thd, view_obj, create_fields, file));
+  return fill_dd_columns_from_create_fields(thd, view_obj, create_fields, file);
 }
 
 /**
@@ -372,49 +384,22 @@ static bool fill_dd_view_columns(THD *thd, View *view_obj,
 
 static void fill_dd_view_tables(View *view_obj, const TABLE_LIST *view,
                                 const TABLE_LIST *query_tables) {
-  DBUG_ENTER("fill_dd_view_tables");
+  DBUG_TRACE;
 
   for (const TABLE_LIST *table = query_tables; table != nullptr;
        table = table->next_global) {
     /*
-      Skip tables if
-        - It is not directly referred by the view OR
-        - It is a temporary table OR
-        - It is a data-directly table OR
-        - If it is not a user or information_schema schema table.
+      Skip if table is not directly referred by a view or if table is a
+      data-dictionary or temporary table.
     */
-    {
-      if (table->referencing_view && table->referencing_view != view)
-        continue;
-      else if (is_temporary_table(const_cast<TABLE_LIST *>(table)))
-        continue;
-      else if (get_dictionary()->is_dd_schema_name(table->get_db_name()))
-        continue;
-      else {
-        LEX_STRING db_name = {const_cast<char *>(table->get_db_name()),
-                              strlen(table->get_db_name())};
-        LEX_STRING table_name = {const_cast<char *>(table->get_table_name()),
-                                 strlen(table->get_table_name())};
+    if ((table->referencing_view && table->referencing_view != view) ||
+        get_dictionary()->is_dd_table_name(table->get_db_name(),
+                                           table->get_table_name()) ||
+        is_temporary_table(const_cast<TABLE_LIST *>(table)))
+      continue;
 
-        TABLE_CATEGORY table_category = get_table_category(db_name, table_name);
-        if (table_category != TABLE_CATEGORY_USER &&
-            table_category != TABLE_CATEGORY_INFORMATION)
-          continue;
-      }
-    }
-
-    LEX_CSTRING db_name;
-    LEX_CSTRING table_name;
-    if (table->schema_table_name) {
-      db_name = {table->db, table->db_length};
-      table_name = {table->schema_table_name, strlen(table->schema_table_name)};
-    } else if (table->is_view()) {
-      db_name = table->view_db;
-      table_name = table->view_name;
-    } else {
-      db_name = {table->db, table->db_length};
-      table_name = {table->table_name, table->table_name_length};
-    }
+    LEX_CSTRING db_name = {table->db, table->db_length};
+    LEX_CSTRING table_name = {table->table_name, table->table_name_length};
 
     // Avoid duplicate entries.
     {
@@ -441,8 +426,6 @@ static void fill_dd_view_tables(View *view_obj, const TABLE_LIST *view,
     view_table_obj->set_table_name(
         String_type(table_name.str, table_name.length));
   }
-
-  DBUG_VOID_RETURN;
 }
 
 /**
@@ -455,7 +438,7 @@ static void fill_dd_view_tables(View *view_obj, const TABLE_LIST *view,
 
 static void fill_dd_view_routines(View *view_obj,
                                   Query_tables_list *routines_ctx) {
-  DBUG_ENTER("fill_dd_view_routines");
+  DBUG_TRACE;
 
   // View stored functions. We need only directly used routines.
   for (Sroutine_hash_entry *rt = routines_ctx->sroutines_list.first;
@@ -478,8 +461,6 @@ static void fill_dd_view_routines(View *view_obj,
     // View routine name
     view_sf_obj->set_routine_name(String_type(rt->name(), rt->name_length()));
   }
-
-  DBUG_VOID_RETURN;
 }
 
 /**
@@ -564,10 +545,19 @@ static bool fill_dd_view_definition(THD *thd, View *view_obj,
   dd::Properties *view_options = &view_obj->options();
   view_options->set("timestamp",
                     String_type(view->timestamp.str, view->timestamp.length));
-  view_options->set_bool("view_valid", true);
+  view_options->set("view_valid", true);
 
-  // Fill view columns information in View object.
-  if (fill_dd_view_columns(thd, view_obj, view)) return true;
+  /*
+    Fill view columns information in View object.
+
+    During DD upgrade, view metadata is stored in 2 phases. In first phase,
+    view metadata is stored without column information. In second phase view
+    metadata stored with column information. Fill view columns only when view
+    metadata is stored with column information.
+  */
+  if (!thd->lex->select_lex->field_list_is_empty() &&
+      fill_dd_view_columns(thd, view_obj, view))
+    return true;
 
   // Fill view tables information in View object.
   fill_dd_view_tables(view_obj, view, thd->lex->query_tables);
@@ -587,12 +577,9 @@ bool update_view(THD *thd, dd::View *new_view, TABLE_LIST *view) {
   new_view->remove_children();
 
   // Get statement start time.
-  MYSQL_TIME curtime;
-  thd->variables.time_zone->gmt_sec_to_TIME(&curtime,
-                                            thd->query_start_in_secs());
-  ulonglong ull_curtime = TIME_to_ulonglong_datetime(&curtime);
   // Set last altered time.
-  new_view->set_last_altered(ull_curtime);
+  new_view->set_last_altered(
+      dd::my_time_t_to_ull_datetime(thd->query_start_in_secs()));
 
   if (fill_dd_view_definition(thd, new_view, view)) return true;
 
@@ -681,7 +668,7 @@ bool read_view(TABLE_LIST *view, const dd::View &view_obj, MEM_ROOT *mem_root) {
   if (!names_dict.empty())  // Explicit names were provided
   {
     auto *names_array = static_cast<Create_col_name_list *>(
-        alloc_root(mem_root, sizeof(Create_col_name_list)));
+        mem_root->Alloc(sizeof(Create_col_name_list)));
     if (!names_array) return true; /* purecov: inspected */
     names_array->init(mem_root);
     uint i = 0;
@@ -689,7 +676,8 @@ bool read_view(TABLE_LIST *view, const dd::View &view_obj, MEM_ROOT *mem_root) {
       std::string i_s = std::to_string(++i);
       String_type key(i_s.begin(), i_s.end());
       if (!names_dict.exists(key)) break;
-      String_type value = names_dict.value(key);
+      String_type value;
+      names_dict.get(key, &value);
       char *name = static_cast<char *>(
           strmake_root(mem_root, value.c_str(), value.length()));
       if (!name || (names_array->push_back({name, value.length()})))
@@ -712,9 +700,9 @@ bool update_view_status(THD *thd, const char *schema_name,
 
   // Update view error status.
   dd::Properties *view_options = &new_view->options();
-  view_options->set_bool("view_valid", status);
+  view_options->set("view_valid", status);
 
-  Disable_gtid_state_update_guard disabler(thd);
+  Implicit_substatement_state_guard substatement_guard(thd);
 
   // Update DD tables.
   if (client->update(new_view)) {

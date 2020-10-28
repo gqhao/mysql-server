@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2.0,
@@ -28,6 +28,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 #include <list>
 #include <string>
 
+#include "my_compiler.h"
+
 REQUIRES_SERVICE_PLACEHOLDER(udf_registration);
 REQUIRES_SERVICE_PLACEHOLDER(udf_registration_aggregate);
 
@@ -44,8 +46,8 @@ class udf_list {
  public:
   ~udf_list() { unregister(); }
   bool add_scalar(const char *func_name, enum Item_result return_type,
-                  Udf_func_any func, Udf_func_init init_func = NULL,
-                  Udf_func_deinit deinit_func = NULL) {
+                  Udf_func_any func, Udf_func_init init_func = nullptr,
+                  Udf_func_deinit deinit_func = nullptr) {
     if (!mysql_service_udf_registration->udf_register(
             func_name, return_type, func, init_func, deinit_func)) {
       set.push_back(func_name);
@@ -55,10 +57,10 @@ class udf_list {
   }
 
   bool add_aggregate(const char *func_name, enum Item_result return_type,
-                     Udf_func_any func, Udf_func_add add_func = NULL,
-                     Udf_func_clear clear_func = NULL,
-                     Udf_func_init init_func = NULL,
-                     Udf_func_deinit deinit_func = NULL) {
+                     Udf_func_any func, Udf_func_add add_func = nullptr,
+                     Udf_func_clear clear_func = nullptr,
+                     Udf_func_init init_func = nullptr,
+                     Udf_func_deinit deinit_func = nullptr) {
     if (!mysql_service_udf_registration_aggregate->udf_register(
             func_name, return_type, func, init_func, deinit_func, add_func,
             clear_func)) {
@@ -100,15 +102,15 @@ const char *test_init = "test_init", *test_udf = "test_udf",
 
 static bool dynamic_udf_init(UDF_INIT *initid, UDF_ARGS *, char *) {
   initid->ptr = const_cast<char *>(test_init);
-  return 0;
+  return false;
 }
 
-static void dynamic_udf_deinit(UDF_INIT *initid) {
+static void dynamic_udf_deinit(UDF_INIT *initid MY_ATTRIBUTE((unused))) {
   assert(initid->ptr == test_init || initid->ptr == test_udf);
 }
 
-static long long dynamic_udf(UDF_INIT *initid, UDF_ARGS *, char *,
-                             unsigned long *, char *is_null, char *error) {
+static long long dynamic_udf(UDF_INIT *initid, UDF_ARGS *,
+                             unsigned char *is_null, unsigned char *error) {
   if (initid->ptr == test_init) initid->ptr = const_cast<char *>(test_udf);
   if (initid->ptr != test_udf) {
     *error = 1;
@@ -118,13 +120,13 @@ static long long dynamic_udf(UDF_INIT *initid, UDF_ARGS *, char *,
   return 42;
 }
 
-static void dynamic_agg_deinit(UDF_INIT *initid) {
+static void dynamic_agg_deinit(UDF_INIT *initid MY_ATTRIBUTE((unused))) {
   assert(initid->ptr == test_init || initid->ptr == test_udf ||
          initid->ptr == test_udf_clear || initid->ptr == test_udf_add);
 }
 
-static long long dynamic_agg(UDF_INIT *initid, UDF_ARGS *, char *,
-                             unsigned long *, char *is_null, char *error) {
+static long long dynamic_agg(UDF_INIT *initid, UDF_ARGS *,
+                             unsigned char *is_null, unsigned char *error) {
   if (initid->ptr == test_init || initid->ptr == test_udf_add)
     initid->ptr = const_cast<char *>(test_udf_clear);
   if (initid->ptr == test_udf_clear) initid->ptr = const_cast<char *>(test_udf);

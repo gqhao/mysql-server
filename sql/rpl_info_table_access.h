@@ -1,4 +1,4 @@
-/* Copyright (c) 2010, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2010, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -36,8 +36,8 @@ enum enum_return_id { FOUND_ID = 1, NOT_FOUND_ID, ERROR_ID };
 
 class Rpl_info_table_access : public System_table_access {
  public:
-  Rpl_info_table_access() : thd_created(false){};
-  virtual ~Rpl_info_table_access(){};
+  Rpl_info_table_access() : thd_created(false) {}
+  ~Rpl_info_table_access() override {}
 
   /**
     Prepares before opening table.
@@ -47,8 +47,8 @@ class Rpl_info_table_access : public System_table_access {
 
     @param[in]  thd  Thread requesting to open the table
   */
-  void before_open(THD *thd);
-  void close_table(THD *thd, TABLE *table, Open_tables_backup *backup,
+  void before_open(THD *thd) override;
+  bool close_table(THD *thd, TABLE *table, Open_tables_backup *backup,
                    bool error);
   enum enum_return_id find_info(Rpl_info_values *field_values, TABLE *table);
   enum enum_return_id scan_info(TABLE *table, uint instance);

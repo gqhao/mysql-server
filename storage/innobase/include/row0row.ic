@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2019, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -30,6 +30,9 @@ this program; if not, write to the Free Software Foundation, Inc.,
  Created 4/20/1996 Heikki Tuuri
  *******************************************************/
 
+#include <cmath>
+#include <cstdint>
+
 #include "dict0dict.h"
 #include "rem0rec.h"
 #include "trx0undo.h"
@@ -47,7 +50,7 @@ ulint row_get_trx_id_offset(
   ulint len;
 
   ut_ad(index->is_clustered());
-  ut_ad(rec_offs_validate(NULL, index, offsets));
+  ut_ad(rec_offs_validate(nullptr, index, offsets));
 
   pos = index->get_sys_col_pos(DATA_TRX_ID);
 
@@ -109,14 +112,14 @@ roll_ptr_t row_get_rec_roll_ptr(
  unavailable and ext != NULL */
 UNIV_INLINE
 dtuple_t *row_build_index_entry(
-    const dtuple_t *row,  /*!< in: row which should be
-                          inserted or purged */
-    const row_ext_t *ext, /*!< in: externally stored column
-                          prefixes, or NULL */
-    dict_index_t *index,  /*!< in: index on the table */
-    mem_heap_t *heap)     /*!< in: memory heap from which
-                          the memory for the index entry
-                          is allocated */
+    const dtuple_t *row,       /*!< in: row which should be
+                               inserted or purged */
+    const row_ext_t *ext,      /*!< in: externally stored column
+                               prefixes, or NULL */
+    const dict_index_t *index, /*!< in: index on the table */
+    mem_heap_t *heap)          /*!< in: memory heap from which
+                               the memory for the index entry
+                               is allocated */
 {
   dtuple_t *entry;
 
@@ -147,7 +150,7 @@ void row_build_row_ref_fast(
   ulint field_no;
   ulint i;
 
-  ut_ad(rec_offs_validate(rec, NULL, offsets));
+  ut_ad(rec_offs_validate(rec, nullptr, offsets));
   ut_ad(!rec_offs_any_extern(offsets));
   ref_len = dtuple_get_n_fields(ref);
 
@@ -185,15 +188,19 @@ ib_uint64_t row_parse_int(const byte *data, ulint len, ulint mtype,
     case DATA_FLOAT:
 
       ut_a(len == sizeof(float));
-      value = static_cast<ib_uint64_t>(mach_float_read(data));
+      /* Cast float value to int64_t first, before casting to unsigned,
+         to avoid UBSAN warnings. */
+      value =
+          static_cast<ib_uint64_t>(static_cast<int64_t>(mach_float_read(data)));
       break;
 
-    case DATA_DOUBLE:
-
+    case DATA_DOUBLE: {
       ut_a(len == sizeof(double));
-      value = static_cast<ib_uint64_t>(mach_double_read(data));
+      double dblval = mach_double_read(data);
+      value = std::signbit(dblval) ? static_cast<int64_t>(dblval)
+                                   : static_cast<ib_uint64_t>(dblval);
       break;
-
+    }
     default:
       ut_error;
   }

@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -25,8 +25,9 @@
 
 #include "my_inttypes.h"
 #include "sql/dd/impl/raw/object_keys.h"  // IWYU pragma: keep
-#include "sql/dd/sdi_fwd.h"               // RJ_Document
-#include "sql/dd/types/entity_object.h"   // dd::Entity_object
+#include "sql/dd/properties.h"
+#include "sql/dd/sdi_fwd.h"              // RJ_Document
+#include "sql/dd/types/entity_object.h"  // dd::Entity_object
 
 class THD;
 
@@ -44,10 +45,17 @@ class Function;
 class Procedure;
 class Void_key;
 class Time_zone;
+class Properties;
 
 namespace tables {
 class Schemata;
 }
+
+/////////////////////////////////////////////////////////////////////////
+// enum_encryption_type.
+/////////////////////////////////////////////////////////////////////////
+
+enum class enum_encryption_type { ET_NO = 1, ET_YES };
 
 ///////////////////////////////////////////////////////////////////////////
 
@@ -75,15 +83,35 @@ class Schema : virtual public Entity_object {
 
   virtual bool update_aux_key(Aux_key *) const { return true; }
 
- public:
-  virtual ~Schema(){};
+  /////////////////////////////////////////////////////////////////////////
+  // options
+  /////////////////////////////////////////////////////////////////////////
 
+  virtual const Properties &options() const = 0;
+  virtual Properties &options() = 0;
+  virtual bool set_options(const String_type &options_raw) = 0;
+  virtual bool set_options(const Properties &options) = 0;
+
+ public:
   /////////////////////////////////////////////////////////////////////////
   // Default collation.
   /////////////////////////////////////////////////////////////////////////
 
   virtual Object_id default_collation_id() const = 0;
   virtual void set_default_collation_id(Object_id default_collation_id) = 0;
+
+  /////////////////////////////////////////////////////////////////////////
+  // Default encryption.
+  /////////////////////////////////////////////////////////////////////////
+
+  virtual bool default_encryption() const = 0;
+  virtual void set_default_encryption(bool default_encryption) = 0;
+
+  /////////////////////////////////////////////////////////////////////////
+  // Read only.
+  /////////////////////////////////////////////////////////////////////////
+  virtual bool read_only() const = 0;
+  virtual void set_read_only(bool state) = 0;
 
   /////////////////////////////////////////////////////////////////////////
   // created
@@ -98,6 +126,16 @@ class Schema : virtual public Entity_object {
 
   virtual ulonglong last_altered(bool convert_time) const = 0;
   virtual void set_last_altered(ulonglong last_altered) = 0;
+
+  /////////////////////////////////////////////////////////////////////////
+  // se_private_data.
+  /////////////////////////////////////////////////////////////////////////
+
+  virtual const Properties &se_private_data() const = 0;
+
+  virtual Properties &se_private_data() = 0;
+  virtual bool set_se_private_data(const String_type &se_private_data_raw) = 0;
+  virtual bool set_se_private_data(const Properties &se_private_data) = 0;
 
  public:
   virtual Event *create_event(THD *thd) const = 0;

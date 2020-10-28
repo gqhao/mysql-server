@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -34,7 +34,7 @@
 
 #define JAM_FILE_ID 415
 
-#ifdef VM_TRACE
+#if (defined(VM_TRACE) || defined(ERROR_INSERT))
 //#define DEBUG_LCP 1
 //#define DEBUG_LCP_REL 1
 //#define DEBUG_LCP_ALLOC 1
@@ -203,7 +203,7 @@ Uint32 Dbtup::getRealpid(Fragrecord* regFragPtr, Uint32 logicalPageId)
     ndbrequire((*ptr) != RNIL)
     return ((*ptr) & PAGE_BIT_MASK);
   }
-  ndbrequire(false);
+  ndbabort();
   return RNIL;
 }
 
@@ -244,6 +244,16 @@ Dbtup::init_page(Fragrecord* regFragPtr, PagePtr pagePtr, Uint32 pageId)
   pagePtr.p->nextList = RNIL;
   pagePtr.p->prevList = RNIL;
   pagePtr.p->m_flags = 0;
+  Tup_fixsize_page* fix_page = (Tup_fixsize_page*)pagePtr.p;
+  /**
+   * A new page is required to be fully scanned the first LCP after
+   * allocation to ensure that we generate DELETE BY ROWID for all
+   * positions that are not yet inserted into, this ensures that
+   * we don't leave deleted rows in change pages after an LCP.
+   */
+  fix_page->set_all_change_map();
+  fix_page->clear_max_gci();
+  ndbassert(fix_page->verify_change_maps(jamBuffer()));
 }
 
 #ifdef VM_TRACE
@@ -424,26 +434,31 @@ Dbtup::get_lcp_scanned_bit(Fragrecord *regFragPtr, Uint32 logicalPageId)
   return get_lcp_scanned_bit(ptr);
 }
 
-void
-Dbtup::reset_lcp_scanned_bit(Fragrecord *regFragPtr, Uint32 logicalPageId)
-{
-  DynArr256 map(c_page_map_pool, regFragPtr->m_page_map);
-  Uint32 *ptr = map.set(2 * logicalPageId);
-  ndbassert(ptr != 0);
-  ndbassert((*ptr) != RNIL);
-#ifdef DEBUG_LCP_SCANNED_BIT
-  if ((*ptr) & LCP_SCANNED_BIT)
-  {
-    g_eventLogger->info("(%u)tab(%u,%u):%u reset_lcp_scanned_bit",
-      instance(),
-      regFragPtr->fragTableId,
-      regFragPtr->fragmentId,
-      logicalPageId);
-  }
-#endif
-  *ptr = (*ptr) & (Uint32)~LCP_SCANNED_BIT;
-  do_check_page_map(regFragPtr);
-}
+/**
+ * Currently not used code, can be activated when we can decrease
+ * m_max_page_cnt.
+ *
+ *void
+ *Dbtup::reset_lcp_scanned_bit(Fragrecord *regFragPtr, Uint32 logicalPageId)
+ *{
+ *  DynArr256 map(c_page_map_pool, regFragPtr->m_page_map);
+ *  Uint32 *ptr = map.set(2 * logicalPageId);
+ *  ndbassert(ptr != 0);
+ *  ndbassert((*ptr) != RNIL);
+ *#ifdef DEBUG_LCP_SCANNED_BIT
+ *  if ((*ptr) & LCP_SCANNED_BIT)
+ *  {
+ *    g_eventLogger->info("(%u)tab(%u,%u):%u reset_lcp_scanned_bit",
+ *      instance(),
+ *      regFragPtr->fragTableId,
+ *      regFragPtr->fragmentId,
+ *      logicalPageId);
+ *  }
+ *#endif
+ *  *ptr = (*ptr) & (Uint32)~LCP_SCANNED_BIT;
+ *  do_check_page_map(regFragPtr);
+ *}
+ */
 
 void
 Dbtup::reset_lcp_scanned_bit(Uint32 *next_ptr)
@@ -696,7 +711,8 @@ Dbtup::handle_lcp_skip_bit(EmulatedJamBuffer *jamBuf,
     ndbassert((*ptr) != RNIL);
     Uint32 lcp_scanned_bit = (*ptr) & LCP_SCANNED_BIT;
     ScanOpPtr scanOp;
-    c_scanOpPool.getPtr(scanOp, lcp_scan_ptr_i);
+    scanOp.i = lcp_scan_ptr_i;
+    ndbrequire(c_scanOpPool.getValidPtr(scanOp));
     Local_key key;
     key.m_page_no = page_no;
     key.m_page_idx = ZNIL;
@@ -730,6 +746,7 @@ Dbtup::handle_lcp_skip_bit(EmulatedJamBuffer *jamBuf,
                        fragPtrP->fragmentId,
                        page_no));
         pagePtr.p->set_page_to_skip_lcp();
+        c_backup->alloc_page_after_lcp_start(page_no);
       }
       else
       {
@@ -969,10 +986,6 @@ Dbtup::releaseFragPage(Fragrecord* fragPtrP,
                        PagePtr pagePtr)
 {
   DynArr256 map(c_page_map_pool, fragPtrP->m_page_map);
-  /**
-   * We optimise on that DynArr256 always will have the pair on the
-   * same 256 byte page. Thus they lie consecutive to each other.
-   */
   DEB_LCP_REL(("(%u)releaseFragPage: tab(%u,%u) page(%u)",
                instance(),
                fragPtrP->fragTableId,
@@ -1001,7 +1014,8 @@ Dbtup::releaseFragPage(Fragrecord* fragPtrP,
      */
     ScanOpPtr scanOp;
     Local_key key;
-    c_scanOpPool.getPtr(scanOp, lcp_scan_ptr_i);
+    scanOp.i = lcp_scan_ptr_i;
+    ndbrequire(c_scanOpPool.getValidPtr(scanOp));
     key.m_page_no = logicalPageId;
     key.m_page_idx = ZNIL;
     if (is_rowid_in_remaining_lcp_set(pagePtr.p,
@@ -1078,8 +1092,19 @@ Dbtup::releaseFragPage(Fragrecord* fragPtrP,
                              fragPtrP->fragmentId,
                              logicalPageId));
         lcp_scanned_bit = LCP_SCANNED_BIT;
-        Uint32 new_last_lcp_state = pagePtr.p->is_page_to_skip_lcp() ?
-                                    LAST_LCP_FREE_BIT : 0;
+        bool page_to_skip_lcp = pagePtr.p->is_page_to_skip_lcp();
+        Uint32 new_last_lcp_state;
+        if (page_to_skip_lcp)
+        {
+          new_last_lcp_state = LAST_LCP_FREE_BIT;
+          c_backup->alloc_dropped_page_after_lcp_start(is_change_part);
+        }
+        else
+        {
+          new_last_lcp_state = 0;
+          c_backup->dropped_page_after_lcp_start(is_change_part,
+                                                 (last_lcp_state == 0));
+        }
         if (is_change_part && (last_lcp_state == 0))
         {
           /**
@@ -1095,9 +1120,9 @@ Dbtup::releaseFragPage(Fragrecord* fragPtrP,
           jam();
           /* Coverage tested */
           c_page_pool.getPtr(pagePtr);
-          bool delete_by_pageid = pagePtr.p->is_page_to_skip_lcp();
+          bool delete_by_pageid = page_to_skip_lcp;
           page_freed = true;
-          ndbassert(c_backup->is_partial_lcp_enabled());
+          ndbrequire(c_backup->is_partial_lcp_enabled());
           handle_lcp_drop_change_page(fragPtrP,
                                       logicalPageId,
                                       pagePtr,
@@ -1248,7 +1273,7 @@ void Dbtup::errorHandler(Uint32 errorCode)
   default:
     jam();
   }
-  ndbrequire(false);
+  ndbabort();
 }//Dbtup::errorHandler()
 
 void

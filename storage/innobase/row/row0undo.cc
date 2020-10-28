@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1997, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1997, 2019, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -35,7 +35,6 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "fsp0fsp.h"
 #include "ha_prototypes.h"
 #include "mach0data.h"
-#include "my_compiler.h"
 #include "que0que.h"
 #include "row0mysql.h"
 #include "row0row.h"
@@ -126,13 +125,8 @@ doing the purge. Similarly, during a rollback, a record can be removed
 if the stored roll ptr in the undo log points to a trx already (being) purged,
 or if the roll ptr is NULL, i.e., it was a fresh insert. */
 
-/** Creates a row undo node to a query graph.
- @return own: undo node */
-undo_node_t *row_undo_node_create(
-    trx_t *trx,        /*!< in/out: transaction */
-    que_thr_t *parent, /*!< in: parent node, i.e., a thr node */
-    mem_heap_t *heap)  /*!< in: memory heap where created */
-{
+undo_node_t *row_undo_node_create(trx_t *trx, que_thr_t *parent,
+                                  mem_heap_t *heap, bool partial_rollback) {
   undo_node_t *undo;
 
   ut_ad(trx_state_eq(trx, TRX_STATE_ACTIVE) ||
@@ -147,6 +141,7 @@ undo_node_t *row_undo_node_create(
   undo->state = UNDO_NODE_FETCH_NEXT;
   undo->trx = trx;
 
+  undo->partial = partial_rollback;
   btr_pcur_init(&(undo->pcur));
 
   undo->heap = mem_heap_create(256);
@@ -168,7 +163,7 @@ bool row_undo_search_clust_to_pcur(
   mtr_t mtr;
   row_ext_t **ext;
   const rec_t *rec;
-  mem_heap_t *heap = NULL;
+  mem_heap_t *heap = nullptr;
   ulint offsets_[REC_OFFS_NORMAL_SIZE];
   ulint *offsets = offsets_;
   rec_offs_init(offsets_);
@@ -205,12 +200,12 @@ bool row_undo_search_clust_to_pcur(
       /* REDUNDANT and COMPACT formats store a local
       768-byte prefix of each externally stored
       column. No cache is needed. */
-      ext = NULL;
-      node->ext = NULL;
+      ext = nullptr;
+      node->ext = nullptr;
     }
 
-    node->row = row_build(ROW_COPY_DATA, clust_index, rec, offsets, NULL, NULL,
-                          NULL, ext, node->heap);
+    node->row = row_build(ROW_COPY_DATA, clust_index, rec, offsets, nullptr,
+                          nullptr, nullptr, ext, node->heap);
 
     /* We will need to parse out virtual column info from undo
     log, first mark them DATA_MISSING. So we will know if the
@@ -228,8 +223,8 @@ bool row_undo_search_clust_to_pcur(
       row_upd_replace(node->trx, node->undo_row, &node->undo_ext, clust_index,
                       node->update, node->heap);
     } else {
-      node->undo_row = NULL;
-      node->undo_ext = NULL;
+      node->undo_row = nullptr;
+      node->undo_ext = nullptr;
     }
 
     btr_pcur_store_position(&node->pcur, &mtr);
@@ -256,8 +251,8 @@ static MY_ATTRIBUTE((warn_unused_result)) dberr_t
   trx_t *trx;
   roll_ptr_t roll_ptr;
 
-  ut_ad(node != NULL);
-  ut_ad(thr != NULL);
+  ut_ad(node != nullptr);
+  ut_ad(thr != nullptr);
 
   trx = node->trx;
   ut_ad(trx->in_rollback);
@@ -313,6 +308,36 @@ static MY_ATTRIBUTE((warn_unused_result)) dberr_t
   thr->run_node = node;
 
   return (err);
+}
+
+void row_convert_impl_to_expl_if_needed(btr_cur_t *cursor, undo_node_t *node) {
+  ulint *offsets = nullptr;
+  /* In case of partial rollback implicit lock on the
+  record is released in the middle of transaction, which
+  can break the serializability of IODKU and REPLACE
+  statements. Normal rollback is not affected by this
+  becasue we release the locks after the rollback. So
+  to prevent any other transaction modifying the record
+  in between the partial rollback we convert the implicit
+  lock on the record to explict. When the record is actually
+  deleted this lock be inherited by the next record.  */
+
+  if (!node->partial || (node->trx == nullptr) ||
+      node->trx->isolation_level < trx_t::REPEATABLE_READ) {
+    return;
+  }
+
+  ut_ad(node->trx->in_rollback);
+  auto index = btr_cur_get_index(cursor);
+  auto rec = btr_cur_get_rec(cursor);
+  auto block = btr_cur_get_block(cursor);
+  auto heap_no = page_rec_get_heap_no(rec);
+
+  if (heap_no != PAGE_HEAP_NO_SUPREMUM && !dict_index_is_spatial(index) &&
+      !index->table->is_temporary() && !index->table->is_intrinsic()) {
+    lock_rec_convert_active_impl_to_expl(block, rec, index, offsets, node->trx,
+                                         heap_no);
+  }
 }
 
 /** Undoes a row operation in a table. This is a high-level function used

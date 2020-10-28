@@ -1,7 +1,7 @@
 #ifndef ITEM_GEOFUNC_INCLUDED
 #define ITEM_GEOFUNC_INCLUDED
 
-/* Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -23,11 +23,12 @@
    along with this program; if not, write to the Free Software
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
-#include <stddef.h>
 #include <sys/types.h>
+
+#include <cstddef>
 #include <vector>
 
-#include "binary_log_types.h"
+#include "field_types.h"  // MYSQL_TYPE_BLOB
 #include "my_dbug.h"
 #include "my_inttypes.h"
 #include "my_sys.h"
@@ -38,6 +39,7 @@
 #include "sql/enum_query_type.h"
 #include "sql/field.h"
 #include "sql/gis/srid.h"
+#include "sql/parse_location.h"  // POS
 /* This file defines all spatial functions */
 #include "sql/inplace_vector.h"
 #include "sql/item.h"
@@ -45,8 +47,7 @@
 #include "sql/item_func.h"
 #include "sql/item_json_func.h"  // Item_json_func
 #include "sql/item_strfunc.h"    // Item_str_func
-#include "sql/parse_tree_node_base.h"
-#include "sql/spatial.h"  // gis_wkb_raw_free
+#include "sql/spatial.h"         // gis_wkb_raw_free
 #include "sql_string.h"
 
 class Json_array;
@@ -55,6 +56,7 @@ class Json_object;
 class Json_wrapper;
 class PT_item_list;
 class THD;
+struct Parse_context;
 struct TABLE;
 
 enum class enum_json_type;
@@ -77,7 +79,7 @@ class BG_result_buf_mgr {
   typedef Prealloced_array<void *, 64> Prealloced_buffers;
 
  public:
-  BG_result_buf_mgr() : bg_result_buf(NULL), bg_results(PSI_INSTRUMENT_ME) {}
+  BG_result_buf_mgr() : bg_result_buf(nullptr), bg_results(PSI_INSTRUMENT_ME) {}
 
   ~BG_result_buf_mgr() {
     free_intermediate_result_buffers();
@@ -87,7 +89,7 @@ class BG_result_buf_mgr {
   void add_buffer(void *buf) { bg_results.insert_unique(buf); }
 
   void forget_buffer(void *buf) {
-    if (bg_result_buf == buf) bg_result_buf = NULL;
+    if (bg_result_buf == buf) bg_result_buf = nullptr;
     bg_results.erase_unique(buf);
   }
 
@@ -103,7 +105,7 @@ class BG_result_buf_mgr {
   // Free the final result buffer, should be called after the result used.
   void free_result_buffer() {
     gis_wkb_raw_free(bg_result_buf);
-    bg_result_buf = NULL;
+    bg_result_buf = nullptr;
   }
 
   void set_result_buffer(void *buf) {
@@ -166,6 +168,14 @@ class BG_geometry_collection {
   size_t num_isolated() const { return m_num_isolated; }
 
   Gis_geometry_collection *as_geometry_collection(String *geodata) const;
+  /**
+    Merge all components as appropriate so that the object contains only
+    components that don't overlap.
+
+    @tparam Coordsys Coordinate system type, specified using those defined in
+            boost::geometry::cs.
+    @param[out] pnull_value takes back null_value set during the operation.
+   */
   template <typename Coordsys>
   void merge_components(bool *pnull_value);
 
@@ -249,6 +259,12 @@ class Item_func_geometry_from_text : public Item_geometry_func {
   bool itemize(Parse_context *pc, Item **res) override;
   const char *func_name() const override;
   String *val_str(String *) override;
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1)) return true;
+    if (param_type_is_default(thd, 1, 2, MYSQL_TYPE_LONGLONG)) return true;
+    if (param_type_is_default(thd, 2, 3)) return true;
+    return Item_geometry_func::resolve_type(thd);
+  }
 };
 
 class Item_func_geometry_from_wkb : public Item_geometry_func {
@@ -290,6 +306,12 @@ class Item_func_geometry_from_wkb : public Item_geometry_func {
     @retval false The geometry type is not allowed
   */
   bool is_allowed_wkb_type(Geometry::wkbType type) const;
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1)) return true;
+    if (param_type_is_default(thd, 1, 2, MYSQL_TYPE_LONGLONG)) return true;
+    if (param_type_is_default(thd, 2, 3)) return true;
+    return Item_geometry_func::resolve_type(thd);
+  }
 
  public:
   Item_func_geometry_from_wkb(const POS &pos, Item *a, Functype functype)
@@ -324,9 +346,10 @@ class Item_func_as_wkb : public Item_geometry_func {
   const char *func_name() const override { return "st_aswkb"; }
   String *val_str(String *) override;
   bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1, MYSQL_TYPE_GEOMETRY)) return true;
+    if (param_type_is_default(thd, 1, 2)) return true;
     if (Item_geometry_func::resolve_type(thd)) return true;
-    set_data_type(MYSQL_TYPE_BLOB);
-    // @todo - what about max_length???
+    set_data_type_blob(Field::MAX_LONG_BLOB_WIDTH);
     return false;
   }
 };
@@ -337,12 +360,13 @@ class Item_func_geometry_type : public Item_str_ascii_func {
       : Item_str_ascii_func(pos, a) {}
   String *val_str_ascii(String *) override;
   const char *func_name() const override { return "st_geometrytype"; }
-  bool resolve_type(THD *) override {
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1, MYSQL_TYPE_GEOMETRY)) return true;
     // "MultiLinestring" is the longest
     set_data_type_string(15, default_charset());
     maybe_null = true;
     return false;
-  };
+  }
 };
 
 /**
@@ -690,6 +714,10 @@ class Item_func_centroid : public Item_geometry_func {
   const char *func_name() const override { return "st_centroid"; }
   String *val_str(String *) override;
   Field::geometry_type get_geometry_type() const override;
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
+    return Item_geometry_func::resolve_type(thd);
+  }
 };
 
 class Item_func_convex_hull : public Item_geometry_func {
@@ -703,6 +731,10 @@ class Item_func_convex_hull : public Item_geometry_func {
   const char *func_name() const override { return "st_convexhull"; }
   String *val_str(String *) override;
   Field::geometry_type get_geometry_type() const override;
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
+    return Item_geometry_func::resolve_type(thd);
+  }
 };
 
 class Item_func_envelope : public Item_geometry_func {
@@ -711,6 +743,10 @@ class Item_func_envelope : public Item_geometry_func {
   const char *func_name() const override { return "st_envelope"; }
   String *val_str(String *) override;
   Field::geometry_type get_geometry_type() const override;
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
+    return Item_geometry_func::resolve_type(thd);
+  }
 };
 
 class Item_func_make_envelope : public Item_geometry_func {
@@ -720,6 +756,10 @@ class Item_func_make_envelope : public Item_geometry_func {
   const char *func_name() const override { return "st_makeenvelope"; }
   String *val_str(String *) override;
   Field::geometry_type get_geometry_type() const override;
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
+    return Item_geometry_func::resolve_type(thd);
+  }
 };
 
 class Item_func_validate : public Item_geometry_func {
@@ -728,21 +768,27 @@ class Item_func_validate : public Item_geometry_func {
  public:
   Item_func_validate(const POS &pos, Item *a) : Item_geometry_func(pos, a) {}
   const char *func_name() const override { return "st_validate"; }
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
+    return Item_geometry_func::resolve_type(thd);
+  }
   String *val_str(String *) override;
 };
 
-class Item_func_simplify : public Item_geometry_func {
-  BG_result_buf_mgr bg_resbuf_mgr;
-  String arg_val;
-  template <typename Coordsys>
-  int simplify_basic(Geometry *geom, double max_dist, String *str,
-                     Gis_geometry_collection *gc = NULL, String *gcbuf = NULL);
-
+/// Item that implements function ST_Simplify, which simplifies a geometry using
+/// the Douglas-Peucker algorithm.
+class Item_func_st_simplify : public Item_geometry_func {
  public:
-  Item_func_simplify(const POS &pos, Item *a, Item *b)
+  Item_func_st_simplify(const POS &pos, Item *a, Item *b)
       : Item_geometry_func(pos, a, b) {}
-  const char *func_name() const override { return "st_simplify"; }
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1, MYSQL_TYPE_GEOMETRY)) return true;
+    if (param_type_is_default(thd, 1, 2, MYSQL_TYPE_DOUBLE)) return true;
+    return Item_geometry_func::resolve_type(thd);
+  }
   String *val_str(String *) override;
+
+  const char *func_name() const override { return "st_simplify"; }
 };
 
 class Item_func_point : public Item_geometry_func {
@@ -752,6 +798,10 @@ class Item_func_point : public Item_geometry_func {
   const char *func_name() const override { return "point"; }
   String *val_str(String *) override;
   Field::geometry_type get_geometry_type() const override;
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_DOUBLE)) return true;
+    return Item_geometry_func::resolve_type(thd);
+  }
 };
 
 /**
@@ -786,13 +836,18 @@ class Item_func_pointfromgeohash : public Item_geometry_func {
   const char *func_name() const override { return "st_pointfromgeohash"; }
   String *val_str(String *) override;
   bool fix_fields(THD *thd, Item **ref) override;
+  bool resolve_type(THD *thd) override;
   Field::geometry_type get_geometry_type() const override {
     return Field::GEOM_POINT;
-  };
+  }
 };
 
 class Item_func_spatial_decomp : public Item_geometry_func {
   enum Functype decomp_func;
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
+    return Item_geometry_func::resolve_type(thd);
+  }
 
  public:
   Item_func_spatial_decomp(const POS &pos, Item *a, Item_func::Functype ft)
@@ -817,6 +872,11 @@ class Item_func_spatial_decomp : public Item_geometry_func {
 
 class Item_func_spatial_decomp_n : public Item_geometry_func {
   enum Functype decomp_func_n;
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1, MYSQL_TYPE_GEOMETRY)) return true;
+    if (param_type_is_default(thd, 1, 2, MYSQL_TYPE_LONGLONG)) return true;
+    return Item_geometry_func::resolve_type(thd);
+  }
 
  public:
   Item_func_spatial_decomp_n(const POS &pos, Item *a, Item *b,
@@ -855,11 +915,12 @@ class Item_func_spatial_collection : public Item_geometry_func {
   }
   String *val_str(String *) override;
   bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
     if (Item_geometry_func::resolve_type(thd)) return true;
     for (unsigned int i = 0; i < arg_count; ++i) {
       if (args[i]->fixed && args[i]->data_type() != MYSQL_TYPE_GEOMETRY) {
         String str;
-        args[i]->print(&str, QT_NO_DATA_EXPANSION);
+        args[i]->print(thd, &str, QT_NO_DATA_EXPANSION);
         str.append('\0');
         my_error(ER_ILLEGAL_VALUE_FOR_TYPE, MYF(0), "non geometric", str.ptr());
         return true;
@@ -902,8 +963,9 @@ class Item_func_spatial_mbr_rel : public Item_bool_func2 {
   }
 
   const char *func_name() const override;
-  void print(String *str, enum_query_type query_type) override {
-    Item_func::print(str, query_type);
+  void print(const THD *thd, String *str,
+             enum_query_type query_type) const override {
+    Item_func::print(thd, str, query_type);
   }
   bool resolve_type(THD *) override {
     maybe_null = true;
@@ -972,15 +1034,17 @@ class Item_func_spatial_relation : public Item_bool_func2 {
  public:
   Item_func_spatial_relation(const POS &pos, Item *a, Item *b)
       : Item_bool_func2(pos, a, b) {}
-  bool resolve_type(THD *) override {
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
     // Spatial relation functions may return NULL if either parameter is NULL or
     // an empty geometry. Since we can't check for empty geometries at resolve
     // time, this item is always nullable.
     maybe_null = true;
     return false;
   }
-  void print(String *str, enum_query_type query_type) override {
-    Item_func::print(str, query_type);
+  void print(const THD *thd, String *str,
+             enum_query_type query_type) const override {
+    Item_func::print(thd, str, query_type);
   }
   longlong val_int() override;
   bool is_null() override {
@@ -1002,7 +1066,7 @@ class Item_func_spatial_relation : public Item_bool_func2 {
     @param[out] result Result of the relational operation.
     @param[out] null True if the function should return NULL, false otherwise.
 
-    @retval true An error has occured and has been reported with my_error.
+    @retval true An error has occurred and has been reported with my_error.
     @retval false Success.
   */
   virtual bool eval(const dd::Spatial_reference_system *srs,
@@ -1270,6 +1334,11 @@ class Item_func_spatial_operation : public Item_geometry_func {
   String m_tmp_value1;
   String m_tmp_value2;
   BG_result_buf_mgr m_bg_resbuf_mgr;
+
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
+    return Item_geometry_func::resolve_type(thd);
+  }
 };
 
 class Item_func_st_difference final : public Item_func_spatial_operation {
@@ -1359,6 +1428,12 @@ class Item_func_buffer : public Item_geometry_func {
   String tmp_value;  // Stores current buffer result.
   String m_tmp_geombuf;
   void set_strategies();
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1, MYSQL_TYPE_GEOMETRY)) return true;
+    if (param_type_is_default(thd, 1, 2, MYSQL_TYPE_DOUBLE)) return true;
+    if (param_type_is_default(thd, 2, -1)) return true;
+    return Item_geometry_func::resolve_type(thd);
+  }
 
  public:
   Item_func_buffer(const POS &pos, PT_item_list *ilist);
@@ -1382,9 +1457,10 @@ class Item_func_isempty : public Item_bool_func {
  public:
   Item_func_isempty(const POS &pos, Item *a) : Item_bool_func(pos, a) {}
   longlong val_int() override;
-  optimize_type select_optimize() const override { return OPTIMIZE_NONE; }
+  optimize_type select_optimize(const THD *) override { return OPTIMIZE_NONE; }
   const char *func_name() const override { return "st_isempty"; }
-  bool resolve_type(THD *) override {
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1, MYSQL_TYPE_GEOMETRY)) return true;
     maybe_null = true;
     return false;
   }
@@ -1395,15 +1471,20 @@ class Item_func_st_issimple : public Item_bool_func {
   Item_func_st_issimple(const POS &pos, Item *a) : Item_bool_func(pos, a) {}
   longlong val_int() override;
   const char *func_name() const override { return "st_issimple"; }
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1, MYSQL_TYPE_GEOMETRY)) return true;
+    return Item_bool_func::resolve_type(thd);
+  }
 };
 
 class Item_func_isclosed : public Item_bool_func {
  public:
   Item_func_isclosed(const POS &pos, Item *a) : Item_bool_func(pos, a) {}
   longlong val_int() override;
-  optimize_type select_optimize() const override { return OPTIMIZE_NONE; }
+  optimize_type select_optimize(const THD *) override { return OPTIMIZE_NONE; }
   const char *func_name() const override { return "st_isclosed"; }
-  bool resolve_type(THD *) override {
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1, MYSQL_TYPE_GEOMETRY)) return true;
     maybe_null = true;
     return false;
   }
@@ -1413,8 +1494,12 @@ class Item_func_isvalid : public Item_bool_func {
  public:
   Item_func_isvalid(const POS &pos, Item *a) : Item_bool_func(pos, a) {}
   longlong val_int() override;
-  optimize_type select_optimize() const override { return OPTIMIZE_NONE; }
+  optimize_type select_optimize(const THD *) override { return OPTIMIZE_NONE; }
   const char *func_name() const override { return "st_isvalid"; }
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1, MYSQL_TYPE_GEOMETRY)) return true;
+    return Item_bool_func::resolve_type(thd);
+  }
 };
 
 class Item_func_dimension : public Item_int_func {
@@ -1424,70 +1509,192 @@ class Item_func_dimension : public Item_int_func {
   Item_func_dimension(const POS &pos, Item *a) : Item_int_func(pos, a) {}
   longlong val_int() override;
   const char *func_name() const override { return "st_dimension"; }
-  bool resolve_type(THD *) override {
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1, MYSQL_TYPE_GEOMETRY)) return true;
     max_length = 10;
     maybe_null = true;
     return false;
   }
 };
 
-/**
-  This class updates the x coordinate of geometry class POINT.
-  The class handles the SQL function @<geometry@>= ST_X(@<point@>, @<double@>).
-*/
-class Item_func_set_x : public Item_geometry_func {
+/// The abstract superclass for all geometry coordinate mutator functions (ST_X,
+/// ST_Y, ST_Latitude and ST_Longitude with two parameters).
+///
+/// @see Item_func_coordinate_observer
+class Item_func_coordinate_mutator : public Item_geometry_func {
  public:
-  Item_func_set_x(const POS &pos, Item *a, Item *b)
-      : Item_geometry_func(pos, a, b) {}
-  const char *func_name() const override { return "st_x"; }
+  Item_func_coordinate_mutator(const POS &pos, Item *a, Item *b,
+                               bool geographic_only)
+      : Item_geometry_func(pos, a, b), m_geographic_only(geographic_only) {}
   String *val_str(String *) override;
-};
 
-/**
-  This class updates the y coordinate of geometry class POINT.
-  The class handles the SQL function @<geometry@>= ST_Y(@<point@>, @<double@>).
-*/
-class Item_func_set_y : public Item_geometry_func {
- public:
-  Item_func_set_y(const POS &pos, Item *a, Item *b)
-      : Item_geometry_func(pos, a, b) {}
-  const char *func_name() const override { return "st_y"; }
-  String *val_str(String *) override;
-};
-
-class Item_func_get_x : public Item_real_func {
-  String value;
-
- public:
-  Item_func_get_x(const POS &pos, Item *a) : Item_real_func(pos, a) {}
-  double val_real() override;
-  const char *func_name() const override { return "st_x"; }
+ protected:
+  const char *func_name() const override = 0;
+  /// Returns the coordinate number accessed by this item.
+  ///
+  /// @param[in] srs The spatial reference system of the point.
+  ///
+  /// @return The coordinate number to access.
+  virtual int coordinate_number(
+      const dd::Spatial_reference_system *srs) const = 0;
   bool resolve_type(THD *thd) override {
-    if (Item_real_func::resolve_type(thd)) return true;
-    maybe_null = true;
-    return false;
+    if (param_type_is_default(thd, 0, 1, MYSQL_TYPE_GEOMETRY)) return true;
+    if (param_type_is_default(thd, 1, 2, MYSQL_TYPE_DOUBLE)) return true;
+    return Item_geometry_func::resolve_type(thd);
+  }
+
+ private:
+  /// Whether this item will accept only geographic geometries/SRSs.
+  bool m_geographic_only;
+};
+
+/// The abstract superclass for all geometry coordinate oberserver functions
+/// (ST_X, ST_Y, ST_Latitude, ST_Longitude with one parameter).
+///
+/// @see Item_func_coordinate_mutator
+class Item_func_coordinate_observer : public Item_real_func {
+ public:
+  Item_func_coordinate_observer(const POS &pos, Item *a, bool geographic_only)
+      : Item_real_func(pos, a), m_geographic_only(geographic_only) {}
+  double val_real() override;
+
+ protected:
+  const char *func_name() const override = 0;
+  /// Returns the coordinate number accessed by this item.
+  ///
+  /// @param[in] srs The spatial reference system of the point.
+  ///
+  /// @return The coordinate number to access.
+  virtual int coordinate_number(
+      const dd::Spatial_reference_system *srs) const = 0;
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1, MYSQL_TYPE_GEOMETRY)) return true;
+    return Item_real_func::resolve_type(thd);
+  }
+
+ private:
+  /// Whether this item will accept only geographic geometries/SRSs.
+  bool m_geographic_only;
+};
+
+/// This class implements the two-parameter ST_Latitude function which sets the
+/// latitude of a geographic point.
+class Item_func_st_latitude_mutator final
+    : public Item_func_coordinate_mutator {
+ public:
+  Item_func_st_latitude_mutator(const POS &pos, Item *a, Item *b)
+      : Item_func_coordinate_mutator(pos, a, b, true) {}
+
+ protected:
+  const char *func_name() const override { return "st_latitude"; }
+  int coordinate_number(const dd::Spatial_reference_system *) const override {
+    return 1;
   }
 };
 
-class Item_func_get_y : public Item_real_func {
-  String value;
-
+/// This class implements the one-parameter ST_Latitude function which returns
+/// the latitude coordinate of a geographic point.
+class Item_func_st_latitude_observer final
+    : public Item_func_coordinate_observer {
  public:
-  Item_func_get_y(const POS &pos, Item *a) : Item_real_func(pos, a) {}
-  double val_real() override;
-  const char *func_name() const override { return "st_y"; }
-  bool resolve_type(THD *thd) override {
-    if (Item_real_func::resolve_type(thd)) return true;
-    maybe_null = true;
-    return false;
+  Item_func_st_latitude_observer(const POS &pos, Item *a)
+      : Item_func_coordinate_observer(pos, a, true) {}
+
+ protected:
+  const char *func_name() const override { return "st_latitude"; }
+  int coordinate_number(const dd::Spatial_reference_system *) const override {
+    return 1;
   }
+};
+
+/// This class implements the two-parameter ST_Longitude function which sets the
+/// longitude coordinate of a point.
+class Item_func_st_longitude_mutator final
+    : public Item_func_coordinate_mutator {
+ public:
+  Item_func_st_longitude_mutator(const POS &pos, Item *a, Item *b)
+      : Item_func_coordinate_mutator(pos, a, b, true) {}
+
+ protected:
+  const char *func_name() const override { return "st_longitude"; }
+  int coordinate_number(const dd::Spatial_reference_system *) const override {
+    return 0;
+  }
+};
+
+/// This class implements the one-parameter ST_Longitude function which returns
+/// the longitude coordinate of a geographic point.
+class Item_func_st_longitude_observer final
+    : public Item_func_coordinate_observer {
+ public:
+  Item_func_st_longitude_observer(const POS &pos, Item *a)
+      : Item_func_coordinate_observer(pos, a, true) {}
+
+ protected:
+  const char *func_name() const override { return "st_longitude"; }
+  int coordinate_number(const dd::Spatial_reference_system *) const override {
+    return 0;
+  }
+};
+
+/// This class implements the two-parameter ST_X function which sets the X
+/// coordinate of a point.
+class Item_func_st_x_mutator final : public Item_func_coordinate_mutator {
+ public:
+  Item_func_st_x_mutator(const POS &pos, Item *a, Item *b)
+      : Item_func_coordinate_mutator(pos, a, b, false) {}
+
+ protected:
+  const char *func_name() const override { return "st_x"; }
+  int coordinate_number(const dd::Spatial_reference_system *srs) const override;
+};
+
+/// This class implements the one-parameter ST_X function which returns the X
+/// coordinate of a point.
+class Item_func_st_x_observer final : public Item_func_coordinate_observer {
+ public:
+  Item_func_st_x_observer(const POS &pos, Item *a)
+      : Item_func_coordinate_observer(pos, a, false) {}
+
+ protected:
+  const char *func_name() const override { return "st_x"; }
+  int coordinate_number(const dd::Spatial_reference_system *srs) const override;
+};
+
+/// This class implements the two-parameter ST_Y function which sets the Y
+/// coordinate of a point.
+class Item_func_st_y_mutator final : public Item_func_coordinate_mutator {
+ public:
+  Item_func_st_y_mutator(const POS &pos, Item *a, Item *b)
+      : Item_func_coordinate_mutator(pos, a, b, false) {}
+
+ protected:
+  const char *func_name() const override { return "st_y"; }
+  int coordinate_number(const dd::Spatial_reference_system *srs) const override;
+};
+
+/// This class implements the one-parameter ST_Y function which returns the Y
+/// coordinate of a point.
+class Item_func_st_y_observer final : public Item_func_coordinate_observer {
+ public:
+  Item_func_st_y_observer(const POS &pos, Item *a)
+      : Item_func_coordinate_observer(pos, a, false) {}
+
+ protected:
+  const char *func_name() const override { return "st_y"; }
+  int coordinate_number(const dd::Spatial_reference_system *srs) const override;
 };
 
 class Item_func_swap_xy : public Item_geometry_func {
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
+    return Item_geometry_func::resolve_type(thd);
+  }
+
  public:
   Item_func_swap_xy(const POS &pos, Item *a) : Item_geometry_func(pos, a) {}
-  const char *func_name() const { return "st_swapxy"; }
-  String *val_str(String *);
+  const char *func_name() const override { return "st_swapxy"; }
+  String *val_str(String *) override;
 };
 
 class Item_func_numgeometries : public Item_int_func {
@@ -1497,7 +1704,8 @@ class Item_func_numgeometries : public Item_int_func {
   Item_func_numgeometries(const POS &pos, Item *a) : Item_int_func(pos, a) {}
   longlong val_int() override;
   const char *func_name() const override { return "st_numgeometries"; }
-  bool resolve_type(THD *) override {
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
     max_length = 10;
     maybe_null = true;
     return false;
@@ -1511,7 +1719,8 @@ class Item_func_numinteriorring : public Item_int_func {
   Item_func_numinteriorring(const POS &pos, Item *a) : Item_int_func(pos, a) {}
   longlong val_int() override;
   const char *func_name() const override { return "st_numinteriorrings"; }
-  bool resolve_type(THD *) override {
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
     max_length = 10;
     maybe_null = true;
     return false;
@@ -1525,25 +1734,22 @@ class Item_func_numpoints : public Item_int_func {
   Item_func_numpoints(const POS &pos, Item *a) : Item_int_func(pos, a) {}
   longlong val_int() override;
   const char *func_name() const override { return "st_numpoints"; }
-  bool resolve_type(THD *) override {
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
     max_length = 10;
     maybe_null = true;
     return false;
   }
 };
 
-class Item_func_area : public Item_real_func {
-  String value;
-
-  template <typename Coordsys>
-  double bg_area(const Geometry *geom);
-
+class Item_func_st_area : public Item_real_func {
  public:
-  Item_func_area(const POS &pos, Item *a) : Item_real_func(pos, a) {}
+  Item_func_st_area(const POS &pos, Item *a) : Item_real_func(pos, a) {}
   double val_real() override;
   const char *func_name() const override { return "st_area"; }
   bool resolve_type(THD *thd) override {
-    if (Item_real_func::resolve_type(thd)) return true;
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
+    // ST_Area returns NULL if the geometry is empty.
     maybe_null = true;
     return false;
   }
@@ -1553,54 +1759,47 @@ class Item_func_st_length : public Item_real_func {
   String value;
 
  public:
-  Item_func_st_length(const POS &pos, Item *a) : Item_real_func(pos, a) {}
+  Item_func_st_length(const POS &pos, PT_item_list *ilist)
+      : Item_real_func(pos, ilist) {}
   double val_real() override;
   const char *func_name() const override { return "st_length"; }
   bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
     if (Item_real_func::resolve_type(thd)) return true;
     maybe_null = true;
     return false;
   }
 };
 
-/**
-  Implements the one-parameter ST_SRID observer function. If used with a
-  valid geometry, it returns the SRID of the geometry object. Ex:
-
-  SELECT ST_SRID(geometry_column) FROM t1;
-
-  will return the SRIDs of the geometries in geometry_column
-  in table t1.
-*/
-class Item_func_get_srid : public Item_int_func {
-  String value;
-
+/// This class implements the two-parameter ST_SRID function which sets
+/// the SRID of a geometry.
+class Item_func_st_srid_mutator : public Item_geometry_func {
  public:
-  Item_func_get_srid(const POS &pos, Item *a) : Item_int_func(pos, a) {}
-  longlong val_int() override;
+  Item_func_st_srid_mutator(const POS &pos, Item *a, Item *b)
+      : Item_geometry_func(pos, a, b) {}
+  String *val_str(String *) override;
   const char *func_name() const override { return "st_srid"; }
-  bool resolve_type(THD *) override {
-    max_length = 10;
-    maybe_null = true;
-    return false;
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1, MYSQL_TYPE_GEOMETRY)) return true;
+    if (param_type_is_default(thd, 1, 2, MYSQL_TYPE_LONGLONG)) return true;
+    return Item_geometry_func::resolve_type(thd);
   }
 };
 
-/**
-  Updates the SRID of a geometry object without changing its content.
-  This extends the ST_SRID function to two parameters: a geometry and an
-  SRID. Can be used as follows:
-
-  UPDATE t1 SET geometry_column=ST_SRID(geometry_column, 4326);
-
-  This will update all geometries in geometry_column to have SRID 4326.
-*/
-class Item_func_set_srid : public Item_geometry_func {
+/// This class implements the one-parameter ST_SRID function which
+/// returns the SRID of a geometry.
+class Item_func_st_srid_observer : public Item_int_func {
  public:
-  Item_func_set_srid(const POS &pos, Item *a, Item *b)
-      : Item_geometry_func(pos, a, b){};
-  String *val_str(String *str) override;
+  Item_func_st_srid_observer(const POS &pos, Item *a) : Item_int_func(pos, a) {}
+  longlong val_int() override;
   const char *func_name() const override { return "st_srid"; }
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 1, MYSQL_TYPE_GEOMETRY)) return true;
+    bool error = Item_int_func::resolve_type(thd);
+    max_length = 10;
+    return error;
+  }
 };
 
 class Item_func_distance : public Item_real_func {
@@ -1623,8 +1822,8 @@ class Item_func_distance : public Item_real_func {
     maybe_null = true;
   }
 
-  virtual bool resolve_type(THD *thd) override {
-    if (Item_real_func::resolve_type(thd)) return true;
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, -1, MYSQL_TYPE_GEOMETRY)) return true;
     maybe_null = true;
     return false;
   }
@@ -1639,6 +1838,23 @@ class Item_func_st_distance_sphere : public Item_real_func {
       : Item_real_func(pos, ilist) {}
   double val_real() override;
   const char *func_name() const override { return "st_distance_sphere"; }
+  bool resolve_type(THD *thd) override {
+    if (param_type_is_default(thd, 0, 2, MYSQL_TYPE_GEOMETRY)) return true;
+    if (param_type_is_default(thd, 2, 3, MYSQL_TYPE_DOUBLE)) return true;
+    return Item_real_func::resolve_type(thd);
+  }
+};
+
+/// This class implements ST_Transform function that transforms a geometry from
+/// one SRS to another.
+class Item_func_st_transform final : public Item_geometry_func {
+ public:
+  Item_func_st_transform(const POS &pos, Item *a, Item *b)
+      : Item_geometry_func(pos, a, b) {}
+  String *val_str(String *str) override;
+
+ private:
+  const char *func_name() const override { return "st_transform"; }
 };
 
 #endif /*ITEM_GEOFUNC_INCLUDED*/

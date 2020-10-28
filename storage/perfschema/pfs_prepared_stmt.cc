@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2013, 2020, Oracle and/or its affiliates. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -73,22 +73,24 @@ PFS_prepared_stmt *create_prepared_stmt(
     void *identity, PFS_thread *thread, PFS_program *pfs_program,
     PFS_events_statements *pfs_stmt, uint stmt_id, const char *stmt_name,
     uint stmt_name_length, const char *sqltext, uint sqltext_length) {
-  PFS_prepared_stmt *pfs = NULL;
+  PFS_prepared_stmt *pfs = nullptr;
   pfs_dirty_state dirty_state;
 
   /* Create a new record in prepared stmt stat array. */
   pfs = global_prepared_stmt_container.allocate(&dirty_state);
-  if (pfs != NULL) {
+  if (pfs != nullptr) {
     /* Reset the stats. */
     pfs->reset_data();
     /* Do the assignments. */
     pfs->m_identity = identity;
     /* Set query text if available, else it will be set later. */
-    if (sqltext_length > 0) strncpy(pfs->m_sqltext, sqltext, sqltext_length);
+    if (sqltext_length > 0) {
+      strncpy(pfs->m_sqltext, sqltext, sqltext_length);
+    }
 
     pfs->m_sqltext_length = sqltext_length;
 
-    if (stmt_name != NULL) {
+    if (stmt_name != nullptr) {
       pfs->m_stmt_name_length = stmt_name_length;
       if (pfs->m_stmt_name_length > PS_NAME_LENGTH) {
         pfs->m_stmt_name_length = PS_NAME_LENGTH;

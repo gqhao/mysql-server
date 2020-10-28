@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2012, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2011, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -48,7 +48,7 @@ struct QueryNodeParameters;
 class Dbspj: public SimulatedBlock {
 public:
   Dbspj(Block_context& ctx, Uint32 instanceNumber = 0);
-  virtual ~Dbspj();
+  ~Dbspj() override;
 
   struct Request;
   struct TreeNode;
@@ -123,11 +123,11 @@ public:
   struct TableRecord {
     TableRecord() 
     : m_currentSchemaVersion(0), m_flags(0)
-    {};
+    {}
 
     TableRecord(Uint32 schemaVersion)
     : m_currentSchemaVersion(schemaVersion), m_flags(TR_PREPARED)
-    {};
+    {}
 
     Uint32 m_currentSchemaVersion;
     Uint16 m_flags;
@@ -150,21 +150,10 @@ public:
   };
   typedef Ptr<TableRecord> TableRecordPtr;
 
-  enum Buffer_type {
-    BUFFER_VOID  = 0,
-    BUFFER_STACK = 1,
-    BUFFER_VAR   = 2
-  };
-
   struct RowRef
   {
     Uint32 m_page_id;
     Uint16 m_page_pos;
-    union
-    {
-      Uint16 unused;
-      enum Buffer_type m_alloc_type:16;
-    };
 
     void copyto_link(Uint32 * dst) const {
       dst[0] = m_page_id; dst[1] = m_page_pos;
@@ -201,9 +190,10 @@ public:
    */
   struct RowPtr
   {
-    Uint32 m_type;
-    Uint32 m_src_node_ptrI;
-    Uint32 m_src_correlation;
+    Uint32  m_src_node_ptrI;
+    Uint32  m_src_correlation;
+
+    TreeNodeBitMask *m_matched;  //If 'T_BUFFER_MATCH' is specified, else NULL
 
     struct Header
     {
@@ -211,30 +201,13 @@ public:
       Uint32 m_offset[1];
     };
 
-    struct Section
+    struct Row
     {
-      const Header * m_header;
-      SegmentedSectionPtrPOD m_dataPtr;
-    };
-
-    struct Linear
-    {
-      RowRef m_row_ref;
       const Header * m_header;
       const Uint32 * m_data;
     };
-    union
-    {
-      struct Section m_section;
-      struct Linear m_linear;
-    } m_row_data;
 
-    enum RowType
-    {
-      RT_SECTION = 1,
-      RT_LINEAR = 2,
-      RT_END = 0
-    };
+    struct Row m_row_data;
   };
 
   struct RowBuffer;  // forward decl.
@@ -303,7 +276,7 @@ public:
 
     bool isNull() const { return m_map_ref.isNull(); }
 
-    void assign (RowRef ref) {
+    void assign(RowRef ref) {
       m_map_ref = ref;
     }
 
@@ -486,43 +459,22 @@ public:
   typedef DLFifoList<RowPage_pool> RowPage_fifo;
   typedef LocalDLFifoList<RowPage_pool> Local_RowPage_fifo;
 
-  typedef Tup_varsize_page Var_page;
-
   struct RowBuffer
   {
-    enum Buffer_type m_type;
-
-    RowBuffer() : m_type(BUFFER_VOID) {}
+    RowBuffer() {}
     RowPage_fifo::Head m_page_list;
 
-    void init(enum Buffer_type type)
+    void init()
     {
       new (&m_page_list) RowPage_fifo::Head();
-      m_type = type;
       reset();
     }
     void reset()
     {
-      if (m_type == BUFFER_STACK)
-        m_stack.m_pos = 0xFFFF;
-      else if (m_type == BUFFER_VAR)
-        m_var.m_free = 0;
+      m_stack_pos = 0xFFFF;
     }
 
-    struct Stack
-    {
-      Uint32 m_pos; // position on head-page
-    };
-
-    struct Var
-    {
-      Uint32 m_free; // Free on last page in list
-    };
-
-    union {
-      struct Stack m_stack;
-      struct Var m_var;
-    };
+    Uint32 m_stack_pos;  // Next free position in head-page
   };
 
   /**
@@ -561,9 +513,10 @@ public:
 
     /**
      * This function is called when a waited for signal arrives.
-     * Return 'true' if this completes the wait for this treeNode
+     * Sets Request::m_completed_tree_nodes if this completed the
+     * wait for this treeNode
      */
-    bool (Dbspj::*m_countSignal)(const Signal*,Ptr<Request>,Ptr<TreeNode>);
+    void (Dbspj::*m_countSignal)(Signal*, Ptr<Request>, Ptr<TreeNode>, Uint32 cnt);
 
     /**
      * This function is used when getting a LQHKEYREF
@@ -630,7 +583,7 @@ public:
      * This function is called on node-failure
      */
     Uint32 (Dbspj::*m_execNODE_FAILREP)(Signal*, Ptr<Request>, Ptr<TreeNode>,
-                                        NdbNodeBitmask);
+                                        const NdbNodeBitmask);
     /**
      * This function is called when request/node(s) is/are removed
      *  should only do local cleanup(s)
@@ -683,7 +636,6 @@ public:
       m_state = SFH_NOT_STARTED;
       m_rangePtrI = RNIL;
       m_readBackup = readBackup;
-      reset_ranges();
     }
 
     Uint32 m_magic;
@@ -692,16 +644,6 @@ public:
     Uint8 m_state;
     Uint8 m_readBackup;
     Uint32 m_ref;
-
-    void reset_ranges() {
-      // m_rangePtrI is explicitly managed...in code
-      m_range_builder.m_range_cnt = m_range_builder.m_range_size = 0;
-    }
-    struct RangeBuilder
-    {
-      Uint32 m_range_size;
-      Uint16 m_range_cnt; // too set bounds info correctly
-    } m_range_builder;
     Uint32 m_rangePtrI;
     union {
       Uint32 nextList;
@@ -804,27 +746,20 @@ public:
   {
     /**
      * m_correlations contains a list of Correlation Values (Uint32)
-     * which identifies parent rows which has been deferred. 
-     * m_pos are index into this array, identifying the next parent row
+     * which identifies parent rows which has been deferred.
+     * m_it iterates this list, identifying the next parent row
      * for which to resume operation.
      */
     Correlation_list::Head m_correlations;
-    Uint16 m_pos; // Next row operation to resume 
+    Correlation_list::ConstDataBufferIterator m_it;
 
-    DeferredParentOps() : m_correlations(), m_pos(0) {}
-
+    DeferredParentOps() : m_correlations() {
+      m_it.setNull();
+    }
     void init()  {
       m_correlations.init();
-      m_pos = 0;
+      m_it.setNull();
     }
-    bool isEmpty() const {
-      return (m_pos == m_correlations.getSize());
-    }
-  };
-
-  struct TreeNode_cursor_ptr
-  {
-    Uint32 nextList;
   };
 
   /**
@@ -832,15 +767,16 @@ public:
    *   (This is an instantiated version of QueryNode in
    *    include/kernel/signal/QueryTree.hpp)
    */
-  struct TreeNode : TreeNode_cursor_ptr
+  struct TreeNode
   {
     STATIC_CONST ( MAGIC = ~RT_SPJ_TREENODE );
 
     TreeNode()
     : m_magic(MAGIC), m_state(TN_END),
       m_parentPtrI(RNIL), m_requestPtrI(RNIL),
-      m_ancestors(),
-      m_resumeEvents(0), m_resumePtrI(RNIL)
+      m_ancestors(), m_coverage(), m_predecessors(), m_dependencies(),
+      m_resumeEvents(0),
+      m_scanAncestorPtrI(RNIL)
     {
     }
 
@@ -848,15 +784,20 @@ public:
     : m_magic(MAGIC),
       m_info(0), m_bits(T_LEAF), m_state(TN_BUILDING),
       m_parentPtrI(RNIL), m_requestPtrI(request),
-      m_ancestors(),
-      m_resumeEvents(0), m_resumePtrI(RNIL),
-      nextList(RNIL), prevList(RNIL)
+      m_ancestors(), m_coverage(), m_predecessors(), m_dependencies(),
+      m_resumeEvents(0),
+      m_scanAncestorPtrI(RNIL),
+      nextList(RNIL), prevList(RNIL), nextCursor(RNIL)
     {
 //    m_send.m_ref = 0;
       m_send.m_correlation = 0;
       m_send.m_keyInfoPtrI = RNIL;
       m_send.m_attrInfoPtrI = RNIL;
     }
+
+    // TreeNode represent either a 'lookup' or 'scan' operation
+    bool isLookup() const { return (m_info == &g_LookupOpInfo); }
+    bool isScan()   const { return (m_info != &g_LookupOpInfo); }
 
     const Uint32 m_magic;
     const struct OpInfo* m_info;
@@ -935,22 +876,23 @@ public:
       T_UNIQUE_INDEX_LOOKUP = 0x40,
 
       /*
-       * Should this node buffers its rows
+       * Should this node buffers its rows or 'm_matched' bitmask?
+       *  We could request the buffer to store either the 'ROW',
+       *  as received by TRANSID_AI, and/or a 'MATCH' bitMask.
+       *  If 'ROW' is not specified, the correlationId of the 
+       *  row is stored nevertheless. 
        */
-      T_ROW_BUFFER = 0x80,
+      T_BUFFER_ROW   = 0x80,
+      T_BUFFER_MATCH = 0x100,
+      T_BUFFER_ANY   = (T_BUFFER_ROW | T_BUFFER_MATCH),
 
       /**
-       * Should rows have dictionary (i.e random access capability)
+       * Should row/match buffers have dictionary (i.e random access capability)
        *  This is typically used when having nodes depending on multiple parents
-       *  so that when row gets availble from "last" parent, a key can be
+       *  so that when row gets available from "last" parent, a key can be
        *  constructed using correlation value from parents
        */
-      T_ROW_BUFFER_MAP = 0x100,
-
-      /**
-       * Does any child need to know when all its ancestors are complete
-       */
-      T_REPORT_BATCH_COMPLETE  = 0x200,
+      T_BUFFER_MAP = 0x200,
 
       /**
        * Do *I need* to know when all ancestors has completed this batch
@@ -977,11 +919,7 @@ public:
        */
       T_SCAN_REPEATABLE = 0x4000,
 
-      /**
-       * Exec of a previous REQ must complete before we can proceed.
-       * A ResumeEvent will later resume exec. of this operation
-       */
-      T_EXEC_SEQUENTIAL = 0x8000,
+      // 0x8000, Deprecated, available for reuse
 
       /**
        * Does this node need the m_prepare() method to be called.
@@ -996,19 +934,49 @@ public:
        */
       T_NEED_COMPLETE = 0x20000,
 
+      /**
+       * Allow inner-join optimizations for this treeNode.
+       * (No outer-join semantics required)
+       */
+      T_INNER_JOIN = 0x40000,
+
+      /**
+       * A TRANSID_AI signal is returned for each row found by the datanodes.
+       */
+      T_EXPECT_TRANSID_AI = 0x80000,
+
+      /**
+       * Results from this TreeNode need to be produced in sorted
+       * order, as defined by the index being used.
+       * (Also require that T_SCAN_PARALLEL is set)
+       */
+      T_SORTED_ORDER = 0x100000,
+
+      /**
+       * Allow FirstMatch elimination when multiple rows matching the
+       * same key or range
+       */
+      T_FIRST_MATCH = 0x200000,
+
+      /**
+       * Need congestion control of this TreeNode. Possible suspend it
+       * and later resume the operations on it.
+       */
+      T_CHK_CONGESTION = 0x400000,
+
       // End marker...
       T_END = 0
     };
 
     /**
-     * Describe whether a LQHKEY-REF and/or CONF whould trigger a 
-     * exec resume of another TreeNode having T_EXEC_SEQUENTIAL.
-     * (Used as a bitmask)
+     * Describe whether a node operation should wait for operations
+     * it depends on to complete, and the resume when all result
+     * rows has been sent. (Used as a bitmask)
      */
     enum TreeNodeResumeEvents
     {
-      TN_RESUME_REF   = 0x01,
-      TN_RESUME_CONF  = 0x02
+      TN_EXEC_WAIT    = 0x08,
+      TN_RESUME_NODE  = 0x10
     };
 
     bool isLeaf() const { return (m_bits & T_LEAF) != 0;}
@@ -1026,10 +994,62 @@ public:
     Uint32 m_batch_size;
     Uint32 m_parentPtrI;
     const Uint32 m_requestPtrI;
+
+    /**
+     * The TreeNode organize its descendant nodes in two different lists:
+     *
+     * m_child_nodes: (The dependent nodes)
+     *   Are the list of descendant nodes as organized by the request sent
+     *   from the SPJ API. All child-TreeNodes will have their 'm_parentPtrI'
+     *   referring 'this' TreeNode.
+     *
+     * m_next_nodes: (The execution order)
+     *   The list of TreeNodes having operations to be started after
+     *   this TreeNode, either when a single operation completes, or
+     *   after completion of entire 'batch' from this TreeNode.
+     *   All 'm_child_nodes' will either be directly included in
+     *   the 'next' list, or be included in the 'next' list of some
+     *   'next' TreeNodes.
+     *   Usage is to set up a more sequential execution plan than what
+     *   is available through the 'child' list.
+     */
+    Dependency_map::Head m_child_nodes;
+    Dependency_map::Head m_next_nodes;
+
+    /**
+     * We provide some TreeNodeBitMap's. Usefull to check how
+     * a specific node relates to other TreeNodes:
+     *
+     * - 'ancestors' are the set of TreeNodes reachable through
+     *    this node's (grand-)parentPtr(s)
+     * - 'coverage' is the set of (grand-)children reachable through
+     *    a 'm_child_nodes' dive. Also include this TreeNode itself.
+     * - 'predecessors' are the TreeNodes which will be executed prior
+     *    to this TreeNode. This include all 'ancestors', as well as
+     *    other TreeNodes which the SPJ 'query planner' may decide
+     *    to execute prior to this TreeNode.
+     * - 'dependencies' are the sub set of 'predecessors' where 
+     *    there are an inner-join relation specified between the
+     *    TreeNodes.
+     *
+     * 'ancestors' and 'coverage' relates to the topology of the query
+     * as represented by parentPtrI and m_child_nodes. 'predecessors' and
+     * 'dependencies' relates to the order of execution, as represented by
+     * 'm_next_nodes'.
+     */
     TreeNodeBitMask m_ancestors;
-    Dependency_map::Head m_dependent_nodes;
+    TreeNodeBitMask m_coverage;
+    TreeNodeBitMask m_predecessors;
+    TreeNodeBitMask m_dependencies;
+
     PatternStore::Head m_keyPattern;
     PatternStore::Head m_attrParamPattern;
+
+    // Memory Arena with lifetime limited to current result batch / node
+    ArenaHead m_batchArena;
+
+    // RowBuffers for this TreeNode only
+    RowBuffer m_rowBuffer;
 
     /**
      * Rows buffered by this node
@@ -1037,20 +1057,23 @@ public:
     RowCollection m_rows;
 
     /**
-     * T_EXEC_SEQUENTIAL cause execution of child operations to
+     * T_CHK_CONGESTION may cause execution of child operations to
      * be deferred.  These operations are queued in the 'struct DeferredParentOps'
-     * Currently only Lookup operation might be deferred.
-     * Could later be extended to also cover index scans.
+     * The congestion check will always happen on a Scan TreeNode having
+     * some Lookup childrens, which are the operations which might be deferred.
      */
     DeferredParentOps m_deferred;
 
     /**
      * Set of TreeNodeResumeEvents, possibly or'ed.
-     * Specify whether a REF or CONF will cause a resume
-     * of the TreeNode referred by 'm_resumePtrI'.
      */
     Uint32 m_resumeEvents;
-    Uint32 m_resumePtrI;
+
+    /**
+     * The Scan-TreeNode being the head of the inner-joined-branch
+     * this node is a member of.
+     */
+    Uint32 m_scanAncestorPtrI;
 
     union
     {
@@ -1074,6 +1097,7 @@ public:
       Uint32 nextPool;
     };
     Uint32 prevList;
+    Uint32 nextCursor;
   };  //struct TreeNode
 
   static const Ptr<TreeNode> NullTreeNodePtr;
@@ -1082,9 +1106,9 @@ public:
   typedef DLFifoList<TreeNode_pool> TreeNode_list;
   typedef LocalDLFifoList<TreeNode_pool> Local_TreeNode_list;
 
-  typedef SLList<TreeNode_pool, TreeNode_cursor_ptr>
+  typedef SLList<TreeNode_pool, IA_Cursor>
   TreeNodeCursor_list;
-  typedef LocalSLList<TreeNode_pool, TreeNode_cursor_ptr>
+  typedef LocalSLList<TreeNode_pool, IA_Cursor>
   Local_TreeNodeCursor_list;
 
   /**
@@ -1095,9 +1119,7 @@ public:
     enum RequestBits
     {
       RT_SCAN                = 0x1  // unbounded result set, scan interface
-      ,RT_ROW_BUFFERS        = 0x2  // Do any of the node use row-buffering
       ,RT_MULTI_SCAN         = 0x4  // Is there several scans in request
-//    ,RT_VAR_ALLOC          = 0x8  // DEPRECATED
       ,RT_NEED_PREPARE       = 0x10 // Does any node need m_prepare hook
       ,RT_NEED_COMPLETE      = 0x20 // Does any node need m_complete hook
       ,RT_REPEAT_SCAN_RESULT = 0x40 // Repeat bushy scan result when required
@@ -1134,14 +1156,15 @@ public:
     TreeNodeCursor_list::Head m_cursor_nodes;
     Uint32 m_cnt_active;       // No of "running" nodes
     TreeNodeBitMask
-           m_active_nodes;     // Nodes which will return more data in NEXTREQ
+      m_active_tree_nodes;     // Nodes which will return more data in NEXTREQ
     TreeNodeBitMask
-           m_completed_nodes;  // Nodes wo/ any 'outstanding' signals
+      m_completed_tree_nodes;  // Nodes wo/ any 'outstanding' signals
+    TreeNodeBitMask
+      m_suspended_tree_nodes;  // Nodes suspended by SPJ congestion control
     Uint32 m_rows;             // Rows accumulated in current batch
     Uint32 m_outstanding;      // Outstanding signals, when 0, batch is done
     Uint16 m_lookup_node_data[MAX_NDB_NODES];
     ArenaHead m_arena;
-    RowBuffer m_rowBuffer;
 
 #ifdef SPJ_TRACE_TIME
     Uint32 m_cnt_batches;
@@ -1151,7 +1174,8 @@ public:
     NDB_TICKS m_save_time;
 #endif
 
-    bool isScan() const { return (m_bits & RT_SCAN) != 0;}
+    // Entire query may be either a 'scan' or 'lookup' type
+    bool isScan()   const { return (m_bits & RT_SCAN) != 0;}
     bool isLookup() const { return (m_bits & RT_SCAN) == 0;}
 
     bool equal(const Request & key) const {
@@ -1333,7 +1357,25 @@ private:
   const OpInfo* getOpInfo(Uint32 op);
   Uint32 build(Build_context&,Ptr<Request>,SectionReader&,SectionReader&);
   Uint32 initRowBuffers(Ptr<Request>);
-  void buildExecPlan(Ptr<Request>, Ptr<TreeNode> node, Ptr<TreeNode> next);
+
+  void setupAncestors(Ptr<Request>  requestPtr,
+                      Ptr<TreeNode> treeNodePtr,
+                      Uint32 scanAncestorPtrI);
+  
+  Uint32 buildExecPlan(Ptr<Request> requestPtr);
+  Uint32 planParallelExec(Ptr<Request> requestPtr,
+			  Ptr<TreeNode> treeNodePtr);
+
+  Uint32 planSequentialExec(Ptr<Request>  requestPtr,
+                            const Ptr<TreeNode> branchPtr,
+                            Ptr<TreeNode> prevExecPtr);
+
+  Uint32 appendTreeNode(Ptr<Request>  requestPtr,
+                        Ptr<TreeNode> treeNodePtr,
+                        Ptr<TreeNode> prevExecPtr);
+
+  void dumpExecPlan(Ptr<Request>, Ptr<TreeNode> node);
+
   void prepare(Signal*, Ptr<Request>);
   void checkPrepareComplete(Signal*, Ptr<Request>);
   void checkBatchComplete(Signal*, Ptr<Request>);
@@ -1349,9 +1391,6 @@ private:
   Uint32 createNode(Build_context&, Ptr<Request>, Ptr<TreeNode> &);
   void handleTreeNodeComplete(Signal*, Ptr<Request>, Ptr<TreeNode>);
   void reportAncestorsComplete(Signal*, Ptr<Request>, Ptr<TreeNode>);
-  void releaseScanBuffers(Ptr<Request> requestPtr);
-  void releaseRequestBuffers(Ptr<Request> requestPtr);
-  void releaseNodeRows(Ptr<Request> requestPtr, Ptr<TreeNode>);
   void registerActiveCursor(Ptr<Request>, Ptr<TreeNode>);
   void nodeFail_checkRequests(Signal*);
   void cleanup_common(Ptr<Request>, Ptr<TreeNode>);
@@ -1359,18 +1398,21 @@ private:
   /**
    * Row buffering
    */
-  Uint32 storeRow(RowCollection& collection, RowPtr &row);
-  void releaseRow(RowCollection& collection, RowRef ref);
+  Uint32 storeRow(Ptr<TreeNode> treeNodePtr, const RowPtr &row);
   Uint32* stackAlloc(RowBuffer& dst, RowRef&, Uint32 len);
-  Uint32* varAlloc(RowBuffer& dst, RowRef&, Uint32 len);
-  Uint32* rowAlloc(RowBuffer& dst, RowRef&, Uint32 len);
 
   void add_to_list(SLFifoRowList & list, RowRef);
   Uint32 add_to_map(RowMap& map, Uint32, RowRef);
 
-  void setupRowPtr(const RowCollection& collection,
-                   RowPtr& dst, RowRef, const Uint32 * src);
+  void setupRowPtr(Ptr<TreeNode> treeNodePtr,
+                   RowPtr &dst, const Uint32 *src);
   Uint32 * get_row_ptr(RowRef pos);
+
+  void getBufferedRow(const Ptr<TreeNode>, Uint32 rowId,
+                      RowPtr *row);
+
+  void resumeBufferedNode(Signal*, Ptr<Request>, Ptr<TreeNode>);
+  void resumeCongestedNode(Signal*, Ptr<Request>, Ptr<TreeNode>);
 
   /**
    * SLFifoRowListIterator
@@ -1394,42 +1436,27 @@ private:
   /**
    * Misc
    */
-  Uint32 buildRowHeader(RowPtr::Header *, SegmentedSectionPtr);
-  Uint32 buildRowHeader(RowPtr::Header *, const Uint32 *& src, Uint32 len);
-  void getCorrelationData(const RowPtr::Section & row, Uint32 col,
-                          Uint32& correlationNumber);
-  void getCorrelationData(const RowPtr::Linear & row, Uint32 col,
+  Uint32 buildRowHeader(RowPtr::Header *, LinearSectionPtr);
+  Uint32 buildRowHeader(RowPtr::Header *, const Uint32 *& src, Uint32 cnt);
+  void getCorrelationData(const RowPtr::Row &row, Uint32 col,
                           Uint32& correlationNumber);
   Uint32 appendToPattern(Local_pattern_store &, DABuffer & tree, Uint32);
-  Uint32 appendParamToPattern(Local_pattern_store&,const RowPtr::Linear&,
+  Uint32 appendParamToPattern(Local_pattern_store&,const RowPtr::Row&,
                               Uint32);
-  Uint32 appendParamHeadToPattern(Local_pattern_store&,const RowPtr::Linear&,
+  Uint32 appendParamHeadToPattern(Local_pattern_store&,const RowPtr::Row&,
                                   Uint32);
 
-  Uint32 appendTreeToSection(Uint32 & ptrI, SectionReader &, Uint32);
-  Uint32 appendColToSection(Uint32 & ptrI, const RowPtr::Linear&, Uint32 col, bool& hasNull);
-  Uint32 appendColToSection(Uint32 & ptrI, const RowPtr::Section&, Uint32 col, bool& hasNull);
-  Uint32 appendPkColToSection(Uint32 & ptrI, const RowPtr::Section&,Uint32 col);
-  Uint32 appendPkColToSection(Uint32 & ptrI, const RowPtr::Linear&, Uint32 col);
-  Uint32 appendAttrinfoToSection(Uint32 &, const RowPtr::Linear&, Uint32 col, bool& hasNull);
-  Uint32 appendAttrinfoToSection(Uint32 &, const RowPtr::Section&, Uint32 col, bool& hasNull);
+  Uint32 appendReaderToSection(Uint32 & ptrI, SectionReader&, Uint32);
+  Uint32 appendColToSection(Uint32 & ptrI, const RowPtr::Row&, Uint32 col, bool& hasNull);
+  Uint32 appendPkColToSection(Uint32 & ptrI, const RowPtr::Row&, Uint32 col);
+  Uint32 appendAttrinfoToSection(Uint32 &, const RowPtr::Row&, Uint32 col, bool& hasNull);
   Uint32 appendDataToSection(Uint32 & ptrI, Local_pattern_store&,
 			     Local_pattern_store::ConstDataBufferIterator&,
 			     Uint32 len, bool& hasNull);
   Uint32 appendFromParent(Uint32 & ptrI, Local_pattern_store&,
                           Local_pattern_store::ConstDataBufferIterator&,
                           Uint32 level, const RowPtr&, bool& hasNull);
-  Uint32 expand(Uint32 & ptrI, Local_pattern_store& p, const RowPtr& r, bool& hasNull){
-    switch(r.m_type){
-    case RowPtr::RT_SECTION:
-      return expandS(ptrI, p, r, hasNull);
-    case RowPtr::RT_LINEAR:
-      return expandL(ptrI, p, r, hasNull);
-    }
-    return DbspjErr::InternalError;
-  }
-  Uint32 expandS(Uint32 & ptrI, Local_pattern_store&, const RowPtr&, bool& hasNull);
-  Uint32 expandL(Uint32 & ptrI, Local_pattern_store&, const RowPtr&, bool& hasNull);
+  Uint32 expand(Uint32 & ptrI, Local_pattern_store& p, const RowPtr& r, bool& hasNull);
   Uint32 expand(Uint32 & ptrI, DABuffer& pattern, Uint32 len,
                 DABuffer & param, Uint32 cnt, bool& hasNull);
   Uint32 expand(Local_pattern_store& dst, Ptr<TreeNode> treeNodePtr,
@@ -1444,8 +1471,7 @@ private:
   Uint32 checkTableError(Ptr<TreeNode> treeNodePtr) const;
   Uint32 getNodes(Signal*, BuildKeyReq&, Uint32 tableId);
 
-  void common_execTRANSID_AI(Signal*, Ptr<Request>, Ptr<TreeNode>,
-			     const RowPtr&);
+  void startNextNodes(Signal*, Ptr<Request>, Ptr<TreeNode>, const RowPtr&);
 
   void dumpScanFragHandle(const Ptr<ScanFragHandle> fragPtr) const;
   void dumpNodeCommon(const Ptr<TreeNode>) const;
@@ -1459,14 +1485,12 @@ private:
   Uint32 lookup_build(Build_context&,Ptr<Request>,
 		      const QueryNode*, const QueryNodeParameters*);
   void lookup_start(Signal*, Ptr<Request>, Ptr<TreeNode>);
-  void lookup_resume(Signal*, Ptr<Request>, Ptr<TreeNode>);
   void lookup_send(Signal*, Ptr<Request>, Ptr<TreeNode>);
-  bool lookup_countSignal(const Signal*, Ptr<Request>, Ptr<TreeNode>);
+  void lookup_countSignal(Signal*, Ptr<Request>, Ptr<TreeNode>, Uint32 cnt);
   void lookup_execLQHKEYREF(Signal*, Ptr<Request>, Ptr<TreeNode>);
   void lookup_execLQHKEYCONF(Signal*, Ptr<Request>, Ptr<TreeNode>);
   void lookup_stop_branch(Signal*, Ptr<Request>, Ptr<TreeNode>, Uint32 err);
   void lookup_parent_row(Signal*, Ptr<Request>, Ptr<TreeNode>, const RowPtr &);
-  void lookup_row(Signal*, Ptr<Request>, Ptr<TreeNode>, const RowPtr &);
   void lookup_abort(Signal*, Ptr<Request>, Ptr<TreeNode>);
   Uint32 lookup_execNODE_FAILREP(Signal*signal, Ptr<Request>, Ptr<TreeNode>,
                                NdbNodeBitmask);
@@ -1498,13 +1522,13 @@ private:
                        DABuffer param, Uint32 paramBits);
   void scanFrag_start(Signal*, Ptr<Request>,Ptr<TreeNode>);
   void scanFrag_prepare(Signal*, Ptr<Request>, Ptr<TreeNode>);
-  bool scanFrag_countSignal(const Signal*, Ptr<Request>, Ptr<TreeNode>);
+  void scanFrag_countSignal(Signal*, Ptr<Request>, Ptr<TreeNode>, Uint32 cnt);
   void scanFrag_execSCAN_FRAGREF(Signal*, Ptr<Request>, Ptr<TreeNode>,
                                  Ptr<ScanFragHandle>);
   void scanFrag_execSCAN_FRAGCONF(Signal*, Ptr<Request>, Ptr<TreeNode>,
                                   Ptr<ScanFragHandle>);
   void scanFrag_parent_row(Signal*,Ptr<Request>,Ptr<TreeNode>, const RowPtr&);
-  void scanFrag_fixupBound(Ptr<ScanFragHandle> fragPtr, Uint32 ptrI, Uint32);
+  void scanFrag_fixupBound(Uint32 ptrI, Uint32);
   void scanFrag_send(Signal*, Ptr<Request>, Ptr<TreeNode>);
   Uint32 scanFrag_send(Signal* signal,
                        Ptr<Request> requestPtr,
@@ -1543,8 +1567,7 @@ private:
    * Page manager
    */
   bool allocPage(Ptr<RowPage> &);
-  void releasePage(Ptr<RowPage>);
-  void releasePages(Uint32 first, Ptr<RowPage> last);
+  void releasePages(RowBuffer &rowBuffer);
   void releaseGlobal(Signal*);
   RowPage_list::Head m_free_page_list;
   RowPage_pool m_page_pool;
@@ -1564,7 +1587,6 @@ private:
   Uint32 m_buffer0[16*1024]; // 64k
   Uint32 m_buffer1[16*1024]; // 64k
 };
-
 
 #undef JAM_FILE_ID
 

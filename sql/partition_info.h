@@ -1,7 +1,7 @@
 #ifndef PARTITION_INFO_INCLUDED
 #define PARTITION_INFO_INCLUDED
 
-/* Copyright (c) 2006, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2006, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -218,12 +218,26 @@ class partition_info {
 
   /*
     If there is no subpartitioning, use only this func to get partition ids.
-    If there is subpartitioning, use the this func to get partition id when
-    you have both partition and subpartition fields.
+
+    If there is subpartitioning use this to get the partition_id which will
+    consider the subpartition as well. See the below example
+
+    A table with 3 partition and 0 subpartition then the return value will
+    lie in the range of [0, 2]
+
+    A table with 3 partition and 3 subpartition then the return value will
+    lie in the range of [0, 8(no of partition X no of sub_partition -1)].
   */
   get_part_id_func get_partition_id;
 
-  /* Get partition id when we don't have subpartition fields */
+  /* Get partition id when we don't have subpartitioning
+     OR
+     Have both partition and subpartition fields but we don't want to consider
+     the subpartitions.
+     For example:
+     A table with 3 partition and 3 subpartition then the return value will
+     lie in the range of [0, 2].
+  */
   get_part_id_func get_part_partition_id;
 
   /*
@@ -275,7 +289,7 @@ class partition_info {
   Item *part_expr;
   Item *subpart_expr;
 
-  Item *item_free_list;
+  Item *item_list;
 
   /*
     Bitmaps of partitions used by the current query.
@@ -297,7 +311,7 @@ class partition_info {
       locked, so that it can unlock them later). In case of LOCK TABLES it will
       lock all partitions, and keep them locked while lock_partitions can
       change for each statement under LOCK TABLES.
-    * Freed at the same time item_free_list is freed.
+    * Freed at the same time item_list is freed.
   */
   MY_BITMAP read_partitions;
   MY_BITMAP lock_partitions;
@@ -397,29 +411,29 @@ class partition_info {
   bool is_pruning_completed;
 
   partition_info()
-      : get_partition_id(NULL),
-        get_part_partition_id(NULL),
-        get_subpartition_id(NULL),
-        part_field_array(NULL),
-        subpart_field_array(NULL),
-        part_charset_field_array(NULL),
-        subpart_charset_field_array(NULL),
-        full_part_field_array(NULL),
-        part_field_buffers(NULL),
-        subpart_field_buffers(NULL),
-        restore_part_field_ptrs(NULL),
-        restore_subpart_field_ptrs(NULL),
-        part_expr(NULL),
-        subpart_expr(NULL),
-        item_free_list(NULL),
+      : get_partition_id(nullptr),
+        get_part_partition_id(nullptr),
+        get_subpartition_id(nullptr),
+        part_field_array(nullptr),
+        subpart_field_array(nullptr),
+        part_charset_field_array(nullptr),
+        subpart_charset_field_array(nullptr),
+        full_part_field_array(nullptr),
+        part_field_buffers(nullptr),
+        subpart_field_buffers(nullptr),
+        restore_part_field_ptrs(nullptr),
+        restore_subpart_field_ptrs(nullptr),
+        part_expr(nullptr),
+        subpart_expr(nullptr),
+        item_list(nullptr),
         bitmaps_are_initialized(false),
-        list_array(NULL),
+        list_array(nullptr),
         err_value(0),
-        part_func_string(NULL),
-        subpart_func_string(NULL),
+        part_func_string(nullptr),
+        subpart_func_string(nullptr),
         num_columns(0),
-        table(NULL),
-        default_engine_type(NULL),
+        table(nullptr),
+        default_engine_type(nullptr),
         part_type(partition_type::NONE),
         subpart_type(partition_type::NONE),
         part_func_len(0),
@@ -447,12 +461,11 @@ class partition_info {
         has_null_value(false),
         column_list(false),
         is_pruning_completed(false) {
-    partitions.empty();
-    temp_partitions.empty();
-    part_field_list.empty();
-    subpart_field_list.empty();
+    partitions.clear();
+    temp_partitions.clear();
+    part_field_list.clear();
+    subpart_field_list.clear();
   }
-  ~partition_info() {}
 
   partition_info *get_clone(THD *thd, bool reset = false);
   partition_info *get_full_clone(THD *thd);
@@ -493,12 +506,11 @@ class partition_info {
   bool set_up_charset_field_preps();
   bool check_partition_field_length();
   void set_show_version_string(String *packet);
-  partition_element *get_part_elem(const char *partition_name, char *file_name,
-                                   uint32 *part_id);
+  partition_element *get_part_elem(const char *partition_name, uint32 *part_id);
   void report_part_expr_error(bool use_subpart_expr);
-  bool set_used_partition(List<Item> &fields, List<Item> &values,
-                          COPY_INFO &info, bool copy_default_values,
-                          MY_BITMAP *used_partitions);
+  bool set_used_partition(const mem_root_deque<Item *> &fields,
+                          const mem_root_deque<Item *> &values, COPY_INFO &info,
+                          bool copy_default_values, MY_BITMAP *used_partitions);
   /**
     PRUNE_NO - Unable to prune.
     PRUNE_DEFAULTS - Partitioning field is only set to
@@ -510,8 +522,9 @@ class partition_info {
   */
   enum enum_can_prune { PRUNE_NO = 0, PRUNE_DEFAULTS, PRUNE_YES };
   bool can_prune_insert(THD *thd, enum_duplicates duplic, COPY_INFO &update,
-                        List<Item> &update_fields, List<Item> &fields,
-                        bool empty_values, enum_can_prune *can_prune_partitions,
+                        const mem_root_deque<Item *> &update_fields,
+                        const mem_root_deque<Item *> &fields, bool empty_values,
+                        enum_can_prune *can_prune_partitions,
                         bool *prune_needs_default_values,
                         MY_BITMAP *used_partitions);
   bool has_same_partitioning(partition_info *new_part_info);
@@ -532,6 +545,17 @@ class partition_info {
   }
   bool same_key_column_order(List<Create_field> *create_list);
 
+  /**
+    Allocate memory for one partitions bitmap and initialize it.
+
+    @param  bitmap    Bitmap instance to initialize.
+    @param  mem_root  Memory root to use for bitmap buffer allocation.
+
+    @retval true    Memory allocation failure
+    @retval false   Success
+  */
+  bool init_partition_bitmap(MY_BITMAP *bitmap, MEM_ROOT *mem_root);
+
  private:
   bool set_up_default_partitions(Partition_handler *part_handler,
                                  HA_CREATE_INFO *info, uint start_no);
@@ -541,8 +565,8 @@ class partition_info {
   char *create_default_subpartition_name(uint subpart_no,
                                          const char *part_name);
   bool add_named_partition(const char *part_name, size_t length);
-  bool is_fields_in_part_expr(List<Item> &fields);
-  bool is_full_part_expr_in_fields(List<Item> &fields);
+  bool is_fields_in_part_expr(const mem_root_deque<Item *> &fields);
+  bool is_full_part_expr_in_fields(const mem_root_deque<Item *> &fields);
 };
 
 uint32 get_next_partition_id_range(PARTITION_ITERATOR *part_iter);

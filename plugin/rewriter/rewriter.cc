@@ -1,4 +1,4 @@
-/*  Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+/*  Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License, version 2.0,
@@ -32,6 +32,7 @@
 
 #include "m_string.h"  // Needed because debug_sync.h is not self-sufficient.
 #include "my_dbug.h"
+#include "mysql/components/services/my_thread_bits.h"
 #include "mysqld_error.h"
 #include "nullable.h"
 #include "plugin/rewriter/messages.h"
@@ -87,8 +88,8 @@ bool Rewriter::load_rule(MYSQL_THD thd, Persisted_rule *diskrule) {
                             ">>" +
                             memrule->pattern_parse_error_message() + "<<");
       break;
-    case Rule::PATTERN_NOT_A_SELECT_STATEMENT:
-      diskrule->set_message(messages::PATTERN_NOT_A_SELECT_STATEMENT);
+    case Rule::PATTERN_NOT_SUPPORTED_STATEMENT:
+      diskrule->set_message(messages::PATTERN_NOT_SUPPORTED_STATEMENT);
       break;
     case Rule::REPLACEMENT_PARSE_ERROR:
       diskrule->set_message(string(messages::REPLACEMENT_PARSE_ERROR) +
@@ -119,7 +120,7 @@ static void do_debug_sync(MYSQL_THD thd) {
 void Rewriter::do_refresh(MYSQL_THD session_thd) {
   bool saw_rule_error = false;
 
-  DBUG_ENTER("Rewriter::do_refresh");
+  DBUG_TRACE;
   Cursor c(session_thd);
 
   DBUG_PRINT("info", ("Rewriter::do_refresh cursor opened"));
@@ -127,7 +128,7 @@ void Rewriter::do_refresh(MYSQL_THD session_thd) {
 
   if (c.table_is_malformed()) {
     m_refresh_status = ER_REWRITER_TABLE_MALFORMED_ERROR;
-    DBUG_VOID_RETURN;
+    return;
   }
   m_digests.clear();
 
@@ -151,7 +152,6 @@ void Rewriter::do_refresh(MYSQL_THD session_thd) {
     m_refresh_status = ER_REWRITER_LOAD_FAILED;
   else
     m_refresh_status = 0;
-  DBUG_VOID_RETURN;
 }
 
 namespace {
@@ -164,7 +164,7 @@ struct Refresh_callback_args {
 extern "C" void *refresh_callback(void *p_args) {
   Refresh_callback_args *args = pointer_cast<Refresh_callback_args *>(p_args);
   (args->me->do_refresh)(args->session_thd);
-  return NULL;
+  return nullptr;
 }
 
 }  // namespace

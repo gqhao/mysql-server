@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2009, 2017, Oracle and/or its affiliates. All rights reserved.
+ *  Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License, version 2.0,
@@ -48,6 +48,7 @@ import com.mysql.clusterj.core.util.LoggerFactoryService;
 import com.mysql.clusterj.tie.DbImpl.BufferManager;
 
 import com.mysql.ndbjtie.ndbapi.NdbErrorConst;
+import com.mysql.ndbjtie.ndbapi.NdbErrorConst.Classification;
 import com.mysql.ndbjtie.ndbapi.NdbIndexOperation;
 import com.mysql.ndbjtie.ndbapi.NdbIndexScanOperation;
 import com.mysql.ndbjtie.ndbapi.NdbOperation;
@@ -477,7 +478,10 @@ class ClusterTransactionImpl implements ClusterTransaction {
     public NdbIndexScanOperation scanIndex(NdbRecordConst key_record, NdbRecordConst result_record,
             byte[] result_mask, ScanOptions scanOptions) {
         enlist();
-        return ndbTransaction.scanIndex(key_record, result_record, indexScanLockMode, result_mask, null, scanOptions, 0);
+        NdbIndexScanOperation operation =
+                ndbTransaction.scanIndex(key_record, result_record, indexScanLockMode, result_mask, null, scanOptions, 0);
+        handleError(operation, ndbTransaction);
+        return operation;
     }
 
     /** Create an NdbOperation for delete using NdbRecord.
@@ -568,10 +572,14 @@ class ClusterTransactionImpl implements ClusterTransaction {
         StringBuilder exceptionMessages = new StringBuilder();
         for (Operation op: operationsToCheck) {
             int code = op.getErrorCode();
-            if (code != 0) {
+            int classification = op.getClassification();
+            // Read operations can return data not found errors.
+            // Ignore them and report everything else.
+            if (code != 0 &&
+                !(op.isReadOperation() &&
+                  classification == Classification.NoDataFound)) {
                 int mysqlCode = op.getMysqlCode();
                 int status = op.getStatus();
-                int classification = op.getClassification();
                 String message = local.message("ERR_Datastore", -1, code, mysqlCode, status, classification,
                         op.toString());
                 exceptionMessages.append(message);

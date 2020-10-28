@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -31,8 +31,8 @@
 #include <new>
 #include <utility>  // std::make_pair
 
-#include "binary_log_types.h"
-#include "my_base.h"  // ha_rows
+#include "field_types.h"  // enum_field_types
+#include "my_base.h"      // ha_rows
 #include "my_dbug.h"
 #include "my_inttypes.h"
 #include "mysql_time.h"
@@ -120,8 +120,8 @@ bool Singleton<T>::build_histogram(const Value_map<T> &value_map,
   double cumulative_frequency = 0.0;
 
   /*
-    Since we are using a std::map with Memroot_allocator, we are forced to wrap
-    the following section in a try-catch. The Memroot_allocator will throw an
+    Since we are using a std::map with Mem_root_allocator, we are forced to wrap
+    the following section in a try-catch. The Mem_root_allocator will throw an
     exception of class std::bad_alloc when it runs out of memory.
   */
   try {

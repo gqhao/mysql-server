@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -28,10 +28,7 @@
   length records. A read isn't allowed to go over file-length. A read is ok
   if it ends at file-length and next read can try to read after file-length
   (and get a EOF-error).
-  Possibly use of asyncronic io.
-  macros for read and writes for faster io.
   Used instead of FILE when reading or writing whole files.
-  This will make mf_rec_cache obsolete.
   One can change info->pos_in_file to a higher value to skip bytes in file if
   also info->rc_pos is set to info->rc_end.
   If called through open_cached_file(), then the temporary file will
@@ -64,18 +61,18 @@ int _my_b_net_read(IO_CACHE *info, uchar *Buffer,
                    size_t Count MY_ATTRIBUTE((unused))) {
   ulong read_length;
   NET *net = current_thd->get_protocol_classic()->get_net();
-  DBUG_ENTER("_my_b_net_read");
+  DBUG_TRACE;
 
   if (!info->end_of_file)
-    DBUG_RETURN(1); /* because my_b_get (no _) takes 1 byte at a time */
+    return 1; /* because my_b_get (no _) takes 1 byte at a time */
   read_length = my_net_read(net);
   if (read_length == packet_error) {
     info->error = -1;
-    DBUG_RETURN(1);
+    return 1;
   }
   if (read_length == 0) {
     info->end_of_file = 0; /* End of file from client */
-    DBUG_RETURN(1);
+    return 1;
   }
   /* to set up stuff for my_b_get (no _) */
   info->read_end = (info->read_pos = net->read_pos) + read_length;
@@ -91,5 +88,5 @@ int _my_b_net_read(IO_CACHE *info, uchar *Buffer,
 
   info->read_pos++;
 
-  DBUG_RETURN(0);
+  return 0;
 }

@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -42,7 +42,7 @@ int My_xp_thread_server::create(PSI_thread_key key MY_ATTRIBUTE((unused)),
                                 const native_thread_attr_t *attr,
                                 native_start_routine func, void *arg) {
   return mysql_thread_create(key, m_thread_handle, attr, func, arg);
-};
+}
 
 int My_xp_thread_server::create_detached(
     PSI_thread_key key MY_ATTRIBUTE((unused)), native_thread_attr_t *attr,
@@ -50,7 +50,7 @@ int My_xp_thread_server::create_detached(
   native_thread_attr_t my_attr;
   bool using_my_attr = false;
 
-  if (attr == NULL) {
+  if (attr == nullptr) {
     My_xp_thread_util::attr_init(&my_attr);
     attr = &my_attr;
     using_my_attr = true;
@@ -63,7 +63,7 @@ int My_xp_thread_server::create_detached(
   if (using_my_attr) My_xp_thread_util::attr_destroy(&my_attr);
 
   return ret_status;
-};
+}
 
 int My_xp_thread_server::join(void **value_ptr) {
   return my_thread_join(m_thread_handle, value_ptr);

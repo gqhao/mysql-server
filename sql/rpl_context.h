@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -24,12 +24,24 @@
 #define RPL_SESSION_H
 
 #include <sys/types.h>
+#include <memory>
 
 #include "my_inttypes.h"  // IWYU pragma: keep
+
+#include "sql/system_variables.h"
 
 class Gtid_set;
 class Sid_map;
 class THD;
+struct Gtid;
+
+/** Type of replication channel thread/transaction might be associated to*/
+enum enum_rpl_channel_type {
+  NO_CHANNEL_INFO = 0,       // No information exists about the channel
+  RPL_STANDARD_CHANNEL = 1,  // It is a standard replication channel
+  GR_APPLIER_CHANNEL = 2,    // It is a GR applier channel
+  GR_RECOVERY_CHANNEL = 3    // It is a GR recovery channel
+};
 
 /**
    This class is an interface for session consistency instrumentation
@@ -189,6 +201,11 @@ class Session_consistency_gtids_ctx {
     return notify_after_transaction_commit(thd);
   }
 
+  /**
+    Update session tracker (m_curr_session_track_gtids) from thd.
+  */
+  void update_tracking_activeness_from_session_variable(const THD *thd);
+
  private:
   // not implemented
   Session_consistency_gtids_ctx(const Session_consistency_gtids_ctx &rsc);
@@ -216,6 +233,46 @@ class Dependency_tracker_ctx {
   int64 m_last_session_sequence_number;
 };
 
+/**
+  This class tracks the last used GTID per session.
+*/
+class Last_used_gtid_tracker_ctx {
+ public:
+  Last_used_gtid_tracker_ctx();
+  virtual ~Last_used_gtid_tracker_ctx();
+
+  /**
+   Set the last used GTID the session.
+
+   @param[in]  gtid  the used gtid.
+  */
+  void set_last_used_gtid(const Gtid &gtid);
+
+  /**
+   Get the last used GTID the session.
+
+   @param[out]  gtid  the used gtid.
+  */
+  void get_last_used_gtid(Gtid &gtid);
+
+ private:
+  std::unique_ptr<Gtid> m_last_used_gtid;
+};
+
+class Transaction_compression_ctx {
+ public:
+  static const size_t DEFAULT_COMPRESSION_BUFFER_SIZE;
+
+  Transaction_compression_ctx();
+  virtual ~Transaction_compression_ctx();
+
+  binary_log::transaction::compression::Compressor *get_compressor(
+      THD *session);
+
+ protected:
+  binary_log::transaction::compression::Compressor *m_compressor{nullptr};
+};
+
 /*
   This class SHALL encapsulate the replication context associated with the THD
   object.
@@ -224,13 +281,16 @@ class Rpl_thd_context {
  private:
   Session_consistency_gtids_ctx m_session_gtids_ctx;
   Dependency_tracker_ctx m_dependency_tracker_ctx;
+  Last_used_gtid_tracker_ctx m_last_used_gtid_tracker_ctx;
+  Transaction_compression_ctx m_transaction_compression_ctx;
+  /** If this thread is a channel, what is its type*/
+  enum_rpl_channel_type rpl_channel_type;
 
-  // make these private
   Rpl_thd_context(const Rpl_thd_context &rsc);
   Rpl_thd_context &operator=(const Rpl_thd_context &rsc);
 
  public:
-  Rpl_thd_context() {}
+  Rpl_thd_context() : rpl_channel_type(NO_CHANNEL_INFO) {}
 
   inline Session_consistency_gtids_ctx &session_gtids_ctx() {
     return m_session_gtids_ctx;
@@ -238,6 +298,20 @@ class Rpl_thd_context {
 
   inline Dependency_tracker_ctx &dependency_tracker_ctx() {
     return m_dependency_tracker_ctx;
+  }
+
+  inline Last_used_gtid_tracker_ctx &last_used_gtid_tracker_ctx() {
+    return m_last_used_gtid_tracker_ctx;
+  }
+
+  enum_rpl_channel_type get_rpl_channel_type() { return rpl_channel_type; }
+
+  void set_rpl_channel_type(enum_rpl_channel_type rpl_channel_type_arg) {
+    rpl_channel_type = rpl_channel_type_arg;
+  }
+
+  inline Transaction_compression_ctx &transaction_compression_ctx() {
+    return m_transaction_compression_ctx;
   }
 };
 

@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -25,6 +25,7 @@
 #define AUTH_INTERNAL_INCLUDED
 
 #include <map>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -33,6 +34,7 @@
 #include "sql/auth/auth_common.h"
 #include "sql/auth/dynamic_privilege_table.h"
 #include "sql/auth/partitioned_rwlock.h"
+#include "sql/auth/user_table.h"
 #include "sql/sql_audit.h"
 #include "sql/table.h"
 #include "violite.h" /* SSL_type */
@@ -42,9 +44,14 @@ class ACL_PROXY_USER;
 class GRANT_NAME;
 class GRANT_TABLE;
 class GRANT_COLUMN;
+class Json_object;
+class Json_wrapper;
+class Restrictions;
 struct TABLE;
+class Rewrite_params;
+
 typedef struct user_resources USER_RESOURCES;
-void append_identifier(THD *thd, String *packet, const char *name,
+void append_identifier(const THD *thd, String *packet, const char *name,
                        size_t length);
 typedef std::map<std::string, unsigned long> Column_map;
 struct Grant_table_aggregate {
@@ -58,8 +65,8 @@ typedef std::map<std::string, unsigned long> Db_access_map;
 typedef std::map<std::string, Grant_table_aggregate> Table_access_map_storage;
 class Table_access_map {
  public:
-  Table_access_map() : m_thd(0) {}
-  ~Table_access_map() {}
+  Table_access_map() : m_thd(nullptr) {}
+
   typedef Table_access_map_storage::iterator iterator;
   typedef Table_access_map_storage::value_type value_type;
   typedef Table_access_map_storage::mapped_type mapped_type;
@@ -82,21 +89,22 @@ typedef std::unordered_set<std::string> Grant_acl_set;
 
 std::string create_authid_str_from(const LEX_USER *user);
 std::string create_authid_str_from(const ACL_USER *user);
-std::string create_authid_str_from(const LEX_CSTRING &user,
-                                   const LEX_CSTRING &host);
 std::string create_authid_str_from(const Auth_id_ref &user);
 Auth_id_ref create_authid_from(const LEX_USER *user);
 Auth_id_ref create_authid_from(const ACL_USER *user);
 
+std::string get_one_priv(ulong &revoke_privs);
 /* sql_authentication */
 class Rsa_authentication_keys;
 extern Rsa_authentication_keys *g_sha256_rsa_keys;
 extern Rsa_authentication_keys *g_caching_sha2_rsa_keys;
 extern char *caching_sha2_rsa_private_key_path;
 extern char *caching_sha2_rsa_public_key_path;
-#if !defined(HAVE_WOLFSSL)
 extern bool caching_sha2_auto_generate_rsa_keys;
-#endif
+class Auth_id;
+template <typename K, typename V>
+class Map_with_rw_lock;
+extern Map_with_rw_lock<Auth_id, uint> *unknown_accounts;
 
 void optimize_plugin_compare_by_pointer(LEX_CSTRING *plugin_name);
 bool auth_plugin_is_built_in(const char *plugin_name);
@@ -113,7 +121,6 @@ bool assert_acl_cache_write_lock(THD *thd);
 
 /*sql_authentication */
 bool sha256_rsa_auth_status();
-bool caching_sha2_rsa_auth_status();
 
 /* sql_auth_cache */
 void rebuild_check_host(void);
@@ -127,14 +134,29 @@ void acl_update_user(const char *user, const char *host, enum SSL_type ssl_type,
                      const char *ssl_cipher, const char *x509_issuer,
                      const char *x509_subject, USER_RESOURCES *mqh,
                      ulong privileges, const LEX_CSTRING &plugin,
-                     const LEX_CSTRING &auth, MYSQL_TIME password_change_time,
-                     LEX_ALTER password_life, ulong what_is_set);
+                     const LEX_CSTRING &auth, const std::string &second_auth,
+                     const MYSQL_TIME &password_change_time,
+                     const LEX_ALTER &password_life, Restrictions &restrictions,
+                     acl_table::Pod_user_what_to_update &what_to_update,
+                     uint failed_login_attempts, int password_lock_time);
+void acl_users_add_one(const char *user, const char *host,
+                       enum SSL_type ssl_type, const char *ssl_cipher,
+                       const char *x509_issuer, const char *x509_subject,
+                       USER_RESOURCES *mqh, ulong privileges,
+                       const LEX_CSTRING &plugin, const LEX_CSTRING &auth,
+                       const LEX_CSTRING &second_auth,
+                       const MYSQL_TIME &password_change_time,
+                       const LEX_ALTER &password_life, bool add_role_vertex,
+                       Restrictions &restrictions, uint failed_login_attempts,
+                       int password_lock_time, THD *thd MY_ATTRIBUTE((unused)));
 void acl_insert_user(THD *thd, const char *user, const char *host,
                      enum SSL_type ssl_type, const char *ssl_cipher,
                      const char *x509_issuer, const char *x509_subject,
                      USER_RESOURCES *mqh, ulong privileges,
                      const LEX_CSTRING &plugin, const LEX_CSTRING &auth,
-                     MYSQL_TIME password_change_time, LEX_ALTER password_life);
+                     const MYSQL_TIME &password_change_time,
+                     const LEX_ALTER &password_life, Restrictions &restrictions,
+                     uint failed_login_attempts, int password_lock_time);
 void acl_update_proxy_user(ACL_PROXY_USER *new_value, bool is_revoke);
 void acl_update_db(const char *user, const char *host, const char *db,
                    ulong privileges);
@@ -142,17 +164,20 @@ void acl_insert_db(const char *user, const char *host, const char *db,
                    ulong privileges);
 bool update_sctx_cache(Security_context *sctx, ACL_USER *acl_user_ptr,
                        bool expired);
+
+bool do_update_sctx(Security_context *sctx, LEX_USER *from_user);
+void update_sctx(Security_context *sctx, LEX_USER *to_user);
+
 void clear_and_init_db_cache();
-bool acl_reload(THD *thd, bool locked = false);
-bool grant_reload(THD *thd, bool locked = false);
+bool acl_reload(THD *thd, bool mdl_locked);
+bool grant_reload(THD *thd, bool mdl_locked);
+void clean_user_cache();
+bool set_user_salt(ACL_USER *acl_user);
 
 /* sql_user_table */
 ulong get_access(TABLE *form, uint fieldnr, uint *next_field);
 int replace_db_table(THD *thd, TABLE *table, const char *db,
                      const LEX_USER &combo, ulong rights, bool revoke_grant);
-int replace_user_table(THD *thd, TABLE *table, LEX_USER *combo, ulong rights,
-                       bool revoke_grant, bool can_create_user,
-                       ulong what_to_replace);
 int replace_proxies_priv_table(THD *thd, TABLE *table, const LEX_USER *user,
                                const LEX_USER *proxied_user,
                                bool with_grant_arg, bool revoke_grant);
@@ -171,20 +196,20 @@ int replace_routine_table(THD *thd, GRANT_NAME *grant_name, TABLE *table,
                           const char *routine_name, bool is_proc, ulong rights,
                           bool revoke_grant);
 int open_grant_tables(THD *thd, TABLE_LIST *tables, bool *transactional_tables);
-void grant_tables_setup_for_open(
-    TABLE_LIST *tables, thr_lock_type lock_type = TL_WRITE,
-    enum_mdl_type mdl_type = MDL_SHARED_NO_READ_WRITE);
-
-int replace_roles_priv_table(THD *thd, TABLE *table, const LEX_USER *user,
-                             const LEX_USER *role, bool with_grant_arg,
-                             bool revoke_grant);
+void acl_tables_setup_for_read(TABLE_LIST *tables);
 
 void acl_print_ha_error(int handler_error);
 bool check_engine_type_for_acl_table(TABLE_LIST *tables, bool report_error);
 bool log_and_commit_acl_ddl(THD *thd, bool transactional_tables,
-                            std::set<LEX_USER *> *extra_users = NULL,
-                            bool extra_error = false, bool log_to_binlog = true,
-                            bool notify_htons = true);
+                            std::set<LEX_USER *> *extra_users = nullptr,
+                            Rewrite_params *rewrite_params = nullptr,
+                            bool extra_error = false,
+                            bool log_to_binlog = true);
+void acl_notify_htons(THD *thd, enum_sql_command operation,
+                      const List<LEX_USER> *users,
+                      std::set<LEX_USER *> *rewrite_users = nullptr,
+                      const List<LEX_CSTRING> *dynamic_privs = nullptr);
+
 /* sql_authorization */
 bool is_privileged_user_for_credential_change(THD *thd);
 void rebuild_vertex_index(THD *thd);
@@ -194,60 +219,6 @@ void roles_graph_init(void);
 void roles_graph_delete(void);
 void roles_init(void);
 void roles_delete(void);
-
-/**
-  Storage container for default role ids. Default roles are only weakly
-  depending on ACL_USERs. You can retain a default role even if the
-  corresponding ACL_USER is missing in the acl_cache.
-*/
-class Role_id {
- public:
-  Role_id(const char *user, int user_len, const char *host, int host_len) {
-    m_user.append(user, user_len);
-    m_host.append(host, host_len);
-  }
-
-  Role_id(const Auth_id_ref &id) {
-    m_user.append(id.first.str, id.first.length);
-    m_host.append(id.second.str, id.second.length);
-  }
-
-  Role_id(const LEX_CSTRING &user, const LEX_CSTRING &host) {
-    m_user.append(user.str, user.length);
-    m_host.append(host.str, host.length);
-  }
-
-  Role_id(const std::string &user, const std::string &host)
-      : m_user(user), m_host(host) {}
-
-  ~Role_id() {}
-
-  Role_id(const Role_id &id) {
-    m_user = id.m_user;
-    m_host = id.m_host;
-  }
-
-  bool operator<(const Role_id &id) const {
-    if (m_user >= id.m_user) return m_host < id.m_host;
-    return true;
-  }
-
-  void auth_str(std::string *out) const {
-    String tmp;
-    append_identifier(&tmp, m_user.c_str(), m_user.length());
-    tmp.append('@');
-    append_identifier(&tmp, m_host.c_str(), m_host.length());
-    out->append(tmp.ptr());
-  }
-
-  const std::string &user() const { return m_user; }
-  const std::string &host() const { return m_host; }
-
- private:
-  std::string m_user;
-  std::string m_host;
-};
-
 void dynamic_privileges_init(void);
 void dynamic_privileges_delete(void);
 bool grant_dynamic_privilege(const LEX_CSTRING &str_priv,
@@ -273,6 +244,10 @@ bool grant_grant_option_for_all_dynamic_privileges(
 bool revoke_grant_option_for_all_dynamic_privileges(
     const LEX_CSTRING &str_user, const LEX_CSTRING &str_host,
     Update_dynamic_privilege_table &func);
+bool grant_dynamic_privileges_to_auth_id(
+    const Role_id &id, const std::vector<std::string> &priv_list);
+void revoke_dynamic_privileges_from_auth_id(
+    const Role_id &id, const std::vector<std::string> &priv_list);
 bool operator==(const Role_id &a, const Auth_id_ref &b);
 bool operator==(const Auth_id_ref &a, const Role_id &b);
 bool operator==(const std::pair<const Role_id, const Role_id> &a,
@@ -300,7 +275,7 @@ void get_privilege_access_maps(
     Db_access_map *db_map, Db_access_map *db_wild_map,
     Table_access_map *table_map, SP_access_map *sp_map, SP_access_map *func_map,
     List_of_granted_roles *granted_roles, Grant_acl_set *with_admin_acl,
-    Dynamic_privileges *dynamic_acl);
+    Dynamic_privileges *dynamic_acl, Restrictions &restrictions);
 bool clear_default_roles(THD *thd, TABLE *table,
                          const Auth_id_ref &user_auth_id,
                          std::vector<Role_id> *default_roles);
@@ -308,9 +283,6 @@ void get_granted_roles(LEX_USER *user, List_of_granted_roles *granted_roles);
 bool drop_default_role_policy(THD *thd, TABLE *table,
                               const Auth_id_ref &default_role_policy,
                               const Auth_id_ref &user);
-int iterate_granted_roles(
-    Auth_id_ref &authid,
-    std::function<bool(const std::pair<const Auth_id_ref &, bool> &p)> f);
 void revoke_role(THD *thd, ACL_USER *role, ACL_USER *user);
 bool revoke_all_roles_from_user(THD *thd, TABLE *edge_table,
                                 TABLE *defaults_table, LEX_USER *user);
@@ -325,12 +297,10 @@ Auth_id_ref create_authid_from(const LEX_CSTRING &user,
                                const LEX_CSTRING &host);
 bool roles_rename_authid(THD *thd, TABLE *edge_table, TABLE *defaults_table,
                          LEX_USER *user_from, LEX_USER *user_to);
-bool set_and_validate_user_attributes(THD *thd, LEX_USER *Str,
-                                      ulong &what_to_set,
-                                      bool is_privileged_user, bool is_role,
-                                      TABLE_LIST *history_table,
-                                      bool *history_check_done,
-                                      const char *cmd);
+bool set_and_validate_user_attributes(
+    THD *thd, LEX_USER *Str, acl_table::Pod_user_what_to_update &what_to_set,
+    bool is_privileged_user, bool is_role, TABLE_LIST *history_table,
+    bool *history_check_done, const char *cmd, Userhostpassword_list &);
 typedef std::pair<std::string, bool> Grant_privilege;
 typedef std::unordered_multimap<const Role_id, Grant_privilege, role_id_hash>
     User_to_dynamic_privileges_map;
@@ -342,13 +312,28 @@ void grant_role(ACL_USER *role, const ACL_USER *user, bool with_admin_opt);
 void get_mandatory_roles(std::vector<Role_id> *mandatory_roles);
 extern std::vector<Role_id> *g_mandatory_roles;
 void create_role_vertex(ACL_USER *role_acl_user);
+void activate_all_granted_roles(const ACL_USER *acl_user,
+                                Security_context *sctx);
 void activate_all_granted_and_mandatory_roles(const ACL_USER *acl_user,
                                               Security_context *sctx);
-extern std::vector<std::string> builtin_auth_plugins;
 
 bool alter_user_set_default_roles(THD *thd, TABLE *table, LEX_USER *user,
                                   const List_of_auth_id_refs &new_auth_ids);
 
 bool alter_user_set_default_roles_all(THD *thd, TABLE *def_role_table,
                                       LEX_USER *user);
+/*
+  Checks if any of the users has SYSTEM_USER privilege then current user
+  must also have SYSTEM_USER privilege.
+  It is a wrapper over the  Privilege_checker class that does
+  privilege checks for one user at a time.
+*/
+bool check_system_user_privilege(THD *thd, List<LEX_USER> list);
+
+bool read_user_application_user_metadata_from_table(LEX_CSTRING user,
+                                                    LEX_CSTRING host,
+                                                    String *metadata_str,
+                                                    TABLE *table,
+                                                    bool mode_no_backslash);
+bool is_expected_or_transient_error(THD *thd);
 #endif /* AUTH_INTERNAL_INCLUDED */

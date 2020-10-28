@@ -1,4 +1,4 @@
-# Copyright (c) 2010, 2018, Oracle and/or its affiliates. All rights reserved.
+# Copyright (c) 2010, 2019, Oracle and/or its affiliates. All rights reserved.
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License, version 2.0,
@@ -21,9 +21,9 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 
 SET(CPACK_COMPONENTS_USED 
-    "Server;Client;DataFiles;Development;SharedLibraries;Documentation;IniFiles;Readme;Server_Scripts;Meb;MebReadme")
+    "Server;Client;DataFiles;Development;SharedLibraries;Documentation;IniFiles;Readme;Server_Scripts;Meb;MebReadme;Router")
 
-IF("${VERSION}" MATCHES "-ndb-")
+IF(WITH_NDBCLUSTER)
   MESSAGE(STATUS "This is Cluster build, append additional components")
   SET(CPACK_COMPONENTS_USED
     "${CPACK_COMPONENTS_USED};ClusterTools;ClusterDataNode;ClusterManagementServer;ClusterManagementClient;ClusterJ;nodejs")
@@ -58,6 +58,9 @@ SET(CPACK_COMPONENT_GROUP_MYSQLSERVER_DESCRIPTION "Install MySQL Server")
  # Subfeature "Server" (hidden)
  SET(CPACK_COMPONENT_SERVER_GROUP "MySQLServer")
  SET(CPACK_COMPONENT_SERVER_HIDDEN 1)
+ # Subfeature "Shared libraries" (hidden)
+ SET(CPACK_COMPONENT_SHAREDLIBRARIES_GROUP "MySQLServer")
+ SET(CPACK_COMPONENT_SHAREDLIBRARIES_HIDDEN 1)
  # Subfeature "Client" 
  SET(CPACK_COMPONENT_CLIENT_GROUP "MySQLServer")
  SET(CPACK_COMPONENT_CLIENT_DISPLAY_NAME "Client Programs")
@@ -70,6 +73,10 @@ SET(CPACK_COMPONENT_GROUP_MYSQLSERVER_DESCRIPTION "Install MySQL Server")
  # Subfeature "MebReadme" 
  SET(CPACK_COMPONENT_GROUP_ALWAYSINSTALL_HIDDEN 1)
  SET(CPACK_COMPONENT_MEBREADME_GROUP "AlwaysInstall")
+
+ #Subfeature MySQL Router
+ SET(CPACK_COMPONENT_GROUP_ALWAYSINSTALL_HIDDEN 1)
+ SET(CPACK_COMPONENT_ROUTER_GROUP "AlwaysInstall")
     
  #Subfeature "Data Files" 
  SET(CPACK_COMPONENT_DATAFILES_GROUP "MySQLServer")
@@ -83,12 +90,13 @@ SET(CPACK_COMPONENT_GROUP_DEVEL_DESCRIPTION "Installs C/C++ header files and lib
  #Subfeature "Development"
  SET(CPACK_COMPONENT_DEVELOPMENT_GROUP "Devel")
  SET(CPACK_COMPONENT_DEVELOPMENT_HIDDEN 1)
- 
- #Subfeature "Shared libraries"
- SET(CPACK_COMPONENT_SHAREDLIBRARIES_GROUP "Devel")
- SET(CPACK_COMPONENT_SHAREDLIBRARIES_DISPLAY_NAME "Client C API library (shared)")
- SET(CPACK_COMPONENT_SHAREDLIBRARIES_DESCRIPTION "Installs shared client library")
   
+ #Subfeature "Embedded"
+ SET(CPACK_COMPONENT_EMBEDDED_GROUP "Devel")
+ SET(CPACK_COMPONENT_EMBEDDED_DISPLAY_NAME "Embedded server library")
+ SET(CPACK_COMPONENT_EMBEDDED_DESCRIPTION "Installs embedded server library")
+ SET(CPACK_COMPONENT_EMBEDDED_WIX_LEVEL 2)
+
 #Feature Debug Symbols
 SET(CPACK_COMPONENT_GROUP_DEBUGSYMBOLS_DISPLAY_NAME "Debug Symbols")
 SET(CPACK_COMPONENT_GROUP_DEBUGSYMBOLS_DESCRIPTION "Installs Debug Symbols")
@@ -113,7 +121,7 @@ SET(CPACK_COMPONENT_GROUP_MISC_WIX_LEVEL 100)
   SET(CPACK_COMPONENT_INIFILES_GROUP "Misc")
   SET(CPACK_COMPONENT_SERVER_SCRIPTS_GROUP "Misc")
 
-IF("${VERSION}" MATCHES "-ndb-")
+IF(WITH_NDBCLUSTER)
   MESSAGE(STATUS "This is Cluster build, define additional components")
   #Feature "Cluster"
   SET(CPACK_COMPONENT_GROUP_CLUSTER_DISPLAY_NAME "MySQL Cluster")
@@ -149,4 +157,3 @@ IF("${VERSION}" MATCHES "-ndb-")
   SET(CPACK_COMPONENT_NODEJS_DISPLAY_NAME "nodejs Connector for Cluster")
   SET(CPACK_COMPONENT_NODEJS_DESCRIPTION "Installs nodejs connector")
 ENDIF()
-

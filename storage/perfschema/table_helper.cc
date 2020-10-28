@@ -1,4 +1,4 @@
-/* Copyright (c) 2010, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2010, 2020, Oracle and/or its affiliates. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -28,6 +28,8 @@
 
 #include "storage/perfschema/table_helper.h"
 
+#include <algorithm>
+
 #include "my_config.h"
 
 #include "my_compiler.h"
@@ -35,6 +37,7 @@
 #include "my_macros.h"
 #include "my_thread.h"
 #include "sql/field.h"
+#include "sql/json_dom.h"
 #include "storage/perfschema/pfs_account.h"
 #include "storage/perfschema/pfs_column_types.h"
 #include "storage/perfschema/pfs_column_values.h"
@@ -55,12 +58,20 @@ void set_field_tiny(Field *f, long value) {
   Field_tiny *f2 = (Field_tiny *)f;
   f2->store(value, false);
 }
+
 void set_field_utiny(Field *f, ulong value) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_TINY);
   Field_tiny *f2 = (Field_tiny *)f;
   f2->store(value, true);
 }
+
 long get_field_tiny(Field *f) {
+  DBUG_ASSERT(f->real_type() == MYSQL_TYPE_TINY);
+  Field_tiny *f2 = (Field_tiny *)f;
+  return f2->val_int();
+}
+
+ulong get_field_utiny(Field *f) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_TINY);
   Field_tiny *f2 = (Field_tiny *)f;
   return f2->val_int();
@@ -72,12 +83,20 @@ void set_field_short(Field *f, long value) {
   Field_short *f2 = (Field_short *)f;
   f2->store(value, false);
 }
+
 void set_field_ushort(Field *f, ulong value) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_SHORT);
   Field_short *f2 = (Field_short *)f;
   f2->store(value, true);
 }
+
 long get_field_short(Field *f) {
+  DBUG_ASSERT(f->real_type() == MYSQL_TYPE_SHORT);
+  Field_short *f2 = (Field_short *)f;
+  return f2->val_int();
+}
+
+ulong get_field_ushort(Field *f) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_SHORT);
   Field_short *f2 = (Field_short *)f;
   return f2->val_int();
@@ -89,12 +108,20 @@ void set_field_medium(Field *f, long value) {
   Field_medium *f2 = (Field_medium *)f;
   f2->store(value, false);
 }
+
 void set_field_umedium(Field *f, ulong value) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_INT24);
   Field_medium *f2 = (Field_medium *)f;
   f2->store(value, true);
 }
+
 long get_field_medium(Field *f) {
+  DBUG_ASSERT(f->real_type() == MYSQL_TYPE_INT24);
+  Field_medium *f2 = (Field_medium *)f;
+  return f2->val_int();
+}
+
+ulong get_field_umedium(Field *f) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_INT24);
   Field_medium *f2 = (Field_medium *)f;
   return f2->val_int();
@@ -106,12 +133,20 @@ void set_field_long(Field *f, long value) {
   Field_long *f2 = (Field_long *)f;
   f2->store(value, false);
 }
+
 void set_field_ulong(Field *f, ulong value) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_LONG);
   Field_long *f2 = (Field_long *)f;
   f2->store(value, true);
 }
+
 long get_field_long(Field *f) {
+  DBUG_ASSERT(f->real_type() == MYSQL_TYPE_LONG);
+  Field_long *f2 = (Field_long *)f;
+  return f2->val_int();
+}
+
+ulong get_field_ulong(Field *f) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_LONG);
   Field_long *f2 = (Field_long *)f;
   return f2->val_int();
@@ -123,16 +158,19 @@ void set_field_longlong(Field *f, longlong value) {
   Field_longlong *f2 = (Field_longlong *)f;
   f2->store(value, false);
 }
+
 void set_field_ulonglong(Field *f, ulonglong value) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_LONGLONG);
   Field_longlong *f2 = (Field_longlong *)f;
   f2->store(value, true);
 }
+
 longlong get_field_longlong(Field *f) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_LONGLONG);
   Field_longlong *f2 = (Field_longlong *)f;
   return f2->val_int();
 }
+
 ulonglong get_field_ulonglong(Field *f) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_LONGLONG);
   Field_longlong *f2 = (Field_longlong *)f;
@@ -145,6 +183,7 @@ void set_field_decimal(Field *f, double value) {
   Field_new_decimal *f2 = (Field_new_decimal *)f;
   f2->store(value);
 }
+
 double get_field_decimal(Field *f) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_NEWDECIMAL);
   Field_new_decimal *f2 = (Field_new_decimal *)f;
@@ -157,6 +196,7 @@ void set_field_float(Field *f, double value) {
   Field_float *f2 = (Field_float *)f;
   f2->store(value);
 }
+
 double get_field_float(Field *f) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_FLOAT);
   Field_float *f2 = (Field_float *)f;
@@ -169,6 +209,7 @@ void set_field_double(Field *f, double value) {
   Field_double *f2 = (Field_double *)f;
   f2->store(value);
 }
+
 double get_field_double(Field *f) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_DOUBLE);
   Field_double *f2 = (Field_double *)f;
@@ -181,17 +222,19 @@ void set_field_char_utf8(Field *f, const char *str, uint len) {
   Field_string *f2 = (Field_string *)f;
   f2->store(str, len, &my_charset_utf8mb4_bin);
 }
+
 String *get_field_char_utf8(Field *f, String *val) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_STRING);
   Field_string *f2 = (Field_string *)f;
-  val = f2->val_str(NULL, val);
+  val = f2->val_str(nullptr, val);
   return val;
 }
+
 char *get_field_char_utf8(Field *f, char *val, uint *len) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_STRING);
   String temp;
   Field_string *f2 = (Field_string *)f;
-  f2->val_str(NULL, &temp);
+  f2->val_str(nullptr, &temp);
   *len = temp.length();
   strncpy(val, temp.ptr(), *len);
   return val;
@@ -210,22 +253,24 @@ void set_field_varchar_utf8(Field *f, const char *str) {
   Field_varstring *f2 = (Field_varstring *)f;
   f2->store(str, strlen(str), &my_charset_utf8mb4_bin);
 }
-void set_field_varchar_utf8(Field *f, const char *str, uint len) {
+
+void set_field_varchar_utf8(Field *f, const char *str, size_t len) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_VARCHAR);
   Field_varstring *f2 = (Field_varstring *)f;
   f2->store(str, len, &my_charset_utf8mb4_bin);
 }
+
 String *get_field_varchar_utf8(Field *f, String *val) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_VARCHAR);
   Field_varstring *f2 = (Field_varstring *)f;
-  val = f2->val_str(NULL, val);
+  val = f2->val_str(nullptr, val);
   return val;
 }
 char *get_field_varchar_utf8(Field *f, char *val, uint *len) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_VARCHAR);
   String temp;
   Field_varstring *f2 = (Field_varstring *)f;
-  f2->val_str(NULL, &temp);
+  f2->val_str(nullptr, &temp);
   *len = temp.length();
   strncpy(val, temp.ptr(), *len);
   return val;
@@ -236,6 +281,7 @@ void set_field_varchar_utf8mb4(Field *f, const char *str) {
   Field_varstring *f2 = (Field_varstring *)f;
   f2->store(str, strlen(str), &my_charset_utf8mb4_bin);
 }
+
 void set_field_varchar_utf8mb4(Field *f, const char *str, uint len) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_VARCHAR);
   Field_varstring *f2 = (Field_varstring *)f;
@@ -261,7 +307,7 @@ char *get_field_blob(Field *f, char *val, uint *len) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_BLOB);
   String temp;
   Field_blob *f2 = (Field_blob *)f;
-  f2->val_str(NULL, &temp);
+  f2->val_str(nullptr, &temp);
   *len = temp.length();
   strncpy(val, temp.ptr(), *len);
   return val;
@@ -273,6 +319,7 @@ void set_field_enum(Field *f, ulonglong value) {
   Field_enum *f2 = (Field_enum *)f;
   f2->store_type(value);
 }
+
 ulonglong get_field_enum(Field *f) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_ENUM);
   Field_enum *f2 = (Field_enum *)f;
@@ -285,6 +332,7 @@ void set_field_set(Field *f, ulonglong value) {
   Field_set *f2 = (Field_set *)f;
   f2->store_type(value);
 }
+
 ulonglong get_field_set(Field *f) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_SET);
   Field_set *f2 = (Field_set *)f;
@@ -297,11 +345,12 @@ void set_field_date(Field *f, const char *value, uint len) {
   Field_newdate *f2 = (Field_newdate *)f;
   f2->store(value, len, system_charset_info);
 }
+
 char *get_field_date(Field *f, char *val, uint *len) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_NEWDATE);
   String temp;
   Field_newdate *f2 = (Field_newdate *)f;
-  f2->val_str(&temp, NULL);
+  f2->val_str(&temp, nullptr);
   *len = temp.length();
   strncpy(val, temp.ptr(), *len);
   return val;
@@ -313,11 +362,12 @@ void set_field_time(Field *f, const char *value, uint len) {
   Field_timef *f2 = (Field_timef *)f;
   f2->store(value, len, system_charset_info);
 }
+
 char *get_field_time(Field *f, char *val, uint *len) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_TIME2);
   String temp;
   Field_timef *f2 = (Field_timef *)f;
-  f2->val_str(&temp, NULL);
+  f2->val_str(&temp, nullptr);
   *len = temp.length();
   strncpy(val, temp.ptr(), *len);
   return val;
@@ -329,11 +379,12 @@ void set_field_datetime(Field *f, const char *value, uint len) {
   Field_datetimef *f2 = (Field_datetimef *)f;
   f2->store(value, len, system_charset_info);
 }
+
 char *get_field_datetime(Field *f, char *val, uint *len) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_DATETIME2);
   String temp;
   Field_datetimef *f2 = (Field_datetimef *)f;
-  f2->val_str(&temp, NULL);
+  f2->val_str(&temp, nullptr);
   *len = temp.length();
   strncpy(val, temp.ptr(), *len);
   return val;
@@ -345,11 +396,12 @@ void set_field_timestamp(Field *f, const char *value, uint len) {
   Field_timestampf *f2 = (Field_timestampf *)f;
   f2->store(value, len, system_charset_info);
 }
+
 char *get_field_timestamp(Field *f, char *val, uint *len) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_TIMESTAMP2);
   String temp;
   Field_timestampf *f2 = (Field_timestampf *)f;
-  f2->val_str(&temp, NULL);
+  f2->val_str(&temp, nullptr);
   *len = temp.length();
   strncpy(val, temp.ptr(), *len);
   return val;
@@ -370,6 +422,7 @@ void set_field_year(Field *f, ulong value) {
   Field_year *f2 = (Field_year *)f;
   f2->store(value, true);
 }
+
 ulong get_field_year(Field *f) {
   DBUG_ASSERT(f->real_type() == MYSQL_TYPE_YEAR);
   Field_year *f2 = (Field_year *)f;
@@ -386,12 +439,14 @@ void set_field_json(Field *f, const Json_wrapper *json) {
 void format_sqltext(const char *source_sqltext, size_t source_length,
                     const CHARSET_INFO *source_cs, bool truncated,
                     String &sqltext) {
-  DBUG_ASSERT(source_cs != NULL);
+  DBUG_ASSERT(source_cs != nullptr);
 
   sqltext.set_charset(source_cs);
   sqltext.length(0);
 
-  if (source_length == 0) return;
+  if (source_length == 0) {
+    return;
+  }
 
   /* Adjust sqltext length to a valid number of bytes. */
   int cs_error = 0;
@@ -414,6 +469,33 @@ void format_sqltext(const char *source_sqltext, size_t source_length,
     }
   }
   return;
+}
+
+/**
+  Create a SOURCE column from source file and line.
+*/
+void make_source_column(const char *source_file, size_t source_line,
+                        char row_buffer[], size_t row_buffer_size,
+                        uint &row_length) {
+  row_length = 0;
+
+  /* Check that a source file reset is not in progress. */
+  if (source_file == nullptr || pfs_unload_plugin_ref_count.load() > 0) {
+    return;
+  }
+
+  /* Make a working copy. */
+  char safe_source_file[COL_INFO_SIZE + 1]; /* 1024 + 1*/
+  strncpy(safe_source_file, source_file, COL_INFO_SIZE);
+  safe_source_file[sizeof(safe_source_file) - 1] = 0;
+
+  try {
+    /* Isolate the base file name and append the line number. */
+    const char *base = base_name(safe_source_file);
+    row_length =
+        snprintf(row_buffer, row_buffer_size, "%s:%d", base, (int)source_line);
+  } catch (...) {
+  }
 }
 
 int PFS_host_row::make_row(PFS_host *pfs) {
@@ -613,7 +695,7 @@ int PFS_object_row::make_row(PFS_program *pfs) {
 }
 
 int PFS_column_row::make_row(const MDL_key *mdl) {
-  static_assert(MDL_key::NAMESPACE_END == 17,
+  static_assert(MDL_key::NAMESPACE_END == 18,
                 "Adjust performance schema when changing enum_mdl_namespace");
 
   switch (mdl->mdl_namespace()) {
@@ -715,6 +797,11 @@ int PFS_column_row::make_row(const MDL_key *mdl) {
       break;
     case MDL_key::FOREIGN_KEY:
       m_object_type = OBJECT_TYPE_FOREIGN_KEY;
+      m_schema_name_length = mdl->db_name_length();
+      m_object_name_length = mdl->name_length();
+      break;
+    case MDL_key::CHECK_CONSTRAINT:
+      m_object_type = OBJECT_TYPE_CHECK_CONSTRAINT;
       m_schema_name_length = mdl->db_name_length();
       m_object_name_length = mdl->name_length();
       break;
@@ -833,7 +920,7 @@ void PFS_column_row::set_nullable_field(uint index, Field *f) {
 
 int PFS_index_row::make_index_name(PFS_table_share_index *pfs_index,
                                    uint table_index) {
-  if (pfs_index == NULL) {
+  if (pfs_index == nullptr) {
     if (table_index < MAX_INDEXES) {
       m_index_name_length = sprintf(m_index_name, "(index %d)", table_index);
     } else {
@@ -1292,7 +1379,8 @@ int PFS_variable_name_row::make_row(const char *str, size_t length) {
   DBUG_ASSERT(length <= sizeof(m_str));
   DBUG_ASSERT(length <= NAME_CHAR_LEN);
 
-  m_length = (uint)MY_MIN(length, NAME_CHAR_LEN); /* enforce max name length */
+  /* enforce max name length */
+  m_length = std::min(length, size_t{NAME_CHAR_LEN});
   if (m_length > 0) {
     memcpy(m_str, str, length);
   }
@@ -1311,7 +1399,7 @@ int PFS_variable_value_row::make_row(const System_variable *var) {
 
 int PFS_variable_value_row::make_row(const CHARSET_INFO *cs, const char *str,
                                      size_t length) {
-  DBUG_ASSERT(cs != NULL);
+  DBUG_ASSERT(cs != nullptr);
   DBUG_ASSERT(length <= sizeof(m_str));
   if (length > 0) {
     memcpy(m_str, str, length);
@@ -1328,7 +1416,7 @@ void PFS_variable_value_row::set_field(Field *f) {
 
 void PFS_user_variable_value_row::clear() {
   my_free(m_value);
-  m_value = NULL;
+  m_value = nullptr;
   m_value_length = 0;
 }
 
@@ -1338,47 +1426,76 @@ int PFS_user_variable_value_row::make_row(const char *val, size_t length) {
     m_value_length = length;
     memcpy(m_value, val, length);
   } else {
-    m_value = NULL;
+    m_value = nullptr;
     m_value_length = 0;
   }
 
   return 0;
 }
 
+/*
+  Code is the same for all int types,
+  expects the following parameters:
+  bool record_null
+  <T> record_value,
+  bool m_is_null,
+  <T> m_key_value,
+  enum ha_rkey_function m_find_flag
+*/
+#define COMMON_STATELESS_MATCH               \
+  int cmp = 0;                               \
+  if (is_null) {                             \
+    cmp = (record_null ? 0 : 1);             \
+  } else {                                   \
+    if (record_null) {                       \
+      cmp = -1;                              \
+    } else if (record_value < m_key_value) { \
+      cmp = -1;                              \
+    } else if (record_value > m_key_value) { \
+      cmp = +1;                              \
+    } else {                                 \
+      cmp = 0;                               \
+    }                                        \
+  }                                          \
+  switch (find_flag) {                       \
+    case HA_READ_KEY_EXACT:                  \
+      return (cmp == 0);                     \
+    case HA_READ_KEY_OR_NEXT:                \
+      return (cmp >= 0);                     \
+    case HA_READ_KEY_OR_PREV:                \
+      return (cmp <= 0);                     \
+    case HA_READ_BEFORE_KEY:                 \
+      return (cmp < 0);                      \
+    case HA_READ_AFTER_KEY:                  \
+      return (cmp > 0);                      \
+    default:                                 \
+      DBUG_ASSERT(false);                    \
+      return false;                          \
+  }
+
 bool PFS_key_long::stateless_match(bool record_null, long record_value,
-                                   bool m_is_null, long m_key_value,
-                                   enum ha_rkey_function m_find_flag) {
-  int cmp = 0;
+                                   bool is_null, long m_key_value,
+                                   enum ha_rkey_function find_flag) {
+  COMMON_STATELESS_MATCH
+}
 
-  if (m_is_null) {
-    cmp = (record_null ? 0 : 1);
-  } else {
-    if (record_null) {
-      cmp = -1;
-    } else if (record_value < m_key_value) {
-      cmp = -1;
-    } else if (record_value > m_key_value) {
-      cmp = +1;
-    } else {
-      cmp = 0;
-    }
-  }
+bool PFS_key_ulong::stateless_match(bool record_null, ulong record_value,
+                                    bool is_null, ulong m_key_value,
+                                    enum ha_rkey_function find_flag) {
+  COMMON_STATELESS_MATCH
+}
 
-  switch (m_find_flag) {
-    case HA_READ_KEY_EXACT:
-      return (cmp == 0);
-    case HA_READ_KEY_OR_NEXT:
-      return (cmp >= 0);
-    case HA_READ_KEY_OR_PREV:
-      return (cmp <= 0);
-    case HA_READ_BEFORE_KEY:
-      return (cmp < 0);
-    case HA_READ_AFTER_KEY:
-      return (cmp > 0);
-    default:
-      DBUG_ASSERT(false);
-      return false;
-  }
+bool PFS_key_longlong::stateless_match(bool record_null, longlong record_value,
+                                       bool is_null, longlong m_key_value,
+                                       enum ha_rkey_function find_flag) {
+  COMMON_STATELESS_MATCH
+}
+
+bool PFS_key_ulonglong::stateless_match(bool record_null,
+                                        ulonglong record_value, bool is_null,
+                                        ulonglong m_key_value,
+                                        enum ha_rkey_function find_flag) {
+  COMMON_STATELESS_MATCH
 }
 
 bool PFS_key_ulong::do_match(bool record_null, ulong record_value) {
@@ -1453,10 +1570,10 @@ bool PFS_key_pstring::stateless_match(bool record_null,
                                       const char *record_string,
                                       size_t record_string_length,
                                       const char *m_key_value,
-                                      size_t m_key_value_length, bool m_is_null,
-                                      enum ha_rkey_function m_find_flag) {
-  if (m_find_flag == HA_READ_KEY_EXACT) {
-    if (m_is_null) {
+                                      size_t m_key_value_length, bool is_null,
+                                      enum ha_rkey_function find_flag) {
+  if (find_flag == HA_READ_KEY_EXACT) {
+    if (is_null) {
       return record_null;
     }
 
@@ -1474,7 +1591,7 @@ bool PFS_key_pstring::stateless_match(bool record_null,
 
   int cmp = 0;
 
-  if (m_is_null) {
+  if (is_null) {
     cmp = record_null ? 0 : 1;
   } else {
     if (record_null) {
@@ -1484,7 +1601,7 @@ bool PFS_key_pstring::stateless_match(bool record_null,
     }
   }
 
-  switch (m_find_flag) {
+  switch (find_flag) {
     case HA_READ_KEY_OR_NEXT:
       return (cmp >= 0);
     case HA_READ_KEY_OR_PREV:
@@ -1532,7 +1649,7 @@ bool PFS_key_thread_id::match(const PFS_thread *pfs) {
 bool PFS_key_thread_id::match_owner(const PFS_table *pfs) {
   PFS_thread *thread = sanitize_thread(pfs->m_thread_owner);
 
-  if (thread == NULL) {
+  if (thread == nullptr) {
     return do_match(true, 0);
   }
 
@@ -1543,7 +1660,7 @@ bool PFS_key_thread_id::match_owner(const PFS_table *pfs) {
 bool PFS_key_thread_id::match_owner(const PFS_socket *pfs) {
   PFS_thread *thread = sanitize_thread(pfs->m_thread_owner);
 
-  if (thread == NULL) {
+  if (thread == nullptr) {
     return do_match(true, 0);
   }
 
@@ -1553,7 +1670,7 @@ bool PFS_key_thread_id::match_owner(const PFS_socket *pfs) {
 bool PFS_key_thread_id::match_owner(const PFS_mutex *pfs) {
   PFS_thread *thread = sanitize_thread(pfs->m_owner);
 
-  if (thread == NULL) {
+  if (thread == nullptr) {
     return do_match(true, 0);
   }
 
@@ -1573,7 +1690,7 @@ bool PFS_key_thread_id::match_owner(const PFS_metadata_lock *pfs) {
 bool PFS_key_thread_id::match_writer(const PFS_rwlock *pfs) {
   PFS_thread *thread = sanitize_thread(pfs->m_writer);
 
-  if (thread == NULL) {
+  if (thread == nullptr) {
     return do_match(true, 0);
   }
 
@@ -1651,8 +1768,13 @@ bool PFS_key_port::match(const PFS_socket *pfs) {
   return do_match(record_null, (int32)port);
 }
 
+bool PFS_key_port::match(uint port) {
+  bool record_null = (port == 0);
+  return do_match(record_null, (int32)port);
+}
+
 bool PFS_key_error_number::match_error_index(uint error_index) {
-  DBUG_ASSERT(error_index < PFS_MAX_SERVER_ERRORS);
+  DBUG_ASSERT(error_index < PFS_MAX_GLOBAL_SERVER_ERRORS);
 
   server_error *temp_error;
   temp_error = &error_names_array[pfs_to_server_error_map[error_index]];
@@ -1663,7 +1785,7 @@ bool PFS_key_error_number::match_error_index(uint error_index) {
 
 bool PFS_key_thread_name::match(const PFS_thread *pfs) {
   PFS_thread_class *klass = sanitize_thread_class(pfs->m_class);
-  if (klass == NULL) {
+  if (klass == nullptr) {
     return false;
   }
 
@@ -1680,7 +1802,7 @@ bool PFS_key_event_name::match(const PFS_instr_class *pfs) {
 
 bool PFS_key_event_name::match(const PFS_mutex *pfs) {
   PFS_mutex_class *safe_class = sanitize_mutex_class(pfs->m_class);
-  if (unlikely(safe_class == NULL)) {
+  if (unlikely(safe_class == nullptr)) {
     return false;
   }
 
@@ -1689,7 +1811,7 @@ bool PFS_key_event_name::match(const PFS_mutex *pfs) {
 
 bool PFS_key_event_name::match(const PFS_rwlock *pfs) {
   PFS_rwlock_class *safe_class = sanitize_rwlock_class(pfs->m_class);
-  if (unlikely(safe_class == NULL)) {
+  if (unlikely(safe_class == nullptr)) {
     return false;
   }
   return do_match(false, safe_class->m_name, safe_class->m_name_length);
@@ -1697,7 +1819,7 @@ bool PFS_key_event_name::match(const PFS_rwlock *pfs) {
 
 bool PFS_key_event_name::match(const PFS_cond *pfs) {
   PFS_cond_class *safe_class = sanitize_cond_class(pfs->m_class);
-  if (unlikely(safe_class == NULL)) {
+  if (unlikely(safe_class == nullptr)) {
     return false;
   }
   return do_match(false, safe_class->m_name, safe_class->m_name_length);
@@ -1705,7 +1827,7 @@ bool PFS_key_event_name::match(const PFS_cond *pfs) {
 
 bool PFS_key_event_name::match(const PFS_file *pfs) {
   PFS_file_class *safe_class = sanitize_file_class(pfs->m_class);
-  if (unlikely(safe_class == NULL)) {
+  if (unlikely(safe_class == nullptr)) {
     return false;
   }
   return do_match(false, safe_class->m_name, safe_class->m_name_length);
@@ -1713,7 +1835,7 @@ bool PFS_key_event_name::match(const PFS_file *pfs) {
 
 bool PFS_key_event_name::match(const PFS_socket *pfs) {
   PFS_socket_class *safe_class = sanitize_socket_class(pfs->m_class);
-  if (unlikely(safe_class == NULL)) {
+  if (unlikely(safe_class == nullptr)) {
     return false;
   }
   return do_match(false, safe_class->m_name, safe_class->m_name_length);
@@ -1726,8 +1848,18 @@ bool PFS_key_event_name::match_view(uint view) {
                              mutex_instrument_prefix.length);
 
     case PFS_instrument_view_constants::VIEW_RWLOCK:
-      return do_match_prefix(false, rwlock_instrument_prefix.str,
-                             rwlock_instrument_prefix.length);
+      bool match;
+      match = do_match_prefix(false, prlock_instrument_prefix.str,
+                              prlock_instrument_prefix.length);
+      if (!match) {
+        match = do_match_prefix(false, rwlock_instrument_prefix.str,
+                                rwlock_instrument_prefix.length);
+      }
+      if (!match) {
+        match = do_match_prefix(false, sxlock_instrument_prefix.str,
+                                sxlock_instrument_prefix.length);
+      }
+      return match;
 
     case PFS_instrument_view_constants::VIEW_COND:
       return do_match_prefix(false, cond_instrument_prefix.str,
@@ -1855,7 +1987,7 @@ bool PFS_key_bucket_number::match(ulong value) {
   return do_match(false, value);
 }
 
-bool PFS_key_name::match(const LEX_STRING *name) {
+bool PFS_key_name::match(const LEX_CSTRING *name) {
   bool record_null = (name->length == 0);
   return do_match(record_null, name->str, name->length);
 }
@@ -2010,7 +2142,7 @@ void PFS_key_object_type_enum::read(PFS_key_reader &reader,
                                     enum ha_rkey_function find_flag) {
   uchar object_type = 0;
 
-  m_find_flag = reader.read_uchar(find_flag, m_is_null, &object_type);
+  m_find_flag = reader.read_uint8(find_flag, m_is_null, &object_type);
 
   if (m_is_null) {
     m_object_type = NO_OBJECT_TYPE;

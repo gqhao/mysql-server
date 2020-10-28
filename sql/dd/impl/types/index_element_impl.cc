@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -29,7 +29,7 @@
 #include <rapidjson/document.h>
 #include <rapidjson/prettywriter.h>
 
-#include "binary_log_types.h"
+#include "field_types.h"  // enum_field_types
 #include "m_string.h"
 #include "my_inttypes.h"
 #include "my_sys.h"
@@ -91,7 +91,7 @@ bool Index_element_impl::restore_attributes(const Raw_record &r) {
 
   m_hidden = r.read_bool(Index_column_usage::FIELD_HIDDEN);
 
-  return (m_column == NULL);
+  return (m_column == nullptr);
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -114,14 +114,15 @@ bool Index_element_impl::store_attributes(Raw_record *r) {
 
 ///////////////////////////////////////////////////////////////////////////
 
-static_assert(
-    Index_column_usage::FIELD_HIDDEN == 5,
-    "Index_column_usage definition has changed, review (de)ser memfuns!");
+static_assert(Index_column_usage::NUMBER_OF_FIELDS == 6,
+              "Index_column_usage definition has changed, check if serialize() "
+              "and deserialize() need to be updated!");
 void Index_element_impl::serialize(Sdi_wcontext *, Sdi_writer *w) const {
   w->StartObject();
   write(w, m_ordinal_position, STRING_WITH_LEN("ordinal_position"));
   write(w, m_length, STRING_WITH_LEN("length"));
   write_enum(w, m_order, STRING_WITH_LEN("order"));
+  write(w, m_hidden, STRING_WITH_LEN("hidden"));
   write_opx_reference(w, m_column, STRING_WITH_LEN("column_opx"));
   w->EndObject();
 }
@@ -132,6 +133,7 @@ bool Index_element_impl::deserialize(Sdi_rcontext *rctx, const RJ_Value &val) {
   read(&m_ordinal_position, val, "ordinal_position");
   read(&m_length, val, "length");
   read_enum(&m_order, val, "order");
+  read(&m_hidden, val, "hidden");
   read_opx_reference(rctx, &m_column, val, "column_opx");
   return false;
 }

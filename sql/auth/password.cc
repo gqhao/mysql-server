@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -38,14 +38,11 @@
   a string generated from the stored hash_value of the password and the
   random string.
 
-  The password is saved (in user.password) by using the PASSWORD() function in
-  mysql.
+  The password is saved (in user.authentication_string).
 
-  This is .c file because it's used in libmysqlclient, which is entirely in C.
-  (we need it to be portable to a variety of systems).
   Example:
-    update user set password=PASSWORD("hello") where user="test"
-  This saves a hashed number as a string in the password field.
+    SET PASSWORD for test = 'haha'
+  This saves a hashed number as a string in the authentication_string field.
 
   The new authentication is performed in following manner:
 
@@ -122,7 +119,7 @@ static inline uint8 char_val(uint8 X) {
                     : X >= 'A' && X <= 'Z' ? X - 'A' + 10 : X - 'a' + 10);
 }
 
-  /* Character to use as version identifier for version 4.1 */
+/* Character to use as version identifier for version 4.1 */
 
 #define PVERSION41_CHAR '*'
 
@@ -183,15 +180,15 @@ static void my_crypt(char *to, const uchar *s1, const uchar *s2, uint len) {
   while (s1 < s1_end) *to++ = *s1++ ^ *s2++;
 }
 
-#if defined(HAVE_OPENSSL)
 extern "C" void my_make_scrambled_password(char *to, const char *password,
                                            size_t pass_len) {
   char salt[CRYPT_SALT_LENGTH + 1];
 
   generate_user_salt(salt, CRYPT_SALT_LENGTH + 1);
-  my_crypt_genhash(to, CRYPT_MAX_PASSWORD_SIZE, password, pass_len, salt, 0);
+  my_crypt_genhash(to, CRYPT_MAX_PASSWORD_SIZE, password, pass_len, salt,
+                   nullptr);
 }
-#endif
+
 /**
   Compute two stage SHA1 hash of the password :
 
@@ -219,8 +216,7 @@ inline static void compute_two_stage_sha1_hash(const char *password,
     MySQL 4.1.1 password hashing: SHA conversion (see RFC 2289, 3174) twice
     applied to the password string, and then produced octet sequence is
     converted to hex string.
-    The result of this function is used as return value from PASSWORD() and
-    is stored in the database.
+    The result of this function is stored in the database.
   SYNOPSIS
     my_make_scrambled_password_sha1()
     buf       OUT buffer of size 2*SHA1_HASH_SIZE + 2 to store hex string

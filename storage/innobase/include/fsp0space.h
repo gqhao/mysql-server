@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2013, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2013, 2020, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -64,13 +64,13 @@ class Tablespace {
     shutdown();
     ut_ad(m_files.empty());
     ut_ad(m_space_id == SPACE_UNKNOWN);
-    if (m_name != NULL) {
+    if (m_name != nullptr) {
       ut_free(m_name);
-      m_name = NULL;
+      m_name = nullptr;
     }
-    if (m_path != NULL) {
+    if (m_path != nullptr) {
       ut_free(m_path);
-      m_path = NULL;
+      m_path = nullptr;
     }
   }
 
@@ -81,9 +81,9 @@ class Tablespace {
   /** Set tablespace name
   @param[in]	name	tablespace name */
   void set_name(const char *name) {
-    ut_ad(m_name == NULL);
+    ut_ad(m_name == nullptr);
     m_name = mem_strdup(name);
-    ut_ad(m_name != NULL);
+    ut_ad(m_name != nullptr);
   }
 
   /** Get tablespace name
@@ -94,9 +94,9 @@ class Tablespace {
   @param[in]	path	where tablespace file(s) resides
   @param[in]	len	length of the file path */
   void set_path(const char *path, size_t len) {
-    ut_ad(m_path == NULL);
+    ut_ad(m_path == nullptr);
     m_path = mem_strdupl(path, len);
-    ut_ad(m_path != NULL);
+    ut_ad(m_path != nullptr);
 
     Fil_path::normalize(m_path);
   }
@@ -122,14 +122,14 @@ class Tablespace {
 
   /** Set the tablespace flags
   @param[in]	fsp_flags	tablespace flags */
-  void set_flags(ulint fsp_flags) {
+  void set_flags(uint32_t fsp_flags) {
     ut_ad(fsp_flags_is_valid(fsp_flags));
     m_flags = fsp_flags;
   }
 
   /** Get the tablespace flags
   @return m_flags tablespace flags */
-  ulint flags() const { return (m_flags); }
+  uint32_t flags() const { return (m_flags); }
 
   /** Set Ignore Read Only Status for tablespace.
   @param[in]	read_only_status	read only status indicator */
@@ -189,7 +189,7 @@ class Tablespace {
   bool find(const char *filename);
 
   /** Note that the data file was found.
-  @param[in]	file	data file object */
+  @param[in,out] file	Data file object to set */
   void file_found(Datafile &file);
 
   /* DATA MEMBERS */
@@ -204,7 +204,7 @@ class Tablespace {
   char *m_path;
 
   /** Tablespace flags */
-  ulint m_flags;
+  uint32_t m_flags;
 
  protected:
   /** Ignore server read only configuration for this tablespace. */

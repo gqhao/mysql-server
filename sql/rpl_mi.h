@@ -1,4 +1,4 @@
-/* Copyright (c) 2006, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2006, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -27,7 +27,8 @@
 #include <time.h>
 #include <atomic>
 
-#include "binlog_event.h"  // enum_binlog_checksum_alg
+#include "compression.h"  // COMPRESSION_ALGORITHM_NAME_BUFFER_SIZE
+#include "libbinlogevents/include/binlog_event.h"  // enum_binlog_checksum_alg
 #include "m_string.h"
 #include "my_inttypes.h"
 #include "my_io.h"
@@ -82,7 +83,7 @@ struct MYSQL;
 
 *****************************************************************************/
 
-class Master_info : public Rpl_info, public Gtid_mode_copy {
+class Master_info : public Rpl_info {
   friend class Rpl_info_factory;
 
  public:
@@ -134,6 +135,33 @@ class Master_info : public Rpl_info, public Gtid_mode_copy {
 
   /// Information on the current and last queued transactions
   Gtid_monitoring_info *gtid_monitoring_info;
+
+#ifdef HAVE_PSI_INTERFACE
+  /**
+    PSI key for the `rotate_lock`
+  */
+  PSI_mutex_key *key_info_rotate_lock;
+  /**
+    PSI key for the `rotate_cond`
+  */
+  PSI_mutex_key *key_info_rotate_cond;
+#endif
+  /**
+    Lock to protect from rotating the relay log when in the middle of a
+    transaction.
+  */
+  mysql_mutex_t rotate_lock;
+  /**
+    Waiting condition that will block the process/thread requesting a relay log
+    rotation in the middle of a transaction. The process/thread will wait until
+    the transaction is written to the relay log and the rotation is,
+    successfully accomplished.
+  */
+  mysql_cond_t rotate_cond;
+  /**
+    If a rotate was requested while the relay log was in a transaction.
+  */
+  std::atomic<bool> rotate_requested{false};
 
  public:
   /**
@@ -249,7 +277,17 @@ class Master_info : public Rpl_info, public Gtid_mode_copy {
 
   bool ssl;  // enables use of SSL connection if true
   char ssl_ca[FN_REFLEN], ssl_capath[FN_REFLEN], ssl_cert[FN_REFLEN];
-  char ssl_cipher[FN_REFLEN], ssl_key[FN_REFLEN], tls_version[FN_REFLEN];
+  char ssl_cipher[FN_REFLEN], ssl_key[FN_REFLEN];
+  char tls_version[FN_REFLEN];
+  /*
+    Ciphersuites used for TLS 1.3 communication with the master server.
+    tls_ciphersuites = NULL means that TLS 1.3 default ciphersuites
+    are enabled. To allow a value that can either be NULL or a string,
+    it is represented by the pair:
+      first:  true if tls_ciphersuites is set to NULL
+      second: the string value when first is false
+  */
+  std::pair<bool, std::string> tls_ciphersuites = {true, ""};
   char ssl_crl[FN_REFLEN], ssl_crlpath[FN_REFLEN];
   char public_key_path[FN_REFLEN];
   bool ssl_verify_server_cert;
@@ -288,6 +326,25 @@ class Master_info : public Rpl_info, public Gtid_mode_copy {
   ulong retry_count;
   char master_uuid[UUID_LENGTH + 1];
   char bind_addr[HOSTNAME_LENGTH + 1];
+
+  /*
+    Name of a network namespace where a socket for connection to a master
+    should be created.
+  */
+  char network_namespace[NAME_LEN];
+
+  bool is_set_network_namespace() const { return network_namespace[0] != 0; }
+
+  const char *network_namespace_str() const {
+    return is_set_network_namespace() ? network_namespace : "";
+  }
+  /*
+    describes what compression algorithm and level is used between
+    master/slave communication protocol
+  */
+  char compression_algorithm[COMPRESSION_ALGORITHM_NAME_BUFFER_SIZE];
+  int zstd_compression_level;
+  NET_SERVER server_extn;  // maintain compress context info.
 
   int mi_init_info();
   void end_info();
@@ -365,7 +422,26 @@ class Master_info : public Rpl_info, public Gtid_mode_copy {
     if (need_lock) mysql_mutex_unlock(&data_lock);
   }
 
-  virtual ~Master_info();
+  ~Master_info() override;
+
+  /**
+    Sets the flag that indicates that a relay log rotation has been requested.
+
+    @param[in]         thd     the client thread carrying the command.
+   */
+  void request_rotate(THD *thd);
+  /**
+    Clears the flag that indicates that a relay log rotation has been requested
+    and notifies requester that the rotation has finished.
+   */
+  void clear_rotate_requests();
+  /**
+    Checks whether or not there is a request for rotating the underlying relay
+    log.
+
+    @returns true if there is, false otherwise
+   */
+  bool is_rotate_requested();
 
  protected:
   char master_log_name[FN_REFLEN];
@@ -404,11 +480,63 @@ class Master_info : public Rpl_info, public Gtid_mode_copy {
   */
   static const uint *get_table_pk_field_indexes();
 
+  /**
+     Sets bits for columns that are allowed to be `NULL`.
+
+     @param nullable_fields the bitmap to hold the nullable fields.
+  */
+  static void set_nullable_fields(MY_BITMAP *nullable_fields);
+
   bool is_auto_position() { return auto_position; }
 
   void set_auto_position(bool auto_position_param) {
     auto_position = auto_position_param;
   }
+
+  /**
+    Checks if Asynchronous Replication Connection Failover feature is enabled.
+
+    @returns true   if Asynchronous Replication Connection Failover feature is
+                    enabled.
+             false  otherwise.
+  */
+  bool is_source_connection_auto_failover() {
+    return m_source_connection_auto_failover;
+  }
+
+  /**
+    Enable Asynchronous Replication Connection Failover feature.
+  */
+  void set_source_connection_auto_failover() {
+    m_source_connection_auto_failover = true;
+  }
+
+  /**
+    Disable Asynchronous Replication Connection Failover feature.
+  */
+  void unset_source_connection_auto_failover() {
+    m_source_connection_auto_failover = false;
+  }
+
+  /**
+    Checks if network error has occurred.
+
+    @returns true   if slave IO thread failure was due to network error,
+             false  otherwise.
+  */
+  bool is_network_error() { return m_network_error; }
+
+  /**
+    Sets m_network_error to true. Its used by async replication connection
+    failover in case of slave IO thread failure to check if it was due to
+    network failure.
+  */
+  void set_network_error() { m_network_error = true; }
+
+  /**
+    Resets m_network_error to false.
+  */
+  void reset_network_error() { m_network_error = false; }
 
   /**
     This member function shall return true if there are server
@@ -451,9 +579,9 @@ class Master_info : public Rpl_info, public Gtid_mode_copy {
     mi_description_event = fdle;
   }
 
-  bool set_info_search_keys(Rpl_info_handler *to);
+  bool set_info_search_keys(Rpl_info_handler *to) override;
 
-  virtual const char *get_for_channel_str(bool upper_case = false) const {
+  const char *get_for_channel_str(bool upper_case = false) const override {
     return reinterpret_cast<const char *>(upper_case ? for_channel_uppercase_str
                                                      : for_channel_str);
   }
@@ -461,10 +589,12 @@ class Master_info : public Rpl_info, public Gtid_mode_copy {
   void init_master_log_pos();
 
  private:
-  bool read_info(Rpl_info_handler *from);
-  bool write_info(Rpl_info_handler *to);
+  bool read_info(Rpl_info_handler *from) override;
+  bool write_info(Rpl_info_handler *to) override;
 
-  bool auto_position;
+  bool auto_position{false};
+  bool m_source_connection_auto_failover{false};
+  bool m_network_error{false};
 
   Master_info(
 #ifdef HAVE_PSI_INTERFACE
@@ -472,10 +602,12 @@ class Master_info : public Rpl_info, public Gtid_mode_copy {
       PSI_mutex_key *param_key_info_data_lock,
       PSI_mutex_key *param_key_info_sleep_lock,
       PSI_mutex_key *param_key_info_thd_lock,
+      PSI_mutex_key *param_key_info_rotate_lock,
       PSI_mutex_key *param_key_info_data_cond,
       PSI_mutex_key *param_key_info_start_cond,
       PSI_mutex_key *param_key_info_stop_cond,
       PSI_mutex_key *param_key_info_sleep_cond,
+      PSI_mutex_key *param_key_info_rotate_cond,
 #endif
       uint param_id, const char *param_channel);
 
@@ -489,8 +621,10 @@ class Master_info : public Rpl_info, public Gtid_mode_copy {
     It will also be used to verify transactions boundaries on the relay log
     while collecting the Retrieved_Gtid_Set to make sure of only adding GTIDs
     of fully retrieved transactions.
+    Its output is also used to detect when events were not logged using row
+    based logging.
   */
-  Transaction_boundary_parser transaction_parser;
+  Replication_transaction_boundary_parser transaction_parser;
 
  private:
   /*
@@ -559,6 +693,9 @@ class Master_info : public Rpl_info, public Gtid_mode_copy {
     @param thd the THD object of current thread
   */
   void wait_until_no_reference(THD *thd);
+
+  /* Set true when the Master_info object was cleared by a RESET SLAVE */
+  bool reset;
 
   /**
     Sync flushed_relay_log_info with current relay log coordinates.

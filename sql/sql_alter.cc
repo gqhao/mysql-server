@@ -1,4 +1,4 @@
-/* Copyright (c) 2010, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2010, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -36,10 +36,10 @@
 #include "mysqld_error.h"
 #include "sql/auth/auth_acls.h"
 #include "sql/auth/auth_common.h"  // check_access
+#include "sql/create_field.h"
 #include "sql/dd/types/trigger.h"  // dd::Trigger
 #include "sql/derror.h"            // ER_THD
 #include "sql/error_handler.h"     // Strict_error_handler
-#include "sql/field.h"
 // mysql_exchange_partition
 #include "sql/log.h"
 #include "sql/mysqld.h"              // lower_case_table_names
@@ -63,6 +63,12 @@ Alter_info::Alter_info(const Alter_info &rhs, MEM_ROOT *mem_root)
       alter_index_visibility_list(mem_root,
                                   rhs.alter_index_visibility_list.begin(),
                                   rhs.alter_index_visibility_list.end()),
+      alter_constraint_enforcement_list(
+          mem_root, rhs.alter_constraint_enforcement_list.begin(),
+          rhs.alter_constraint_enforcement_list.end()),
+      check_constraint_spec_list(mem_root,
+                                 rhs.check_constraint_spec_list.begin(),
+                                 rhs.check_constraint_spec_list.end()),
       create_list(rhs.create_list, mem_root),
       flags(rhs.flags),
       keys_onoff(rhs.keys_onoff),
@@ -89,15 +95,15 @@ Alter_info::Alter_info(const Alter_info &rhs, MEM_ROOT *mem_root)
 }
 
 Alter_table_ctx::Alter_table_ctx()
-    : datetime_field(NULL),
+    : datetime_field(nullptr),
       error_if_not_empty(false),
       tables_opened(0),
-      db(NULL),
-      table_name(NULL),
-      alias(NULL),
-      new_db(NULL),
-      new_name(NULL),
-      new_alias(NULL),
+      db(nullptr),
+      table_name(nullptr),
+      alias(nullptr),
+      new_db(nullptr),
+      new_name(nullptr),
+      new_alias(nullptr),
       fk_info(nullptr),
       fk_count(0),
       fk_max_generated_name_number(0)
@@ -111,7 +117,7 @@ Alter_table_ctx::Alter_table_ctx()
 Alter_table_ctx::Alter_table_ctx(THD *thd, TABLE_LIST *table_list,
                                  uint tables_opened_arg, const char *new_db_arg,
                                  const char *new_name_arg)
-    : datetime_field(NULL),
+    : datetime_field(nullptr),
       error_if_not_empty(false),
       tables_opened(tables_opened_arg),
       new_db(new_db_arg),
@@ -192,6 +198,19 @@ Alter_table_ctx::Alter_table_ctx(THD *thd, TABLE_LIST *table_list,
     tmp_table = true;
 #endif
   }
+
+  /* Initialize MDL requests on new table name and database if necessary. */
+  if (table_list->table->s->tmp_table == NO_TMP_TABLE) {
+    if (is_table_renamed()) {
+      MDL_REQUEST_INIT(&target_mdl_request, MDL_key::TABLE, new_db, new_name,
+                       MDL_EXCLUSIVE, MDL_TRANSACTION);
+
+      if (is_database_changed()) {
+        MDL_REQUEST_INIT(&target_db_mdl_request, MDL_key::SCHEMA, new_db, "",
+                         MDL_INTENTION_EXCLUSIVE, MDL_TRANSACTION);
+      }
+    }
+  }
 }
 
 Alter_table_ctx::~Alter_table_ctx() {}
@@ -219,17 +238,17 @@ bool Sql_cmd_alter_table::execute(THD *thd) {
   ulong priv_needed = ALTER_ACL;
   bool result;
 
-  DBUG_ENTER("Sql_cmd_alter_table::execute");
+  DBUG_TRACE;
 
-  if (thd->is_fatal_error) /* out of memory creating a copy of alter_info */
-    DBUG_RETURN(true);
+  if (thd->is_fatal_error()) /* out of memory creating a copy of alter_info */
+    return true;
 
   {
     partition_info *part_info = thd->lex->part_info;
-    if (part_info != NULL && has_external_data_or_index_dir(*part_info) &&
-        check_access(thd, FILE_ACL, any_db, NULL, NULL, false, false))
+    if (part_info != nullptr && has_external_data_or_index_dir(*part_info) &&
+        check_access(thd, FILE_ACL, any_db, nullptr, nullptr, false, false))
 
-      DBUG_RETURN(true);
+      return true;
   }
   /*
     We also require DROP priv for ALTER TABLE ... DROP PARTITION, as well
@@ -245,12 +264,12 @@ bool Sql_cmd_alter_table::execute(THD *thd) {
   DBUG_ASSERT(!(alter_info.flags & Alter_info::ALTER_ADMIN_PARTITION));
   if (check_access(thd, priv_needed, first_table->db,
                    &first_table->grant.privilege,
-                   &first_table->grant.m_internal, 0, 0) ||
+                   &first_table->grant.m_internal, false, false) ||
       check_access(thd, INSERT_ACL | CREATE_ACL, alter_info.new_db_name.str,
                    &priv,
-                   NULL, /* Don't use first_tab->grant with sel_lex->db */
-                   0, 0))
-    DBUG_RETURN(true); /* purecov: inspected */
+                   nullptr, /* Don't use first_tab->grant with sel_lex->db */
+                   false, false))
+    return true; /* purecov: inspected */
 
   /* If it is a merge table, check privileges for merge children. */
   if (create_info.merge_list.first) {
@@ -292,11 +311,11 @@ bool Sql_cmd_alter_table::execute(THD *thd) {
     if (check_table_access(thd, SELECT_ACL | UPDATE_ACL | DELETE_ACL,
                            create_info.merge_list.first, false, UINT_MAX,
                            false))
-      DBUG_RETURN(true);
+      return true;
   }
 
   if (check_grant(thd, priv_needed, first_table, false, UINT_MAX, false))
-    DBUG_RETURN(true); /* purecov: inspected */
+    return true; /* purecov: inspected */
 
   if (alter_info.new_table_name.str &&
       !test_all_bits(priv, INSERT_ACL | CREATE_ACL)) {
@@ -308,7 +327,7 @@ bool Sql_cmd_alter_table::execute(THD *thd) {
     tmp_table.grant.privilege = priv;
     if (check_grant(thd, INSERT_ACL | CREATE_ACL, &tmp_table, false, UINT_MAX,
                     false))
-      DBUG_RETURN(true); /* purecov: inspected */
+      return true; /* purecov: inspected */
   }
 
   /* Don't yet allow changing of symlinks with ALTER TABLE */
@@ -318,7 +337,7 @@ bool Sql_cmd_alter_table::execute(THD *thd) {
   if (create_info.index_file_name)
     push_warning_printf(thd, Sql_condition::SL_WARNING, WARN_OPTION_IGNORED,
                         ER_THD(thd, WARN_OPTION_IGNORED), "INDEX DIRECTORY");
-  create_info.data_file_name = create_info.index_file_name = NULL;
+  create_info.data_file_name = create_info.index_file_name = nullptr;
 
   thd->enable_slow_log = opt_log_slow_admin_statements;
 
@@ -333,7 +352,7 @@ bool Sql_cmd_alter_table::execute(THD *thd) {
 
   if (!thd->lex->is_ignore() && thd->is_strict_mode())
     thd->pop_internal_handler();
-  DBUG_RETURN(result);
+  return result;
 }
 
 bool Sql_cmd_discard_import_tablespace::execute(THD *thd) {
@@ -356,7 +375,7 @@ bool Sql_cmd_discard_import_tablespace::execute(THD *thd) {
   TABLE_LIST *table_list = select_lex->get_table_list();
 
   if (check_access(thd, ALTER_ACL, table_list->db, &table_list->grant.privilege,
-                   &table_list->grant.m_internal, 0, 0))
+                   &table_list->grant.m_internal, false, false))
     return true;
 
   if (check_grant(thd, ALTER_ACL, table_list, false, UINT_MAX, false))
@@ -388,4 +407,26 @@ bool Sql_cmd_discard_import_tablespace::execute(THD *thd) {
   thd->add_to_binlog_accessed_dbs(table_list->db);
 
   return mysql_discard_or_import_tablespace(thd, table_list);
+}
+
+bool Sql_cmd_secondary_load_unload::execute(THD *thd) {
+  // One of the SECONDARY_LOAD/SECONDARY_UNLOAD flags must have been set.
+  DBUG_ASSERT(
+      ((m_alter_info->flags & Alter_info::ALTER_SECONDARY_LOAD) == 0) !=
+      ((m_alter_info->flags & Alter_info::ALTER_SECONDARY_UNLOAD) == 0));
+
+  // No other flags should've been set.
+  DBUG_ASSERT(!(m_alter_info->flags & ~(Alter_info::ALTER_SECONDARY_LOAD |
+                                        Alter_info::ALTER_SECONDARY_UNLOAD)));
+
+  TABLE_LIST *table_list = thd->lex->select_lex->get_table_list();
+
+  if (check_access(thd, ALTER_ACL, table_list->db, &table_list->grant.privilege,
+                   &table_list->grant.m_internal, false, false))
+    return true;
+
+  if (check_grant(thd, ALTER_ACL, table_list, false, UINT_MAX, false))
+    return true;
+
+  return mysql_secondary_load_or_unload(thd, table_list);
 }

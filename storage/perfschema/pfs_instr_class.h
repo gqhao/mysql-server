@@ -1,4 +1,4 @@
-/* Copyright (c) 2008, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2008, 2020, Oracle and/or its affiliates. All rights reserved.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -72,6 +72,10 @@ class PFS_opaque_container_page;
 */
 
 extern bool pfs_enabled;
+extern bool pfs_processlist_enabled;
+
+/** Global ref count for plugin and component events. */
+extern std::atomic<uint32> pfs_unload_plugin_ref_count;
 
 /** Key, naming a synch instrument (mutex, rwlock, cond). */
 typedef unsigned int PFS_sync_key;
@@ -172,9 +176,13 @@ struct PFS_instr_class {
 
   bool is_shared_exclusive() const { return m_flags & PSI_FLAG_RWLOCK_SX; }
 
+  bool is_priority() const { return m_flags & PSI_FLAG_RWLOCK_PR; }
+
   bool is_transferable() const { return m_flags & PSI_FLAG_TRANSFER; }
 
   bool is_user() const { return m_flags & PSI_FLAG_USER; }
+
+  bool is_system_thread() const { return m_flags & PSI_FLAG_THREAD_SYSTEM; }
 
   bool is_global() const { return m_flags & PSI_FLAG_ONLY_GLOBAL_STAT; }
 

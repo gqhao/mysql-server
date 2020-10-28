@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -81,8 +81,8 @@ struct My_free_functor {
   assumes that allocators are default-constructible".
 
   @note allocate() throws std::bad_alloc() similarly to the default
-  STL memory allocator. This is necessary - STL functions which allocates
-  memory expects it. Otherwise these functions will try to use the memory,
+  STL memory allocator. This is necessary - STL functions which allocate
+  memory expect it. Otherwise these functions will try to use the memory,
   leading to seg faults if memory allocation was not successful.
 
 */
@@ -115,14 +115,13 @@ class Stateless_allocator {
   template <class U>
   Stateless_allocator &operator=(const Stateless_allocator_type<U> &) {}
 
-  ~Stateless_allocator() = default;
-
-  pointer allocate(size_type n, const_pointer hint MY_ATTRIBUTE((unused)) = 0) {
-    if (n == 0) return NULL;
+  pointer allocate(size_type n,
+                   const_pointer hint MY_ATTRIBUTE((unused)) = nullptr) {
+    if (n == 0) return nullptr;
     if (n > max_size()) throw std::bad_alloc();
 
     pointer p = static_cast<pointer>(ALLOC_FUN()(n * sizeof(T)));
-    if (p == NULL) throw std::bad_alloc();
+    if (p == nullptr) throw std::bad_alloc();
     return p;
   }
 
@@ -130,7 +129,7 @@ class Stateless_allocator {
 
   template <class U, class... Args>
   void construct(U *p, Args &&... args) {
-    DBUG_ASSERT(p != NULL);
+    DBUG_ASSERT(p != nullptr);
     try {
       ::new ((void *)p) U(std::forward<Args>(args)...);
     } catch (...) {
@@ -139,7 +138,7 @@ class Stateless_allocator {
   }
 
   void destroy(pointer p) {
-    DBUG_ASSERT(p != NULL);
+    DBUG_ASSERT(p != nullptr);
     try {
       p->~T();
     } catch (...) {

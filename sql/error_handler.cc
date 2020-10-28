@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2015, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -21,6 +21,7 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
 #include "sql/error_handler.h"
+#include "sql/auth/auth_acls.h"
 
 #include <errno.h>
 
@@ -30,6 +31,9 @@
 #include "my_sys.h"
 #include "my_thread_local.h"
 #include "mysys_err.h"  // EE_*
+#include "sql/create_field.h"
+#include "sql/derror.h"
+#include "sql/field.h"
 #include "sql/mdl.h"
 #include "sql/sql_class.h"  // THD
 #include "sql/sql_lex.h"
@@ -90,6 +94,8 @@ bool Ignore_error_handler::handle_condition(
     case ER_SUBQUERY_NO_1_ROW:
     case ER_ROW_IS_REFERENCED_2:
     case ER_NO_REFERENCED_ROW_2:
+    case ER_NO_REFERENCED_ROW:
+    case ER_ROW_IS_REFERENCED:
     case ER_BAD_NULL_ERROR:
     case ER_DUP_ENTRY:
     case ER_DUP_ENTRY_WITH_KEY_NAME:
@@ -98,6 +104,7 @@ bool Ignore_error_handler::handle_condition(
     case ER_NO_PARTITION_FOR_GIVEN_VALUE:
     case ER_NO_PARTITION_FOR_GIVEN_VALUE_SILENT:
     case ER_ROW_DOES_NOT_MATCH_GIVEN_PARTITION_SET:
+    case ER_CHECK_CONSTRAINT_VIOLATED:
       (*level) = Sql_condition::SL_WARNING;
       break;
     default:
@@ -126,15 +133,14 @@ bool View_error_handler::handle_condition(THD *thd, uint sql_errno,
     // ER_TABLE_NOT_LOCKED cannot happen here.
     case ER_NO_SUCH_TABLE: {
       TABLE_LIST *top = m_top_view->top_table();
-      my_error(ER_VIEW_INVALID, MYF(0), top->view_db.str, top->view_name.str);
+      my_error(ER_VIEW_INVALID, MYF(0), top->db, top->table_name);
       return true;
     }
 
     case ER_NO_DEFAULT_FOR_FIELD: {
       TABLE_LIST *top = m_top_view->top_table();
       // TODO: make correct error message
-      my_error(ER_NO_DEFAULT_FOR_VIEW_FIELD, MYF(0), top->view_db.str,
-               top->view_name.str);
+      my_error(ER_NO_DEFAULT_FOR_VIEW_FIELD, MYF(0), top->db, top->table_name);
       return true;
     }
   }
@@ -188,9 +194,11 @@ bool Strict_error_handler::handle_condition(
     case ER_TRUNCATED_WRONG_VALUE:
     case ER_WRONG_VALUE_FOR_TYPE:
     case ER_WARN_DATA_OUT_OF_RANGE:
+    case ER_WARN_DATA_OUT_OF_RANGE_FUNCTIONAL_INDEX:
     case ER_DIVISION_BY_ZERO:
     case ER_TRUNCATED_WRONG_VALUE_FOR_FIELD:
     case WARN_DATA_TRUNCATED:
+    case ER_WARN_DATA_TRUNCATED_FUNCTIONAL_INDEX:
     case ER_DATA_TOO_LONG:
     case ER_BAD_NULL_ERROR:
     case ER_NO_DEFAULT_FOR_FIELD:
@@ -218,6 +226,192 @@ bool Strict_error_handler::handle_condition(
   return false;
 }
 
+Functional_index_error_handler::Functional_index_error_handler(
+    const Field *field, THD *thd)
+    : m_thd(thd), m_pop_error_handler(false), m_force_error_code(-1) {
+  DBUG_ASSERT(field != nullptr);
+
+  if (field->is_field_for_functional_index()) {
+    m_thd->push_internal_handler(this);
+    m_pop_error_handler = true;
+
+    // Get the name of the functional index
+    // This field is only used by one functional index, so it's OK to just fetch
+    // the first key that matches.
+    for (uint i = 0; i < field->table->s->keys; ++i) {
+      const KEY &index = field->table->key_info[i];
+      if (!index.is_functional_index()) {
+        continue;
+      }
+
+      for (uint j = 0; j < index.actual_key_parts; ++j) {
+        const KEY_PART_INFO &key_part = index.key_part[j];
+        if (key_part.field->field_index() == field->field_index()) {
+          m_functional_index_name.assign(index.name);
+          return;
+        }
+      }
+    }
+
+    assert(false);
+  }
+}
+
+Functional_index_error_handler::Functional_index_error_handler(
+    Create_field *field, const std::string &key_name, THD *thd)
+    : m_functional_index_name(key_name),
+      m_thd(thd),
+      m_pop_error_handler(false),
+      m_force_error_code(-1) {
+  DBUG_ASSERT(field != nullptr);
+
+  if (is_field_for_functional_index(field)) {
+    m_thd->push_internal_handler(this);
+    m_pop_error_handler = true;
+  }
+}
+
+Functional_index_error_handler::Functional_index_error_handler(
+    const std::string &functional_index_name, THD *thd)
+    : m_functional_index_name(functional_index_name),
+      m_thd(thd),
+      m_pop_error_handler(true),
+      m_force_error_code(-1) {
+  m_thd->push_internal_handler(this);
+}
+
+Functional_index_error_handler::~Functional_index_error_handler() {
+  if (m_pop_error_handler) {
+    m_thd->pop_internal_handler();
+  }
+}
+
+template <typename... Args>
+static bool report_error(THD *thd, int error_code,
+                         Sql_condition::enum_severity_level level,
+                         Args... args) {
+  switch (level) {
+    case Sql_condition::SL_ERROR: {
+      my_error(error_code, MYF(0), args...);
+      return true;
+    }
+    case Sql_condition::SL_WARNING: {
+      push_warning_printf(thd, level, error_code,
+                          ER_THD_NONCONST(thd, error_code), args...);
+      return true;
+    }
+    default: {
+      // Do nothing
+      return false; /* purecov: deadcode */
+    }
+  }
+  return false;
+}
+
+static bool report_error(THD *thd, int error_code,
+                         Sql_condition::enum_severity_level level) {
+  switch (level) {
+    case Sql_condition::SL_ERROR: {
+      my_error(error_code, MYF(0));
+      return true;
+    }
+    case Sql_condition::SL_WARNING: {
+      push_warning(thd, level, error_code, ER_THD_NONCONST(thd, error_code));
+      return true;
+    }
+    default: {
+      // Do nothing
+      return false; /* purecov: deadcode */
+    }
+  }
+}
+
+bool Functional_index_error_handler::handle_condition(
+    THD *, uint sql_errno, const char *,
+    Sql_condition::enum_severity_level *level, const char *) {
+  DBUG_ASSERT(!m_functional_index_name.empty());
+  uint res_errno = 0;
+  bool print_row = false;
+
+  switch (sql_errno) {
+    case ER_JSON_USED_AS_KEY: {
+      res_errno = ER_FUNCTIONAL_INDEX_ON_JSON_OR_GEOMETRY_FUNCTION;
+      break;
+    }
+    case ER_TRUNCATED_WRONG_VALUE: {
+      res_errno = ER_WARN_DATA_TRUNCATED_FUNCTIONAL_INDEX;
+      print_row = true;
+      break;
+    }
+    case WARN_DATA_TRUNCATED: {
+      push_warning_printf(
+          m_thd, *level, ER_WARN_DATA_TRUNCATED_FUNCTIONAL_INDEX,
+          ER_THD(m_thd, ER_WARN_DATA_TRUNCATED_FUNCTIONAL_INDEX),
+          m_functional_index_name.c_str(),
+          m_thd->get_stmt_da()->current_row_for_condition());
+      return true;
+    }
+    case ER_JT_VALUE_OUT_OF_RANGE:
+    case ER_WARN_DATA_OUT_OF_RANGE: {
+      res_errno = ER_WARN_DATA_OUT_OF_RANGE_FUNCTIONAL_INDEX;
+      print_row = true;
+      break;
+    }
+    // Difference with above is that this one doesn't print row number
+    case ER_NUMERIC_JSON_VALUE_OUT_OF_RANGE: {
+      res_errno = ER_JSON_VALUE_OUT_OF_RANGE_FOR_FUNC_INDEX;
+      break;
+    }
+    case ER_GENERATED_COLUMN_REF_AUTO_INC: {
+      res_errno = ER_FUNCTIONAL_INDEX_REF_AUTO_INCREMENT;
+      break;
+    }
+    case ER_GENERATED_COLUMN_NAMED_FUNCTION_IS_NOT_ALLOWED:
+    case ER_GENERATED_COLUMN_FUNCTION_IS_NOT_ALLOWED: {
+      res_errno = ER_FUNCTIONAL_INDEX_FUNCTION_IS_NOT_ALLOWED;
+      break;
+    }
+    case ER_UNSUPPORTED_ACTION_ON_GENERATED_COLUMN: {
+      if (m_force_error_code != -1) {
+        return report_error(m_thd, m_force_error_code, *level);
+      }
+      return false;
+    }
+    case ER_WRONG_JSON_TABLE_VALUE: {
+      res_errno = ER_WRONG_MVI_VALUE;
+      break;
+    }
+    case ER_WARN_INDEX_NOT_APPLICABLE: {
+      res_errno = ER_WARN_FUNC_INDEX_NOT_APPLICABLE;
+      break;
+    }
+    case ER_DATA_TOO_LONG: {
+      my_error(ER_FUNCTIONAL_INDEX_DATA_IS_TOO_LONG, MYF(0),
+               m_functional_index_name.c_str());
+      return true;
+    }
+    case ER_INVALID_JSON_VALUE_FOR_CAST: {
+      res_errno = ER_INVALID_JSON_VALUE_FOR_FUNC_INDEX;
+      break;
+    }
+    case ER_GENERATED_COLUMN_ROW_VALUE: {
+      my_error(ER_FUNCTIONAL_INDEX_ROW_VALUE_IS_NOT_ALLOWED, MYF(0),
+               m_functional_index_name.c_str());
+      return true;
+    }
+    default: {
+      // Do nothing
+      return false;
+    }
+  }
+  if (!print_row)
+    report_error(m_thd, res_errno, *level, m_functional_index_name.c_str());
+  else
+    report_error(m_thd, res_errno, *level, m_functional_index_name.c_str(),
+                 m_thd->get_stmt_da()->current_row_for_condition());
+  return true;
+}
+
 /**
   This internal handler is used to trap ER_NO_SUCH_TABLE and
   ER_WRONG_MRG_TABLE errors during CHECK/REPAIR TABLE for MERGE
@@ -229,9 +423,9 @@ class Repair_mrg_table_error_handler : public Internal_error_handler {
   Repair_mrg_table_error_handler()
       : m_handled_errors(false), m_unhandled_errors(false) {}
 
-  virtual bool handle_condition(THD *, uint sql_errno, const char *,
-                                Sql_condition::enum_severity_level *,
-                                const char *) {
+  bool handle_condition(THD *, uint sql_errno, const char *,
+                        Sql_condition::enum_severity_level *,
+                        const char *) override {
     if (sql_errno == ER_NO_SUCH_TABLE || sql_errno == ER_WRONG_MRG_TABLE) {
       m_handled_errors = true;
       return true;
@@ -262,8 +456,9 @@ class Repair_mrg_table_error_handler : public Internal_error_handler {
 };
 
 /**
-  Following are implementation of error handler to convert ER_LOCK_DEADLOCK
-  error when executing I_S.TABLES and I_S.FILES system view.
+  Following are implementation of error handler to convert
+  ER_LOCK_DEADLOCK error when executing I_S.TABLES and I_S.FILES system
+  view.
 */
 
 Info_schema_error_handler::Info_schema_error_handler(THD *thd,
@@ -296,5 +491,59 @@ bool Info_schema_error_handler::handle_condition(
     m_error_handled = true;
   }
 
+  return false;
+}
+
+bool Foreign_key_error_handler::handle_condition(
+    THD *, uint sql_errno, const char *, Sql_condition::enum_severity_level *,
+    const char *) {
+  const TABLE_SHARE *share = m_table_handler->get_table_share();
+
+  if (sql_errno == ER_NO_REFERENCED_ROW_2) {
+    for (TABLE_SHARE_FOREIGN_KEY_INFO *fk = share->foreign_key;
+         fk < share->foreign_key + share->foreign_keys; ++fk) {
+      TABLE_LIST table(fk->referenced_table_db.str,
+                       fk->referenced_table_db.length,
+                       fk->referenced_table_name.str,
+                       fk->referenced_table_name.length, TL_READ);
+      if (check_table_access(m_thd, TABLE_OP_ACLS, &table, true, 1, true)) {
+        my_error(ER_NO_REFERENCED_ROW, MYF(0));
+        return true;
+      }
+    }
+  } else if (sql_errno == ER_ROW_IS_REFERENCED_2) {
+    for (TABLE_SHARE_FOREIGN_KEY_PARENT_INFO *fk_p = share->foreign_key_parent;
+         fk_p < share->foreign_key_parent + share->foreign_key_parents;
+         ++fk_p) {
+      TABLE_LIST table(fk_p->referencing_table_db.str,
+                       fk_p->referencing_table_db.length,
+                       fk_p->referencing_table_name.str,
+                       fk_p->referencing_table_name.length, TL_READ);
+      if (check_table_access(m_thd, TABLE_OP_ACLS, &table, true, 1, true)) {
+        my_error(ER_ROW_IS_REFERENCED, MYF(0));
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+Ignore_json_syntax_handler::Ignore_json_syntax_handler(THD *thd, bool enabled)
+    : m_thd(thd), m_enabled(enabled) {
+  if (enabled) thd->push_internal_handler(this);
+}
+
+Ignore_json_syntax_handler::~Ignore_json_syntax_handler() {
+  if (m_enabled) m_thd->pop_internal_handler();
+}
+
+bool Ignore_json_syntax_handler::handle_condition(
+    THD *, uint sql_errno, const char *,
+    Sql_condition::enum_severity_level *level, const char *) {
+  switch (sql_errno) {
+    case ER_INVALID_JSON_TEXT_IN_PARAM:
+      (*level) = Sql_condition::SL_WARNING;
+      break;
+  }
   return false;
 }

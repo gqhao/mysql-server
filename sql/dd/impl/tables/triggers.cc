@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -41,6 +41,12 @@ namespace tables {
 
 ///////////////////////////////////////////////////////////////////////////
 
+const CHARSET_INFO *Triggers::name_collation() {
+  return &my_charset_utf8_general_ci;
+}
+
+///////////////////////////////////////////////////////////////////////////
+
 Triggers::Triggers() {
   m_target_def.set_table_name("triggers");
 
@@ -49,8 +55,8 @@ Triggers::Triggers() {
   m_target_def.add_field(FIELD_SCHEMA_ID, "FIELD_SCHEMA_ID",
                          "schema_id BIGINT UNSIGNED NOT NULL");
   m_target_def.add_field(FIELD_NAME, "FIELD_NAME",
-                         "name VARCHAR(64) NOT NULL "
-                         "COLLATE utf8_general_ci");
+                         "name VARCHAR(64) NOT NULL COLLATE " +
+                             String_type(name_collation()->name));
   m_target_def.add_field(FIELD_EVENT_TYPE, "FIELD_EVENT_TYPE",
                          "event_type ENUM('INSERT', 'UPDATE', 'DELETE') "
                          "NOT NULL");
@@ -66,48 +72,12 @@ Triggers::Triggers() {
                          "FIELD_ACTION_STATEMENT_UTF8",
                          "action_statement_utf8 LONGTEXT NOT NULL");
   m_target_def.add_field(FIELD_CREATED, "FIELD_CREATED",
-                         "created TIMESTAMP(2) NOT NULL DEFAULT "
-                         "CURRENT_TIMESTAMP(2) ON UPDATE "
-                         "CURRENT_TIMESTAMP(2)");
+                         "created TIMESTAMP(2) NOT NULL");
   m_target_def.add_field(FIELD_LAST_ALTERED, "FIELD_LAST_ALTERED",
-                         "last_altered TIMESTAMP(2) NOT NULL "
-                         "DEFAULT CURRENT_TIMESTAMP(2)");
-  m_target_def.add_field(FIELD_SQL_MODE, "FIELD_SQL_MODE",
-                         "sql_mode SET( \n"
-                         "'REAL_AS_FLOAT',\n"
-                         "'PIPES_AS_CONCAT',\n"
-                         "'ANSI_QUOTES',\n"
-                         "'IGNORE_SPACE',\n"
-                         "'NOT_USED',\n"
-                         "'ONLY_FULL_GROUP_BY',\n"
-                         "'NO_UNSIGNED_SUBTRACTION',\n"
-                         "'NO_DIR_IN_CREATE',\n"
-                         "'NOT_USED_9',\n"
-                         "'NOT_USED_10',\n"
-                         "'NOT_USED_11',\n"
-                         "'NOT_USED_12',\n"
-                         "'NOT_USED_13',\n"
-                         "'NOT_USED_14',\n"
-                         "'NOT_USED_15',\n"
-                         "'NOT_USED_16',\n"
-                         "'NOT_USED_17',\n"
-                         "'NOT_USED_18',\n"
-                         "'ANSI',\n"
-                         "'NO_AUTO_VALUE_ON_ZERO',\n"
-                         "'NO_BACKSLASH_ESCAPES',\n"
-                         "'STRICT_TRANS_TABLES',\n"
-                         "'STRICT_ALL_TABLES',\n"
-                         "'NO_ZERO_IN_DATE',\n"
-                         "'NO_ZERO_DATE',\n"
-                         "'INVALID_DATES',\n"
-                         "'ERROR_FOR_DIVISION_BY_ZERO',\n"
-                         "'TRADITIONAL',\n"
-                         "'NOT_USED_29',\n"
-                         "'HIGH_NOT_PRECEDENCE',\n"
-                         "'NO_ENGINE_SUBSTITUTION',\n"
-                         "'PAD_CHAR_TO_FULL_LENGTH') NOT NULL");
+                         "last_altered TIMESTAMP(2) NOT NULL");
+  m_target_def.add_sql_mode_field(FIELD_SQL_MODE, "FIELD_SQL_MODE");
   m_target_def.add_field(FIELD_DEFINER, "FIELD_DEFINER",
-                         "definer VARCHAR(93) NOT NULL");
+                         "definer VARCHAR(288) NOT NULL");
   m_target_def.add_field(FIELD_CLIENT_COLLATION_ID, "FIELD_CLIENT_COLLATION_ID",
                          "client_collation_id BIGINT UNSIGNED NOT NULL");
   m_target_def.add_field(FIELD_CONNECTION_COLLATION_ID,
@@ -134,6 +104,7 @@ Triggers::Triggers() {
   m_target_def.add_index(INDEX_K_SCHEMA_COLLATION_ID,
                          "INDEX_K_SCHEMA_COLLATION_ID",
                          "KEY(schema_collation_id)");
+  m_target_def.add_index(INDEX_K_DEFINER, "INDEX_K_DEFINER", "KEY(definer)");
 
   m_target_def.add_foreign_key(FK_SCHEMA_ID, "FK_SCHEMA_ID",
                                "FOREIGN KEY (schema_id) "
@@ -174,8 +145,8 @@ Object_key *Triggers::create_key_by_table_id(Object_id table_id) {
 
 Object_key *Triggers::create_key_by_trigger_name(Object_id schema_id,
                                                  const char *trigger_name) {
-  return new (std::nothrow)
-      Item_name_key(FIELD_SCHEMA_ID, schema_id, FIELD_NAME, trigger_name);
+  return new (std::nothrow) Item_name_key(
+      FIELD_SCHEMA_ID, schema_id, FIELD_NAME, trigger_name, name_collation());
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -189,11 +160,11 @@ Object_id Triggers::read_table_id(const Raw_record &r) {
 bool Triggers::get_trigger_table_id(THD *thd, Object_id schema_id,
                                     const String_type &trigger_name,
                                     Object_id *oid) {
-  DBUG_ENTER("Triggers::get_trigger_table_id");
+  DBUG_TRACE;
 
   Transaction_ro trx(thd, ISO_READ_COMMITTED);
   trx.otx.register_tables<dd::Table>();
-  if (trx.otx.open_tables()) DBUG_RETURN(true);
+  if (trx.otx.open_tables()) return true;
 
   DBUG_ASSERT(oid != nullptr);
   *oid = INVALID_OBJECT_ID;
@@ -206,11 +177,18 @@ bool Triggers::get_trigger_table_id(THD *thd, Object_id schema_id,
 
   // Find record by the object-key.
   std::unique_ptr<Raw_record> record;
-  if (table->find_record(*key, record)) DBUG_RETURN(true);
+  if (table->find_record(*key, record)) return true;
 
   if (record.get()) *oid = read_table_id(*record.get());
 
-  DBUG_RETURN(false);
+  return false;
+}
+
+///////////////////////////////////////////////////////////////////////////
+
+Object_key *Triggers::create_key_by_definer(const String_type &definer) {
+  return new (std::nothrow)
+      Definer_reference_range_key(INDEX_K_DEFINER, FIELD_DEFINER, definer);
 }
 
 ///////////////////////////////////////////////////////////////////////////

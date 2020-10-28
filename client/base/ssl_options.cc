@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -38,7 +38,6 @@ void Mysql_connection_options::Ssl_options::create_options() {
   std::function<void(char *)> callback(std::bind(
       &Mysql_connection_options::Ssl_options::mode_option_callback, this, _1));
 
-#if defined(HAVE_OPENSSL)
   this->create_new_option(&this->m_ssl_mode_string, "ssl-mode",
                           "SSL connection mode.")
       ->add_callback(new std::function<void(char *)>(std::bind(
@@ -56,6 +55,8 @@ void Mysql_connection_options::Ssl_options::create_options() {
                           "X509 cert in PEM format.");
   this->create_new_option(&::opt_ssl_cipher, "ssl-cipher",
                           "SSL cipher to use.");
+  this->create_new_option(&::opt_tls_ciphersuites, "tls-ciphersuites",
+                          "TLS v1.3 cipher to use.");
   this->create_new_option(&::opt_ssl_key, "ssl-key", "X509 key in PEM format.");
   this->create_new_option(&::opt_ssl_crl, "ssl-crl",
                           "Certificate revocation list.");
@@ -68,7 +69,6 @@ void Mysql_connection_options::Ssl_options::create_options() {
       ->add_callback(new std::function<void(char *)>(std::bind(
           &Mysql_connection_options::Ssl_options::fips_mode_option_callback,
           this, _1)));
-#endif /* HAVE_OPENSSL */
 }
 
 void Mysql_connection_options::Ssl_options::ca_option_callback(
@@ -88,7 +88,11 @@ void Mysql_connection_options::Ssl_options::fips_mode_option_callback(
       find_type_or_exit(argument, &ssl_fips_mode_typelib, "ssl-fips-mode") - 1;
 }
 
-void Mysql_connection_options::Ssl_options::apply_for_connection(
+bool Mysql_connection_options::Ssl_options::apply_for_connection(
     MYSQL *connection) {
-  SSL_SET_OPTIONS(connection);
+  if (SSL_SET_OPTIONS(connection)) {
+    std::cerr << SSL_SET_OPTIONS_ERROR;
+    return true;
+  }
+  return false;
 }

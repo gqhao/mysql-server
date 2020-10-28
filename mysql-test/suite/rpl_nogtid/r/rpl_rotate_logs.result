@@ -12,12 +12,16 @@ ERROR HY000: Could not initialize master info structure; more error messages can
 change master to master_host='127.0.0.1',master_port=MASTER_PORT, master_user='root';
 ERROR HY000: Could not initialize master info structure; more error messages can be found in the MySQL error log
 reset slave;
+Warnings:
+Warning	1287	'RESET SLAVE' is deprecated and will be removed in a future release. Please use RESET REPLICA instead
 change master to master_host='127.0.0.1',master_port=MASTER_PORT, master_user='root';
 Warnings:
 Note	####	Sending passwords in plain text without SSL/TLS is extremely insecure.
 Note	####	Storing MySQL user name or password information in the master info repository is not secure and is therefore not recommended. Please consider using the USER and PASSWORD connection options for START SLAVE; see the 'START SLAVE Syntax' in the MySQL Manual for more information.
 reset master;
 start slave;
+Warnings:
+Warning	1287	'START SLAVE' is deprecated and will be removed in a future release. Please use START REPLICA instead
 include/wait_for_slave_to_start.inc
 create temporary table temp_table (a char(80) not null);
 insert into temp_table values ("testing temporary tables");
@@ -34,10 +38,10 @@ create table t2(m int not null auto_increment primary key);
 insert into t2 values (34),(67),(123);
 flush logs;
 show binary logs;
-Log_name	File_size
-master-bin.000001	#
-master-bin.000002	#
-master-bin.000003	#
+Log_name	File_size	Encrypted
+master-bin.000001	#	#
+master-bin.000002	#	#
+master-bin.000003	#	#
 create table t3 select * from temp_table;
 include/sync_slave_sql_with_master.inc
 include/assert.inc [Data in t3 should be equal to temp_table]
@@ -46,27 +50,29 @@ include/sync_slave_sql_with_master.inc
 insert into t2 values(1234);
 set insert_id=1234;
 insert into t2 values(NULL);
-call mtr.add_suppression("Slave SQL.*Error .Duplicate entry .1234. for key .PRIMARY.. on query.* Error_code: MY-001062");
+call mtr.add_suppression("Slave SQL.*Error .Duplicate entry .1234. for key .t2.PRIMARY.. on query.* Error_code: MY-001062");
 include/wait_for_slave_sql_error_and_skip.inc [errno=1062]
 include/sync_slave_sql_with_master.inc
 purge master logs to 'master-bin.000002';
 show master logs;
 Log_name	master-bin.000002
 File_size	#
+Encrypted	#
 Log_name	master-bin.000003
 File_size	#
+Encrypted	#
 purge binary logs to 'master-bin.000002';
 show binary logs;
-Log_name	File_size
-master-bin.000002	#
-master-bin.000003	#
+Log_name	File_size	Encrypted
+master-bin.000002	#	#
+master-bin.000003	#	#
 SELECT @time_for_purge:=DATE_ADD('tmpval', INTERVAL 1 SECOND);
 purge master logs before (@time_for_purge);
 Warnings:
 Warning	1868	file master-bin.000003 was not purged because it is the active log file.
 show binary logs;
-Log_name	File_size
-master-bin.000003	#
+Log_name	File_size	Encrypted
+master-bin.000003	#	#
 insert into t2 values (65);
 include/sync_slave_sql_with_master.inc
 Master_Log_File = 'master-bin.000003'

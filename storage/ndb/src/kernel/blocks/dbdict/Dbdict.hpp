@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -716,7 +716,7 @@ public:
     DictObject() {
       m_trans_key = 0;
       m_op_ref_count = 0;
-    };
+    }
     Uint32 m_id;
     Uint32 m_type;
     Uint32 m_object_ptr_i;
@@ -870,7 +870,7 @@ public:
 
 public:
   Dbdict(Block_context& ctx);
-  virtual ~Dbdict();
+  ~Dbdict() override;
 
 private:
   BLOCK_DEFINES(Dbdict);
@@ -1339,7 +1339,7 @@ private:
       m_externalQueue(m_externalQueueHead,
                       m_externalSegmentPool),
       m_jamBuffer(0)
-      {};
+      {}
 
     bool init(EmulatedJamBuffer* jamBuff)
     {
@@ -1357,7 +1357,7 @@ private:
     {
       return (m_internalQueue.isEmpty() &&
               m_externalQueue.isEmpty());
-    };
+    }
 
     /**
      * tryEnqReq
@@ -1518,7 +1518,7 @@ private:
       Uint32 qWordLen = queue.getLen();
       assert((qWordLen % ElementLen) == 0);
       return qWordLen / ElementLen;
-    };
+    }
 
     /* Length of GetTabInfoReq queue elements */
     static const Uint32 ElementLen = GetTabInfoReq::SignalLength + 1 + 3 + 2;
@@ -1764,8 +1764,9 @@ private:
       errorObjectName[0] = 0;
     }
     void print(NdbOut&) const;
+    ErrorInfo(const ErrorInfo&) = default;
   private:
-    ErrorInfo& operator=(const ErrorInfo&);
+    ErrorInfo& operator=(const ErrorInfo&) = default;
   };
 
   void setError(ErrorInfo&,
@@ -4662,7 +4663,6 @@ private:
 			  LinearSectionPtr dataPtr);
 
   void parseReadEventSys(Signal *signal, sysTab_NDBEVENTS_0& m_eventRec);
-  bool upgrade_suma_NotStarted(Uint32 err, Uint32 ref) const;
 
   // support
   void getTableKeyList(TableRecordPtr,
@@ -4794,7 +4794,6 @@ public:
                            Uint32& parentObjectType,
                            Uint32& parentObjectId);
 
-  void sendOLD_LIST_TABLES_CONF(Signal *signal, ListTablesReq*);
   void sendLIST_TABLES_CONF(Signal *signal, ListTablesReq*);
 
   Uint32 c_outstanding_sub_startstop;
@@ -4822,11 +4821,21 @@ public:
   void startNextGetTabInfoReq(Signal*);
 
 protected:
-  virtual bool getParam(const char * param, Uint32 * retVal);
+  bool getParam(const char * param, Uint32 * retVal) override;
 private:
   ArenaAllocator c_arenaAllocator;
   Uint32 c_noOfMetaTables;
   Uint32 c_default_hashmap_size;
+  Uint32 m_use_checksum;
+  
+  /**
+   * Pool of SafeCounters reserved for use with schema
+   * transactions which currently must not fail to seize
+   * a safecounter.
+   * Other usage should use the generic c_counterMgr pool
+   * and handle failure-to-seize
+   */
+  SafeCounterManager c_reservedCounterMgr;
 };
 
 inline bool

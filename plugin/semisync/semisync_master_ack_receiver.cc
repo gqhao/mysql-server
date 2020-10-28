@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -34,6 +34,8 @@
 #include "plugin/semisync/semisync.h"
 #include "plugin/semisync/semisync_master.h"
 #include "plugin/semisync/semisync_master_socket_listener.h"
+#include "sql/protocol_classic.h"
+#include "sql/sql_class.h"
 
 extern ReplSemiSyncMaster *repl_semisync;
 
@@ -52,8 +54,8 @@ static void *ack_receive_handler(void *arg) {
   my_thread_init();
   reinterpret_cast<Ack_receiver *>(arg)->run();
   my_thread_end();
-  my_thread_exit(0);
-  return NULL;
+  my_thread_exit(nullptr);
+  return nullptr;
 }
 }  // extern "C"
 
@@ -124,7 +126,7 @@ void Ack_receiver::stop() {
       When arriving here, the ack thread already exists. Join failure has no
       side effect aganst semisync. So we don't return an error.
     */
-    ret = my_thread_join(&m_pid, NULL);
+    ret = my_thread_join(&m_pid, nullptr);
     if (DBUG_EVALUATE_IF("rpl_semisync_simulate_thread_join_failure", -1, ret))
       LogErr(ERROR_LEVEL, ER_SEMISYNC_FAILED_TO_STOP_ACK_RECEIVER_THD, errno);
   }
@@ -136,9 +138,22 @@ bool Ack_receiver::add_slave(THD *thd) {
   const char *kWho = "Ack_receiver::add_slave";
   function_enter(kWho);
 
-  slave.thd = thd;
+  slave.thread_id = thd->thread_id();
+  slave.server_id = thd->server_id;
+  slave.compress_ctx.algorithm = enum_compression_algorithm::MYSQL_UNCOMPRESSED;
+  char *cmp_algorithm_name = thd->get_protocol()->get_compression_algorithm();
+  if (cmp_algorithm_name != nullptr) {
+    enum enum_compression_algorithm algorithm =
+        get_compression_algorithm(cmp_algorithm_name);
+    if (algorithm != enum_compression_algorithm::MYSQL_UNCOMPRESSED &&
+        algorithm != enum_compression_algorithm::MYSQL_INVALID)
+      mysql_compress_context_init(
+          &slave.compress_ctx, algorithm,
+          thd->get_protocol_classic()->get_compression_level());
+  }
+  slave.is_leaving = false;
   slave.vio = thd->get_protocol_classic()->get_vio();
-  slave.vio->mysql_socket.m_psi = NULL;
+  slave.vio->mysql_socket.m_psi = nullptr;
   slave.vio->read_timeout = 1;
 
   /* push_back() may throw an exception */
@@ -165,13 +180,41 @@ void Ack_receiver::remove_slave(THD *thd) {
   mysql_mutex_lock(&m_mutex);
   Slave_vector_it it;
 
-  for (it = m_slaves.begin(); it != m_slaves.end(); it++) {
-    if (it->thd == thd) {
-      m_slaves.erase(it);
+  /*
+    Mark in the slave object that remove slave request
+    is received. And also inform to Ack_receiver::run()
+    that slaves vector is changed.
+  */
+  for (it = m_slaves.begin(); it != m_slaves.end(); ++it) {
+    if (it->thread_id == thd->thread_id()) {
+      it->is_leaving = true;
       m_slaves_changed = true;
       break;
     }
   }
+  DBUG_ASSERT(it != m_slaves.end());
+  /*
+    Wait till Ack_receiver::run() is done reading from the
+    slave's socket.
+  */
+  while ((it != m_slaves.end()) && (it->is_leaving) && (m_status == ST_UP)) {
+    mysql_cond_wait(&m_cond, &m_mutex);
+    /*
+      In above cond_wait, we release and reacquire m_mutex.
+      So it can happen that slave vector is changed.
+      So rescan the vector to get the correct slave
+      object.
+    */
+    for (it = m_slaves.begin(); it != m_slaves.end(); ++it) {
+      if (it->thread_id == thd->thread_id()) break;
+    }
+  }
+  if (it != m_slaves.end()) {
+    mysql_compress_context_deinit(&it->compress_ctx);
+    m_slaves.erase(it);
+  }
+
+  m_slaves_changed = true;
   mysql_mutex_unlock(&m_mutex);
   function_exit(kWho);
 }
@@ -201,22 +244,23 @@ void Ack_receiver::run() {
   NET net;
   unsigned char net_buff[REPLY_MESSAGE_MAX_LENGTH];
   uint i;
-#ifdef HAVE_POLL
-  Poll_socket_listener listener(m_slaves);
-#else
-  Select_socket_listener listener(m_slaves);
-#endif  // HAVE_POLL
+  Socket_listener listener;
 
   LogErr(INFORMATION_LEVEL, ER_SEMISYNC_STARTING_ACK_RECEIVER_THD);
 
   init_net(&net, net_buff, REPLY_MESSAGE_MAX_LENGTH);
+  NET_SERVER server_extn;
+  server_extn.m_user_data = nullptr;
+  server_extn.m_before_header = nullptr;
+  server_extn.m_after_header = nullptr;
+  server_extn.compress_ctx.algorithm = MYSQL_UNCOMPRESSED;
+  net.extension = &server_extn;
 
   mysql_mutex_lock(&m_mutex);
   m_slaves_changed = true;
   mysql_mutex_unlock(&m_mutex);
 
-  while (1) {
-    Slave_vector_it it;
+  while (true) {
     int ret;
 
     mysql_mutex_lock(&m_mutex);
@@ -229,13 +273,13 @@ void Ack_receiver::run() {
         mysql_mutex_unlock(&m_mutex);
         continue;
       }
-      if (!listener.init_slave_sockets()) goto end;
+      if (!listener.init_slave_sockets(m_slaves)) goto end;
       m_slaves_changed = false;
+      mysql_cond_broadcast(&m_cond);
     }
+    mysql_mutex_unlock(&m_mutex);
     ret = listener.listen_on_sockets();
     if (ret <= 0) {
-      mysql_mutex_unlock(&m_mutex);
-
       ret = DBUG_EVALUATE_IF("rpl_semisync_simulate_select_error", -1, ret);
 
       if (ret == -1 && errno != EINTR)
@@ -248,31 +292,35 @@ void Ack_receiver::run() {
 
     set_stage_info(stage_reading_semi_sync_ack);
     i = 0;
-    while (i < m_slaves.size()) {
+    while (i < listener.number_of_slave_sockets() && m_status == ST_UP) {
       if (listener.is_socket_active(i)) {
+        Slave slave_obj = listener.get_slave_obj(i);
         ulong len;
-        net.vio = m_slaves[i].vio;
+        net.vio = slave_obj.vio;
         /*
           Set compress flag. This is needed to support
           Slave_compress_protocol flag enabled Slaves
         */
+
+        NET_SERVER *server_extension = static_cast<NET_SERVER *>(net.extension);
+        server_extension->compress_ctx = slave_obj.compress_ctx;
         net.compress =
-            m_slaves[i].thd->get_protocol_classic()->get_compression();
+            (server_extension->compress_ctx.algorithm == MYSQL_ZLIB) ||
+            (server_extension->compress_ctx.algorithm == MYSQL_ZSTD);
 
         do {
-          net_clear(&net, 0);
+          net_clear(&net, false);
 
           len = my_net_read(&net);
           if (likely(len != packet_error))
-            repl_semisync->reportReplyPacket(m_slaves[i].server_id(),
-                                             net.read_pos, len);
+            repl_semisync->reportReplyPacket(slave_obj.server_id, net.read_pos,
+                                             len);
           else if (net.last_errno == ER_NET_READ_ERROR)
             listener.clear_socket_info(i);
-        } while (net.vio->has_data(net.vio));
+        } while (net.vio->has_data(net.vio) && m_status == ST_UP);
       }
       i++;
     }
-    mysql_mutex_unlock(&m_mutex);
   }
 end:
   LogErr(INFORMATION_LEVEL, ER_SEMISYNC_STOPPING_ACK_RECEIVER_THREAD);

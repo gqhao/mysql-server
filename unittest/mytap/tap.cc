@@ -1,4 +1,4 @@
-/* Copyright (c) 2006, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2006, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -19,9 +19,6 @@
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
-
-   Library for providing TAP support for testing C and C++ was written
-   by Mats Kindahl <mats@mysql.com>.
 */
 
 #include "unittest/mytap/tap.h"
@@ -137,7 +134,7 @@ static void handle_core_signal(int signo) {
 /* BAIL_OUT("Signal %d thrown", signo); */
 #ifdef HAVE_STACKTRACE
   fprintf(stderr, "Signal %d thrown, attempting backtrace.\n", signo);
-  my_print_stacktrace(NULL, 0);
+  my_print_stacktrace(nullptr, 0);
 #endif
   signal(signo, SIG_DFL);
   raise(signo);
@@ -494,7 +491,7 @@ int exit_status() {
 
    At the end, a complete test report should be written, with some
    statistics. If the test returns EXIT_SUCCESS, all tests were
-   successfull, otherwise at least one test failed.
+   successful, otherwise at least one test failed.
 
    To get a TAP complient output and exit status, report the exit
    status in the following manner:

@@ -13,8 +13,8 @@ from tmp
 where d<@edge_count
 )
 select s,e from tmp;
-create index on edges (s);
-create index on edges (e);
+create index idx1 on edges (s);
+create index idx2 on edges (e);
 flush status;
 set @start_node=60308;
 select * from edges where s=@start_node order by e;
@@ -45,6 +45,6 @@ count(*)	sum(n)	sum(floor(n/20)*(n%20))
 87889	4389446208	2085971176
 show status like 'Created_tmp_disk_tables';
 Variable_name	Value
-Created_tmp_disk_tables	2
+Created_tmp_disk_tables	1
 set session internal_tmp_mem_storage_engine=default;
 drop table edges;

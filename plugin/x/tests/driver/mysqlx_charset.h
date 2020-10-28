@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,8 +22,8 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-#ifndef X_TESTS_DRIVER_MYSQLX_CHARSET_H_
-#define X_TESTS_DRIVER_MYSQLX_CHARSET_H_
+#ifndef PLUGIN_X_TESTS_DRIVER_MYSQLX_CHARSET_H_
+#define PLUGIN_X_TESTS_DRIVER_MYSQLX_CHARSET_H_
 
 #include <cstdint>
 #include <string>
@@ -37,11 +37,11 @@ class Charset {
   static uint32_t id_from_collation_name(const std::string &collation_name);
 
  private:
-  typedef struct {
+  struct Charset_entry {
     uint32_t id;
     std::string name;
     std::string collation;
-  } Charset_entry;
+  };
 
   static const Charset_entry m_charsets_info[];
 
@@ -51,4 +51,4 @@ class Charset {
 
 }  // namespace xcl
 
-#endif  //  X_TESTS_DRIVER_MYSQLX_CHARSET_H_
+#endif  // PLUGIN_X_TESTS_DRIVER_MYSQLX_CHARSET_H_

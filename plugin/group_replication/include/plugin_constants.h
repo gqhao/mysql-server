@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -41,6 +41,7 @@
 #define GROUP_REPLICATION_APPLIER_STOP_TIMEOUT 6
 #define GROUP_REPLICATION_MAX_GROUP_SIZE 7
 #define GROUP_REPLICATION_COMMAND_FAILURE 8
+#define GROUP_REPLICATION_SERVICE_MESSAGE_INIT_FAILURE 9
 
 /* View timeout (seconds) */
 #define VIEW_MODIFICATION_TIMEOUT 60
@@ -57,4 +58,22 @@
   by GCS.
 */
 #define GCS_DEBUG_TRACE_FILE "GCS_DEBUG_TRACE"
+
+/*
+  Version from which group_replication_consistency system variable
+  is supported.
+*/
+#define TRANSACTION_WITH_GUARANTEES_VERSION 0x080014
+
+/*
+  Version from which patch version number is also considered during member
+  join, view changes or primary member selection.
+*/
+#define PRIMARY_ELECTION_PATCH_CONSIDERATION 0x080017
+
+/*
+  Version from which group replication and the server support cloning
+*/
+#define CLONE_GR_SUPPORT_VERSION 0x080017
+
 #endif /* PLUGIN_CONSTANTS_INCLUDE */

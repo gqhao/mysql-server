@@ -1,4 +1,5 @@
-/* Copyright (c) 2008, 2016, Oracle and/or its affiliates. All rights reserved.
+/*
+   Copyright (c) 2008, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -26,6 +27,7 @@
 #include <kernel_types.h>
 #include "MemoryChannel.hpp"
 #include <signaldata/BuildIndxImpl.hpp>
+#include <NdbTick.h>
 
 // Use this define if you want printouts from AsyncFile class
 //#define DEBUG_ASYNCFILE
@@ -53,21 +55,19 @@ class Request
 public:
   Request() {}
 
-  void atGet() { m_do_bind = false; }
+  void atGet()
+  {
+    m_do_bind = false;
+    NdbTick_Invalidate(&m_startTime);
+  }
 
   enum Action {
     open,
     close,
     closeRemove,
-    read,   // Allways leave readv directly after
-            // read because SimblockAsyncFileSystem depends on it
-    readv,
-    write,// Allways leave writev directly after
-	        // write because SimblockAsyncFileSystem depends on it
-    writev,
-    writeSync,// Allways leave writevSync directly after
-    // writeSync because SimblockAsyncFileSystem depends on it
-    writevSync,
+    read,
+    write,
+    writeSync,
     sync,
     end,
     append,
@@ -79,6 +79,7 @@ public:
     suspend
   };
   Action action;
+  static const char* actionName(Action);
   union {
     struct {
       Uint32 flags;
@@ -130,9 +131,11 @@ public:
   MemoryChannel<Request>::ListMember m_mem_channel;
 
   // file info for debug
-  Uint32 m_fileinfo;
   Uint32 m_file_size_hi;
   Uint32 m_file_size_lo;
+
+  /* More debugging info */
+  NDB_TICKS m_startTime;
 };
 
 NdbOut& operator <<(NdbOut&, const Request&);
@@ -153,7 +156,7 @@ class AsyncIoThread
   friend class AsyncFile;
 public:
   AsyncIoThread(class Ndbfs&, bool bound);
-  virtual ~AsyncIoThread() {};
+  virtual ~AsyncIoThread() {}
 
   struct NdbThread* doStart();
   void set_real_time(bool real_time)

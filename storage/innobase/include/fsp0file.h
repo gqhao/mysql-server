@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2013, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2013, 2020, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -92,11 +92,12 @@ class Datafile {
         m_last_os_error(),
         m_file_info(),
         m_encryption_key(),
-        m_encryption_iv() {
+        m_encryption_iv(),
+        m_encryption_op_in_progress(NONE) {
     m_handle.m_file = OS_FILE_CLOSED;
   }
 
-  Datafile(const char *name, ulint flags, page_no_t size, ulint order)
+  Datafile(const char *name, uint32_t flags, page_no_t size, ulint order)
       : m_name(mem_strdup(name)),
         m_filename(),
         m_open_flags(OS_FILE_OPEN),
@@ -114,7 +115,8 @@ class Datafile {
         m_last_os_error(),
         m_file_info(),
         m_encryption_key(),
-        m_encryption_iv() {
+        m_encryption_iv(),
+        m_encryption_op_in_progress(NONE) {
     ut_ad(m_name != nullptr);
     m_handle.m_file = OS_FILE_CLOSED;
     /* No op */
@@ -136,7 +138,8 @@ class Datafile {
         m_last_os_error(),
         m_file_info(),
         m_encryption_key(),
-        m_encryption_iv() {
+        m_encryption_iv(),
+        m_encryption_op_in_progress(NONE) {
     m_name = mem_strdup(file.m_name);
     ut_ad(m_name != nullptr);
 
@@ -191,6 +194,7 @@ class Datafile {
     m_first_page = nullptr;
     m_encryption_key = nullptr;
     m_encryption_iv = nullptr;
+    m_encryption_op_in_progress = NONE;
 
     m_atomic_write = file.m_atomic_write;
 
@@ -200,7 +204,7 @@ class Datafile {
   /** Initialize the name and flags of this datafile.
   @param[in]	name	tablespace name, will be copied
   @param[in]	flags	tablespace flags */
-  void init(const char *name, ulint flags);
+  void init(const char *name, uint32_t flags);
 
   /** Release the resources. */
   void shutdown();
@@ -226,6 +230,12 @@ class Datafile {
   @return DB_SUCCESS or error code */
   dberr_t close();
 
+  /** Returns if the Datafile is created in raw partition
+  @return true if partition  used is raw , false otherwise */
+  bool is_raw_type() {
+    return (m_type == SRV_NEW_RAW || m_type == SRV_OLD_RAW);
+  }
+
   /** Make a full filepath from a directory path and a filename.
   Prepend the dirpath to filename using the extension given.
   If dirpath is nullptr, prepend the default datadir to filepath.
@@ -247,15 +257,15 @@ class Datafile {
   @param[in]	name	Tablespace Name if known, nullptr if not */
   void set_name(const char *name);
 
-  /** Validates the datafile and checks that it conforms with
-  the expected space ID and flags.  The file should exist and be
-  successfully opened in order for this function to validate it.
+  /** Validates the datafile and checks that it conforms with the expected
+  space ID and flags.  The file should exist and be successfully opened
+  in order for this function to validate it.
   @param[in]	space_id	The expected tablespace ID.
   @param[in]	flags		The expected tablespace flags.
-  @param[in]	for_import	is it for importing
+  @param[in]	for_import	if it is for importing
   @retval DB_SUCCESS if tablespace is valid, DB_ERROR if not.
   m_is_valid is also set true on success, else false. */
-  dberr_t validate_to_dd(space_id_t space_id, ulint flags, bool for_import)
+  dberr_t validate_to_dd(space_id_t space_id, uint32_t flags, bool for_import)
       MY_ATTRIBUTE((warn_unused_result));
 
   /** Validates this datafile for the purpose of recovery.
@@ -319,7 +329,7 @@ class Datafile {
 
   /** Get Datafile::m_flags.
   @return m_flags */
-  ulint flags() const { return (m_flags); }
+  uint32_t flags() const { return (m_flags); }
 
   /**
   @return true if m_handle is open, false if not */
@@ -333,11 +343,11 @@ class Datafile {
   @return m_last_os_error */
   ulint last_os_error() const { return (m_last_os_error); }
 
-  /** Test if the filepath provided looks the same as this filepath
-  by string comparison. If they are two different paths to the same
-  file, same_as() will be used to show that after the files are opened.
+  /** Do a quick test if the filepath provided looks the same as this filepath
+  byte by byte. If they are two different looking paths to the same file,
+  same_as() will be used to show that after the files are opened.
   @param[in]	other	filepath to compare with
-  @retval true if it is the same filename by char comparison
+  @retval true if it is the same filename by byte comparison
   @retval false if it looks different */
   bool same_filepath_as(const char *other) const;
 
@@ -352,10 +362,10 @@ class Datafile {
   else DB_ERROR. */
   dberr_t find_space_id();
 
-#ifdef UNIV_HOTBACKUP
   /** @return file size in number of pages */
   page_no_t size() const { return (m_size); }
 
+#ifdef UNIV_HOTBACKUP
   /** Set the tablespace ID.
   @param[in]	space_id	Tablespace ID to set */
   void set_space_id(space_id_t space_id) {
@@ -364,8 +374,8 @@ class Datafile {
   }
 
   /** Set th tablespace flags
-  @param[in]	fsp_flags	Tablespace flags */
-  void set_flags(ulint flags) { m_flags = flags; }
+  @param[in]	flags	Tablespace flags */
+  void set_flags(uint32_t flags) { m_flags = flags; }
 #endif /* UNIV_HOTBACKUP */
 
  private:
@@ -393,7 +403,7 @@ class Datafile {
 
   /** Reads a few significant fields from the first page of the
   datafile, which must already be open.
-  @param[in]	read_only_mode	if true, then readonly mode checks
+  @param[in]	read_only_mode	If true, then readonly mode checks
                                   are enforced.
   @return DB_SUCCESS or DB_IO_ERROR if page cannot be read */
   dberr_t read_first_page(bool read_only_mode)
@@ -408,10 +418,10 @@ class Datafile {
     m_open_flags = open_flags;
   }
 
-  /** Finds a given page of the given space id from the double write
-  buffer and copies it to the corresponding .ibd file.
+  /** Finds a given page of the given space id from the double write buffer
+  and copies it to the corresponding .ibd file.
   @param[in]	restore_page_no		Page number to restore
-  @return DB_SUCCESS if page was restored, else DB_ERROR */
+  @return DB_SUCCESS if page was restored from doublewrite, else DB_ERROR */
   dberr_t restore_from_doublewrite(page_no_t restore_page_no);
 
  private:
@@ -453,7 +463,7 @@ class Datafile {
   /** Tablespace flags. Contained in the datafile header.
   If this is a system tablespace, FSP_SPACE_FLAGS are only valid
   in the first datafile. */
-  ulint m_flags;
+  uint32_t m_flags;
 
   /** true if file already existed on startup */
   bool m_exists;
@@ -494,5 +504,8 @@ class Datafile {
 
   /** Encryption iv read from first page */
   byte *m_encryption_iv;
+
+  /** Encryption operation in progress */
+  encryption_op_type m_encryption_op_in_progress;
 };
 #endif /* fsp0file_h */

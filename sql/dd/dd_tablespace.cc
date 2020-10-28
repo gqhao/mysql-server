@@ -1,4 +1,4 @@
-/* Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -79,13 +79,13 @@ bool fill_table_and_parts_tablespace_names(
     Tablespace_hash_set *tablespace_set) {
   // Get hold of the dd::Table object.
   dd::cache::Dictionary_client::Auto_releaser releaser(thd->dd_client());
-  const dd::Table *table_obj = NULL;
+  const dd::Table *table_obj = nullptr;
   if (thd->dd_client()->acquire(db_name, table_name, &table_obj)) {
     // Error is reported by the dictionary subsystem.
     return true;
   }
 
-  if (table_obj == NULL) {
+  if (table_obj == nullptr) {
     /*
       A non-existing table is a perfectly valid scenario, e.g. for
       statements using the 'IF EXISTS' clause. Thus, we cannot throw
@@ -115,7 +115,7 @@ bool fill_table_and_parts_tablespace_names(
           return true;
 
       // Iterate through tablespace names used by subpartition/indexes.
-      for (const dd::Partition *sub_part_obj : part_obj->sub_partitions()) {
+      for (const dd::Partition *sub_part_obj : part_obj->subpartitions()) {
         if (get_and_store_tablespace_name(thd, sub_part_obj, tablespace_set))
           return true;
 
@@ -163,7 +163,7 @@ bool get_tablespace_name(THD *thd, const T *obj, const char **tablespace_name,
       lock on tablespace (similarly to how it happens for schemas).
     */
     dd::cache::Dictionary_client::Auto_releaser releaser(thd->dd_client());
-    dd::Tablespace *tablespace = NULL;
+    dd::Tablespace *tablespace = nullptr;
     if (thd->dd_client()->acquire_uncached(obj->tablespace_id(), &tablespace)) {
       // acquire() always fails with a error being reported.
       return true;
@@ -181,11 +181,11 @@ bool get_tablespace_name(THD *thd, const T *obj, const char **tablespace_name,
       If user has specified special tablespace name like
       'innodb_file_per_table' then we read it from tablespace options.
     */
-    const dd::Properties *table_options = &obj->options();
-    table_options->get("tablespace", name);
+    if (obj->options().exists("tablespace"))
+      (void)obj->options().get("tablespace", &name);
   }
 
-  *tablespace_name = NULL;
+  *tablespace_name = nullptr;
   if (!name.empty() && !(*tablespace_name = strmake_root(mem_root, name.c_str(),
                                                          name.length()))) {
     return true;
@@ -193,5 +193,26 @@ bool get_tablespace_name(THD *thd, const T *obj, const char **tablespace_name,
 
   return false;
 }
+
+// The explicit instantiation of the template members below
+// is not handled well by doxygen, so we enclose this in a
+// cond/endcon block.
+
+/**
+ @cond
+*/
+
+template bool get_tablespace_name<dd::Partition>(THD *, dd::Partition const *,
+                                                 char const **, MEM_ROOT *);
+template bool get_tablespace_name<dd::Partition_index>(
+    THD *, dd::Partition_index const *, char const **, MEM_ROOT *);
+template bool get_tablespace_name<dd::Index>(THD *, dd::Index const *,
+                                             char const **, MEM_ROOT *);
+template bool get_tablespace_name<dd::Table>(THD *, dd::Table const *,
+                                             char const **, MEM_ROOT *);
+
+/**
+ @endcond
+*/
 
 }  // namespace dd

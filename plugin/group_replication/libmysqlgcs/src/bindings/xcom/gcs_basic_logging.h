@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -23,6 +23,7 @@
 #include "plugin/group_replication/libmysqlgcs/include/mysql/gcs/gcs_logging_system.h"
 #include "plugin/group_replication/libmysqlgcs/include/mysql/gcs/xplatform/my_xp_util.h"
 #include "plugin/group_replication/libmysqlgcs/src/bindings/xcom/gcs_xcom_interface.h"
+#include "plugin/group_replication/libmysqlgcs/src/bindings/xcom/gcs_xcom_utils.h"
 
 extern void cb_xcom_logger(const int64_t level, const char *message);
 extern void cb_xcom_debugger(const char *format, ...);
@@ -62,9 +63,9 @@ class Gcs_basic_logging {
     Constructor that creates the logger, debugger and sink.
   */
   Gcs_basic_logging()
-      : logger(NULL),
-        debugger(NULL),
-        sink(NULL),
+      : logger(nullptr),
+        debugger(nullptr),
+        sink(nullptr),
         saved_debug_options(GCS_DEBUG_NONE) {
     saved_debug_options = Gcs_debug_options::get_current_debug_options();
     Gcs_debug_options::force_debug_options(GCS_DEBUG_ALL);

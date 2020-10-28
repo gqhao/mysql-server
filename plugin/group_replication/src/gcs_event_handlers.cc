@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -22,26 +22,37 @@
 
 #include <stddef.h>
 #include <algorithm>
+#include <list>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include <mysql/components/services/log_builtins.h>
+#include "mutex_lock.h"
 #include "my_dbug.h"
+#include "plugin/group_replication/include/autorejoin.h"
 #include "plugin/group_replication/include/gcs_event_handlers.h"
+#include "plugin/group_replication/include/leave_group_on_failure.h"
+#include "plugin/group_replication/include/observer_trans.h"
 #include "plugin/group_replication/include/pipeline_stats.h"
 #include "plugin/group_replication/include/plugin.h"
-#include "plugin/group_replication/include/single_primary_message.h"
+#include "plugin/group_replication/include/plugin_handlers/primary_election_invocation_handler.h"
+#include "plugin/group_replication/include/plugin_handlers/remote_clone_handler.h"
+#include "plugin/group_replication/include/plugin_messages/group_action_message.h"
+#include "plugin/group_replication/include/plugin_messages/group_service_message.h"
+#include "plugin/group_replication/include/plugin_messages/group_validation_message.h"
+#include "plugin/group_replication/include/plugin_messages/sync_before_execution_message.h"
+#include "plugin/group_replication/include/plugin_messages/transaction_prepared_message.h"
+#include "plugin/group_replication/include/plugin_messages/transaction_with_guarantee_message.h"
 
 using std::vector;
 
 Plugin_gcs_events_handler::Plugin_gcs_events_handler(
     Applier_module_interface *applier_module, Recovery_module *recovery_module,
-    Plugin_gcs_view_modification_notifier *vc_notifier,
     Compatibility_module *compatibility_module, ulong components_stop_timeout)
     : applier_module(applier_module),
       recovery_module(recovery_module),
-      view_change_notifier(vc_notifier),
       compatibility_manager(compatibility_module),
       stop_wait_timeout(components_stop_timeout) {
   this->temporary_states =
@@ -67,27 +78,77 @@ void Plugin_gcs_events_handler::on_message_received(
       Plugin_gcs_message::get_cargo_type(
           message.get_message_data().get_payload());
 
+  const std::string message_origin = message.get_origin().get_member_id();
+  Plugin_gcs_message *processed_message = nullptr;
+
   switch (message_type) {
     case Plugin_gcs_message::CT_TRANSACTION_MESSAGE:
       handle_transactional_message(message);
+      break;
+
+    case Plugin_gcs_message::CT_TRANSACTION_WITH_GUARANTEE_MESSAGE:
+      handle_transactional_with_guarantee_message(message);
+      break;
+
+    case Plugin_gcs_message::CT_TRANSACTION_PREPARED_MESSAGE:
+      handle_transaction_prepared_message(message);
+      break;
+
+    case Plugin_gcs_message::CT_SYNC_BEFORE_EXECUTION_MESSAGE:
+      handle_sync_before_execution_message(message);
       break;
 
     case Plugin_gcs_message::CT_CERTIFICATION_MESSAGE:
       handle_certifier_message(message);
       break;
 
-    case Plugin_gcs_message::CT_RECOVERY_MESSAGE:
-      handle_recovery_message(message);
-      break;
-
     case Plugin_gcs_message::CT_PIPELINE_STATS_MEMBER_MESSAGE:
       handle_stats_message(message);
       break;
 
-    case Plugin_gcs_message::CT_SINGLE_PRIMARY_MESSAGE:
-      handle_single_primary_message(message);
+    case Plugin_gcs_message::CT_MESSAGE_SERVICE_MESSAGE: {
+      Group_service_message *service_message = new Group_service_message(
+          message.get_message_data().get_payload(),
+          message.get_message_data().get_payload_length());
+
+      message_service_handler->add(service_message);
+    } break;
+
+      /**
+        From this point messages are sent to message listeners and may be
+        skipped Messages above are directly processed and/or for performance we
+        do not want to add that extra weight.
+      */
+
+    case Plugin_gcs_message::CT_RECOVERY_MESSAGE:
+      processed_message =
+          new Recovery_message(message.get_message_data().get_payload(),
+                               message.get_message_data().get_payload_length());
+      if (!pre_process_message(processed_message, message_origin))
+        handle_recovery_message(processed_message);
+      delete processed_message;
       break;
 
+    case Plugin_gcs_message::CT_SINGLE_PRIMARY_MESSAGE:
+      processed_message = new Single_primary_message(
+          message.get_message_data().get_payload(),
+          message.get_message_data().get_payload_length());
+      if (!pre_process_message(processed_message, message_origin))
+        handle_single_primary_message(processed_message);
+      delete processed_message;
+      break;
+
+    case Plugin_gcs_message::CT_GROUP_ACTION_MESSAGE:
+      handle_group_action_message(message);
+      break;
+
+    case Plugin_gcs_message::CT_GROUP_VALIDATION_MESSAGE:
+      processed_message = new Group_validation_message(
+          message.get_message_data().get_payload(),
+          message.get_message_data().get_payload_length());
+      pre_process_message(processed_message, message_origin);
+      delete processed_message;
+      break;
     default:
       break; /* purecov: inspected */
   }
@@ -100,28 +161,122 @@ void Plugin_gcs_events_handler::on_message_received(
   notify_and_reset_ctx(m_notification_ctx);
 }
 
+bool Plugin_gcs_events_handler::pre_process_message(
+    Plugin_gcs_message *plugin_message,
+    const std::string &message_origin) const {
+  bool skip_message = false;
+  int error = group_events_observation_manager->before_message_handling(
+      *plugin_message, message_origin, &skip_message);
+  return (error || skip_message);
+}
+
 void Plugin_gcs_events_handler::handle_transactional_message(
     const Gcs_message &message) const {
-  if ((local_member_info->get_recovery_status() ==
-           Group_member_info::MEMBER_IN_RECOVERY ||
-       local_member_info->get_recovery_status() ==
-           Group_member_info::MEMBER_ONLINE) &&
+  const Group_member_info::Group_member_status member_status =
+      local_member_info->get_recovery_status();
+  if ((member_status == Group_member_info::MEMBER_IN_RECOVERY ||
+       member_status == Group_member_info::MEMBER_ONLINE) &&
       this->applier_module) {
-    const unsigned char *payload_data = NULL;
+    if (member_status == Group_member_info::MEMBER_IN_RECOVERY) {
+      applier_module->get_pipeline_stats_member_collector()
+          ->increment_transactions_delivered_during_recovery();
+    }
+
+    const unsigned char *payload_data = nullptr;
     size_t payload_size = 0;
     Plugin_gcs_message::get_first_payload_item_raw_data(
         message.get_message_data().get_payload(), &payload_data, &payload_size);
 
-    this->applier_module->handle(payload_data,
-                                 static_cast<ulong>(payload_size));
+    this->applier_module->handle(payload_data, static_cast<ulong>(payload_size),
+                                 GROUP_REPLICATION_CONSISTENCY_EVENTUAL,
+                                 nullptr);
   } else {
+    /* purecov: begin inspected */
     LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_MSG_DISCARDED);
+    /* purecov: end */
   }
+}
+
+void Plugin_gcs_events_handler::handle_transactional_with_guarantee_message(
+    const Gcs_message &message) const {
+  const Group_member_info::Group_member_status member_status =
+      local_member_info->get_recovery_status();
+  if ((member_status == Group_member_info::MEMBER_IN_RECOVERY ||
+       member_status == Group_member_info::MEMBER_ONLINE) &&
+      this->applier_module) {
+    if (member_status == Group_member_info::MEMBER_IN_RECOVERY) {
+      applier_module->get_pipeline_stats_member_collector()
+          ->increment_transactions_delivered_during_recovery();
+    }
+
+    const unsigned char *payload_data = nullptr;
+    size_t payload_size = 0;
+    Plugin_gcs_message::get_first_payload_item_raw_data(
+        message.get_message_data().get_payload(), &payload_data, &payload_size);
+
+    enum_group_replication_consistency_level consistency_level =
+        Transaction_with_guarantee_message::decode_and_get_consistency_level(
+            message.get_message_data().get_payload(),
+            message.get_message_data().get_payload_length());
+
+    // Get ONLINE members that did receive this message.
+    std::list<Gcs_member_identifier> *online_members =
+        group_member_mgr->get_online_members_with_guarantees(
+            message.get_origin());
+
+    this->applier_module->handle(payload_data, static_cast<ulong>(payload_size),
+                                 consistency_level, online_members);
+  } else {
+    /* purecov: begin inspected */
+    LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_MSG_DISCARDED);
+    /* purecov: end */
+  }
+}
+
+void Plugin_gcs_events_handler::handle_transaction_prepared_message(
+    const Gcs_message &message) const {
+  if (this->applier_module == nullptr) {
+    /* purecov: begin inspected */
+    LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_MISSING_GRP_RPL_APPLIER);
+    return;
+    /* purecov: end */
+  }
+
+  Transaction_prepared_message transaction_prepared_message(
+      message.get_message_data().get_payload(),
+      message.get_message_data().get_payload_length());
+
+  Transaction_prepared_action_packet *transaction_prepared_action =
+      new Transaction_prepared_action_packet(
+          transaction_prepared_message.get_sid(),
+          transaction_prepared_message.get_gno(), message.get_origin());
+  this->applier_module->add_transaction_prepared_action_packet(
+      transaction_prepared_action);
+}
+
+void Plugin_gcs_events_handler::handle_sync_before_execution_message(
+    const Gcs_message &message) const {
+  if (this->applier_module == nullptr) {
+    /* purecov: begin inspected */
+    LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_MISSING_GRP_RPL_APPLIER);
+    return;
+    /* purecov: end */
+  }
+
+  Sync_before_execution_message sync_before_execution_message(
+      message.get_message_data().get_payload(),
+      message.get_message_data().get_payload_length());
+
+  Sync_before_execution_action_packet *sync_before_execution_action =
+      new Sync_before_execution_action_packet(
+          sync_before_execution_message.get_thread_id(), message.get_origin());
+  this->applier_module->add_sync_before_execution_action_packet(
+      sync_before_execution_action);
 }
 
 void Plugin_gcs_events_handler::handle_certifier_message(
     const Gcs_message &message) const {
-  if (this->applier_module == NULL) {
+  if (this->applier_module == nullptr) {
     LogPluginErr(ERROR_LEVEL,
                  ER_GRP_RPL_MISSING_GRP_RPL_APPLIER); /* purecov: inspected */
     return;                                           /* purecov: inspected */
@@ -130,7 +285,7 @@ void Plugin_gcs_events_handler::handle_certifier_message(
   Certifier_interface *certifier =
       this->applier_module->get_certification_handler()->get_certifier();
 
-  const unsigned char *payload_data = NULL;
+  const unsigned char *payload_data = nullptr;
   size_t payload_size = 0;
   Plugin_gcs_message::get_first_payload_item_raw_data(
       message.get_message_data().get_payload(), &payload_data, &payload_size);
@@ -145,12 +300,10 @@ void Plugin_gcs_events_handler::handle_certifier_message(
 }
 
 void Plugin_gcs_events_handler::handle_recovery_message(
-    const Gcs_message &message) const {
-  Recovery_message recovery_message(
-      message.get_message_data().get_payload(),
-      message.get_message_data().get_payload_length());
+    Plugin_gcs_message *processed_message) const {
+  Recovery_message *recovery_message = (Recovery_message *)processed_message;
 
-  std::string member_uuid = recovery_message.get_member_uuid();
+  std::string member_uuid = recovery_message->get_member_uuid();
 
   bool is_local = !member_uuid.compare(local_member_info->get_uuid());
   if (is_local) {
@@ -164,7 +317,7 @@ void Plugin_gcs_events_handler::handle_recovery_message(
       return;                           /* purecov: inspected */
     }
 
-    LogPluginErr(INFORMATION_LEVEL, ER_GRP_RPL_SRV_ONLINE);
+    LogPluginErr(SYSTEM_LEVEL, ER_GRP_RPL_SRV_ONLINE);
 
     /*
      The member is declared as online upon receiving this message
@@ -181,28 +334,18 @@ void Plugin_gcs_events_handler::handle_recovery_message(
     terminate_wait_on_start_process();
 
     /**
+      Re-check compatibility, members may leave during recovery.
       Disable the read mode in the server if the member is:
       - joining
       - doesn't have a higher possible incompatible version
       - We are not on Primary mode.
     */
-    if (*joiner_compatibility_status != READ_COMPATIBLE &&
-        (local_member_info->get_role() ==
-             Group_member_info::MEMBER_ROLE_PRIMARY ||
-         !local_member_info->in_primary_mode())) {
-      if (disable_server_read_mode(PSESSION_DEDICATED_THREAD)) {
-        LogPluginErr(WARNING_LEVEL,
-                     ER_GRP_RPL_DISABLE_SRV_READ_MODE_RESTRICTED); /* purecov:
-                                                                      inspected
-                                                                    */
-      }
-    }
-
+    disable_read_mode_for_compatible_members(true);
   } else {
     Group_member_info *member_info =
         group_member_mgr->get_group_member_info(member_uuid);
-    if (member_info != NULL) {
-      LogPluginErr(INFORMATION_LEVEL, ER_GRP_RPL_MEM_ONLINE,
+    if (member_info != nullptr) {
+      LogPluginErr(SYSTEM_LEVEL, ER_GRP_RPL_MEM_ONLINE,
                    member_info->get_hostname().c_str(),
                    member_info->get_port());
       delete member_info;
@@ -235,12 +378,13 @@ void Plugin_gcs_events_handler::handle_recovery_message(
    while the bootstrapped node has not yet finished recovery.
    Therefore, it is going to become primary when it finishes recovery.
    */
-  this->handle_leader_election_if_needed();
+  std::string no_primary("");
+  this->handle_leader_election_if_needed(DEAD_OLD_PRIMARY, no_primary);
 }
 
 void Plugin_gcs_events_handler::handle_stats_message(
     const Gcs_message &message) const {
-  if (this->applier_module == NULL) {
+  if (this->applier_module == nullptr) {
     LogPluginErr(ERROR_LEVEL,
                  ER_GRP_RPL_MISSING_GRP_RPL_APPLIER); /* purecov: inspected */
     return;                                           /* purecov: inspected */
@@ -253,25 +397,64 @@ void Plugin_gcs_events_handler::handle_stats_message(
 }
 
 void Plugin_gcs_events_handler::handle_single_primary_message(
-    const Gcs_message &message) const {
-  if (this->applier_module == NULL) {
+    Plugin_gcs_message *processed_message) const {
+  if (this->applier_module == nullptr) {
     LogPluginErr(ERROR_LEVEL,
                  ER_GRP_RPL_MISSING_GRP_RPL_APPLIER); /* purecov: inspected */
     return;                                           /* purecov: inspected */
   }
 
-  Single_primary_message single_primary_message(
-      message.get_message_data().get_payload(),
-      message.get_message_data().get_payload_length());
+  Single_primary_message *single_primary_message =
+      (Single_primary_message *)processed_message;
 
-  if (single_primary_message.get_single_primary_message_type() ==
+  if (single_primary_message->get_single_primary_message_type() ==
       Single_primary_message::SINGLE_PRIMARY_QUEUE_APPLIED_MESSAGE) {
     Single_primary_action_packet *single_primary_action =
         new Single_primary_action_packet(
             Single_primary_action_packet::QUEUE_APPLIED);
+    primary_election_handler->set_election_running(false);
     this->applier_module->add_single_primary_action_packet(
         single_primary_action);
   }
+  if (single_primary_message->get_single_primary_message_type() ==
+      Single_primary_message::SINGLE_PRIMARY_PRIMARY_ELECTION) {
+    primary_election_handler->handle_primary_election_message(
+        single_primary_message, &m_notification_ctx);
+  }
+}
+
+void Plugin_gcs_events_handler::handle_group_action_message(
+    const Gcs_message &message) const {
+  if (group_action_coordinator == nullptr) {
+    LogPluginErr(
+        ERROR_LEVEL,
+        ER_GRP_RPL_MISSING_GRP_RPL_ACTION_COORDINATOR); /* purecov: inspected */
+    return;                                             /* purecov: inspected */
+  }
+
+  Group_action_message::enum_action_message_type action_message_type =
+      Group_action_message::get_action_type(
+          message.get_message_data().get_payload());
+
+  Group_action_message *group_action_message = nullptr;
+  switch (action_message_type) {
+    case Group_action_message::ACTION_MULTI_PRIMARY_MESSAGE:
+    case Group_action_message::ACTION_PRIMARY_ELECTION_MESSAGE:
+    case Group_action_message::ACTION_SET_COMMUNICATION_PROTOCOL_MESSAGE:
+      group_action_message = new Group_action_message(
+          message.get_message_data().get_payload(),
+          message.get_message_data().get_payload_length());
+      break;
+    default:
+      break; /* purecov: inspected */
+  }
+
+  if (!pre_process_message(group_action_message,
+                           message.get_origin().get_member_id())) {
+    group_action_coordinator->handle_action_message(
+        group_action_message, message.get_origin().get_member_id());
+  }
+  delete group_action_message;
 }
 
 void Plugin_gcs_events_handler::on_suspicions(
@@ -292,8 +475,8 @@ void Plugin_gcs_events_handler::on_suspicions(
       Group_member_info *member_info =
           group_member_mgr->get_group_member_info_by_member_id(member);
 
-      if (member_info == NULL)  // Trying to update a non-existing member
-        continue;               /* purecov: inspected */
+      if (member_info == nullptr)  // Trying to update a non-existing member
+        continue;                  /* purecov: inspected */
 
       uit = std::find(tmp_unreachable.begin(), tmp_unreachable.end(), member);
       if (uit != tmp_unreachable.end()) {
@@ -303,7 +486,7 @@ void Plugin_gcs_events_handler::on_suspicions(
                        member_info->get_port());
           // flag as a member having changed state
           m_notification_ctx.set_member_state_changed();
-          member_info->set_unreachable();
+          group_member_mgr->set_member_unreachable(member_info->get_uuid());
         }
         // remove to not check again against this one
         tmp_unreachable.erase(uit);
@@ -315,10 +498,12 @@ void Plugin_gcs_events_handler::on_suspicions(
           /* purecov: begin inspected */
           // flag as a member having changed state
           m_notification_ctx.set_member_state_changed();
-          member_info->set_reachable();
+          group_member_mgr->set_member_reachable(member_info->get_uuid());
           /* purecov: end */
         }
       }
+
+      delete member_info;
     }
   }
 
@@ -364,7 +549,7 @@ void Plugin_gcs_events_handler::log_members_leaving_message(
                members_leaving.c_str());
 
   if (!primary_member_host.empty())
-    LogPluginErr(INFORMATION_LEVEL, ER_GRP_RPL_PRIMARY_MEMBER_LEFT_GRP,
+    LogPluginErr(SYSTEM_LEVEL, ER_GRP_RPL_PRIMARY_MEMBER_LEFT_GRP,
                  primary_member_host.c_str());
 }
 
@@ -393,7 +578,7 @@ void Plugin_gcs_events_handler::get_hosts_from_view(
         group_member_mgr->get_group_member_info_by_member_id((*all_members_it));
     all_members_it++;
 
-    if (member_info == NULL) continue;
+    if (member_info == nullptr) continue;
 
     hosts_string << member_info->get_hostname() << ":"
                  << member_info->get_port();
@@ -412,6 +597,8 @@ void Plugin_gcs_events_handler::get_hosts_from_view(
     if (all_members_it != members.end()) {
       hosts_string << ", ";
     }
+
+    delete member_info;
   }
   all_hosts.assign(hosts_string.str());
   primary_host.assign(primary_string.str());
@@ -429,17 +616,26 @@ void Plugin_gcs_events_handler::on_view_changed(
   bool is_joining = is_member_on_vector(new_view.get_joined_members(),
                                         local_member_info->get_gcs_member_id());
 
+  bool skip_election = false;
+  enum_primary_election_mode election_mode = DEAD_OLD_PRIMARY;
+  std::string suggested_primary("");
   // Was member expelled from the group due to network failures?
   if (this->was_member_expelled_from_group(new_view)) {
     DBUG_ASSERT(is_leaving);
+    group_events_observation_manager->after_view_change(
+        new_view.get_joined_members(), new_view.get_leaving_members(),
+        new_view.get_members(), is_leaving, &skip_election, &election_mode,
+        suggested_primary);
     goto end;
   }
 
   // An early error on the applier can render the join invalid
-  if (is_joining && local_member_info->get_recovery_status() ==
-                        Group_member_info::MEMBER_ERROR) {
+  if (is_joining &&
+      local_member_info->get_recovery_status() ==
+          Group_member_info::MEMBER_ERROR &&
+      !autorejoin_module->is_autorejoin_ongoing()) {
     LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_MEMBER_EXIT_PLUGIN_ERROR);
-    view_change_notifier->cancel_view_modification(
+    gcs_module->notify_of_view_change_cancellation(
         GROUP_REPLICATION_CONFIGURATION_ERROR);
   } else {
     /*
@@ -472,7 +668,7 @@ void Plugin_gcs_events_handler::on_view_changed(
     if (update_group_info_manager(new_view, exchanged_data, is_joining,
                                   is_leaving) &&
         is_joining) {
-      view_change_notifier->cancel_view_modification();
+      gcs_module->notify_of_view_change_cancellation();
       return;
     }
 
@@ -502,28 +698,35 @@ void Plugin_gcs_events_handler::on_view_changed(
 
     if (is_leaving) gcs_module->leave_coordination_member_left();
 
-    // Handle leader election if needed
-    this->handle_leader_election_if_needed();
-
     // Signal that the injected view was delivered
-    if (view_change_notifier->is_injected_view_modification())
-      view_change_notifier->end_view_modification();
+    if (gcs_module->is_injected_view_modification())
+      gcs_module->notify_of_view_change_end();
+
+    group_events_observation_manager->after_view_change(
+        new_view.get_joined_members(), new_view.get_leaving_members(),
+        new_view.get_members(), is_leaving, &skip_election, &election_mode,
+        suggested_primary);
+
+    // Handle leader election if needed
+    if (!skip_election && !is_leaving) {
+      this->handle_leader_election_if_needed(election_mode, suggested_primary);
+    }
   }
 
   if (!is_leaving) {
     std::string view_id_representation = "";
     Gcs_view *view = gcs_module->get_current_view();
-    if (view != NULL) {
+    if (view != nullptr) {
       view_id_representation = view->get_view_id().get_representation();
       delete view;
     }
-
+    disable_read_mode_for_compatible_members();
     LogPluginErr(
-        INFORMATION_LEVEL, ER_GRP_RPL_MEMBER_CHANGE,
+        SYSTEM_LEVEL, ER_GRP_RPL_MEMBER_CHANGE,
         group_member_mgr->get_string_current_view_active_hosts().c_str(),
         view_id_representation.c_str());
   } else {
-    LogPluginErr(INFORMATION_LEVEL, ER_GRP_RPL_MEMBER_LEFT_GRP);
+    LogPluginErr(SYSTEM_LEVEL, ER_GRP_RPL_MEMBER_LEFT_GRP);
   }
 
 end:
@@ -552,284 +755,41 @@ end:
 
 bool Plugin_gcs_events_handler::was_member_expelled_from_group(
     const Gcs_view &view) const {
-  DBUG_ENTER("Plugin_gcs_events_handler::was_member_expelled_from_group");
+  DBUG_TRACE;
   bool result = false;
 
   if (view.get_error_code() == Gcs_view::MEMBER_EXPELLED) {
     result = true;
-    LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_MEMBER_EXPELLED);
-    /*
-      Delete all members from group info except the local one.
-
-      Regarding the notifications, these are not triggered here, but
-      rather at the end of the handle function that calls this one:
-      on_view_changed.
-     */
-    std::vector<Group_member_info *> to_update;
-    group_member_mgr->update(&to_update);
-    group_member_mgr->update_member_status(local_member_info->get_uuid(),
-                                           Group_member_info::MEMBER_ERROR,
-                                           m_notification_ctx);
-
-    /*
-      unblock threads waiting for the member to become ONLINE
-    */
-    terminate_wait_on_start_process();
-
-    group_member_mgr->update_member_role(
-        local_member_info->get_uuid(), Group_member_info::MEMBER_ROLE_SECONDARY,
-        m_notification_ctx);
-
-    bool aborted = false;
-    applier_module->add_suspension_packet();
-    int error =
-        applier_module->wait_for_applier_complete_suspension(&aborted, false);
-    /*
-      We do not need to kill ongoing transactions when the applier
-      is already stopping.
-    */
-    if (!error) applier_module->kill_pending_transactions(true, true);
+    const char *exit_state_action_abort_log_message =
+        "Member was expelled from the group due to network failures.";
+    leave_group_on_failure::mask leave_actions;
+    leave_actions.set(leave_group_on_failure::ALREADY_LEFT_GROUP, true);
+    leave_actions.set(leave_group_on_failure::CLEAN_GROUP_MEMBERSHIP, true);
+    leave_actions.set(leave_group_on_failure::STOP_APPLIER, true);
+    leave_actions.set(leave_group_on_failure::HANDLE_EXIT_STATE_ACTION, true);
+    leave_actions.set(leave_group_on_failure::HANDLE_AUTO_REJOIN, true);
+    leave_group_on_failure::leave(leave_actions, ER_GRP_RPL_MEMBER_EXPELLED,
+                                  PSESSION_INIT_THREAD, &m_notification_ctx,
+                                  exit_state_action_abort_log_message);
   }
 
-  DBUG_RETURN(result);
+  return result;
 }
 
-std::vector<Group_member_info *>::iterator
-Plugin_gcs_events_handler::sort_and_get_lowest_version_member_position(
-    std::vector<Group_member_info *> *all_members_info) const {
-  std::vector<Group_member_info *>::iterator it;
-
-  // sort in ascending order of lower member version
-  std::sort(all_members_info->begin(), all_members_info->end(),
-            Group_member_info::comparator_group_member_version);
-
-  /* if vector contains only single version then leader should be picked from
-     all members
-   */
-  std::vector<Group_member_info *>::iterator lowest_version_end =
-      all_members_info->end();
-
-  /* first member will have lowest version as members are already
-     sorted above using member_version.
-   */
-  it = all_members_info->begin();
-  Group_member_info *first_member = *it;
-  uint32 lowest_major_version =
-      first_member->get_member_version().get_major_version();
-
-  /* to avoid read compatibility issue leader should be picked only from lowest
-     version members so save position where member version differs.
-
-     set lowest_version_end when major version changes
-
-     eg: for a list: 5.7.18, 5.7.18, 5.7.19, 5.7.20, 5.7.21, 8.0.2
-         the members to be considered for election will be:
-            5.7.18, 5.7.18, 5.7.19, 5.7.20, 5.7.21
-         and server_uuid based algorithm will be used to elect primary
-
-     eg: for a list: 5.7.20, 5.7.21, 8.0.2, 8.0.2
-         the members to be considered for election will be:
-            5.7.20, 5.7.21
-         and member weight based algorithm will be used to elect primary
-  */
-  for (it = all_members_info->begin() + 1; it != all_members_info->end();
-       it++) {
-    if (lowest_major_version !=
-        (*it)->get_member_version().get_major_version()) {
-      lowest_version_end = it;
-      break;
-    }
-  }
-
-  return lowest_version_end;
-}
-
-void Plugin_gcs_events_handler::sort_members_for_election(
-    std::vector<Group_member_info *> *all_members_info,
-    std::vector<Group_member_info *>::iterator lowest_version_end) const {
-  Group_member_info *first_member = *(all_members_info->begin());
-  Member_version lowest_version = first_member->get_member_version();
-
-  // sort only lower version members as they only will be needed to pick leader
-  if (lowest_version >= PRIMARY_ELECTION_MEMBER_WEIGHT_VERSION)
-    std::sort(all_members_info->begin(), lowest_version_end,
-              Group_member_info::comparator_group_member_weight);
-  else
-    std::sort(all_members_info->begin(), lowest_version_end,
-              Group_member_info::comparator_group_member_uuid);
-}
-
-void Plugin_gcs_events_handler::handle_leader_election_if_needed() const {
-  // take action if in single leader mode
-  if (!local_member_info->in_primary_mode()) return;
-
-  bool am_i_leaving = true;
-#ifndef DBUG_OFF
-  int n = 0;
-#endif
-  Group_member_info *the_primary = NULL;
-  std::vector<Group_member_info *> *all_members_info =
-      group_member_mgr->get_all_members();
-
-  std::vector<Group_member_info *>::iterator it;
-  std::vector<Group_member_info *>::iterator lowest_version_end;
-
-  /* sort members based on member_version and get first iterator position
-     where member version differs
-   */
-  lowest_version_end =
-      sort_and_get_lowest_version_member_position(all_members_info);
-
-  /*  Sort lower version members based on member weight if member version
-      is greater than equal to PRIMARY_ELECTION_MEMBER_WEIGHT_VERSION or uuid.
-   */
-  sort_members_for_election(all_members_info, lowest_version_end);
-
+void Plugin_gcs_events_handler::handle_leader_election_if_needed(
+    enum_primary_election_mode election_mode,
+    std::string &suggested_primary) const {
   /*
-   1. Iterate over the list of all members and check if there is a primary
-      defined already.
-   2. Check if I am leaving the group or not.
-   */
-  for (it = all_members_info->begin(); it != all_members_info->end(); it++) {
-#ifndef DBUG_OFF
-    DBUG_ASSERT(!(n > 1));
-#endif
+    Can we get here when a change to multi master is cancelled and is being
+    undone? Yes but only on situations where the action was killed or the member
+    is stopping that will always result in a plugin restart.
+  */
+  if (election_mode == DEAD_OLD_PRIMARY &&
+      !local_member_info->in_primary_mode())
+    return;
 
-    Group_member_info *member = *it;
-    if (the_primary == NULL &&
-        member->get_role() == Group_member_info::MEMBER_ROLE_PRIMARY) {
-      the_primary = member;
-#ifndef DBUG_OFF
-      n++;
-#endif
-    }
-
-    /* Found the primary and it is me. Check that I am not offline. */
-    if (!member->get_uuid().compare(local_member_info->get_uuid())) {
-      am_i_leaving =
-          member->get_recovery_status() == Group_member_info::MEMBER_OFFLINE;
-    }
-  }
-
-  /* If I am not leaving, then run election. Otherwise do nothing. */
-  if (!am_i_leaving) {
-    Sql_service_command_interface *sql_command_interface =
-        new Sql_service_command_interface();
-    bool skip_set_super_readonly = false;
-    if (sql_command_interface == NULL ||
-        sql_command_interface->establish_session_connection(
-            PSESSION_DEDICATED_THREAD, GROUPREPL_USER, get_plugin_pointer())) {
-      LogPluginErr(WARNING_LEVEL,
-                   ER_GRP_RPL_SESSION_OPEN_FAILED); /* purecov: inspected */
-      /*
-       Unable to open session to (re)set read only mode.
-       Mark that we should skipping that part code.
-       */
-      skip_set_super_readonly = true; /* purecov: inspected */
-    }
-
-    /*
-     There is no primary in the member list. Pick one from
-     the list of ONLINE members. The picked one is the first
-     viable on in the list that was sorted at the beginning
-     of this function.
-
-     The assumption is that std::sort(...) is deterministic
-     on all members.
-
-     To pick leaders from only lowest version members loop
-     till lowest_version_end.
-    */
-    if (the_primary == NULL) {
-      for (it = all_members_info->begin();
-           it != lowest_version_end && the_primary == NULL; it++) {
-        Group_member_info *mi = *it;
-
-        DBUG_ASSERT(mi);
-        if (mi && mi->get_recovery_status() == Group_member_info::MEMBER_ONLINE)
-          the_primary = mi;
-      }
-    }
-
-    // take actions on the primary
-    if (the_primary != NULL) {
-      std::string primary_uuid = the_primary->get_uuid();
-      const bool is_primary_local =
-          !primary_uuid.compare(local_member_info->get_uuid());
-      const bool has_primary_changed =
-          Group_member_info::MEMBER_ROLE_PRIMARY != the_primary->get_role();
-
-      if (has_primary_changed) {
-        /*
-          A new primary was elected, inform certifier to enable conflict
-          detection until the new primary apply all relay logs.
-        */
-        Single_primary_action_packet *single_primary_action =
-            new Single_primary_action_packet(
-                Single_primary_action_packet::NEW_PRIMARY);
-        applier_module->add_single_primary_action_packet(single_primary_action);
-
-        // declare this as the new primary
-        group_member_mgr->update_member_role(
-            primary_uuid, Group_member_info::MEMBER_ROLE_PRIMARY,
-            m_notification_ctx);
-
-        LogPluginErr(INFORMATION_LEVEL, ER_GRP_RPL_NEW_PRIMARY_ELECTED,
-                     the_primary->get_hostname().c_str(),
-                     the_primary->get_port());
-
-        // Check if the session was established, it can (re)set read only mode.
-        if (!skip_set_super_readonly) {
-          if (is_primary_local) {
-            if (disable_super_read_only_mode(sql_command_interface)) {
-              LogPluginErr(
-                  WARNING_LEVEL,
-                  ER_GRP_RPL_DISABLE_READ_ONLY_FAILED); /* purecov: inspected */
-            }
-          } else {
-            if (enable_super_read_only_mode(sql_command_interface)) {
-              LogPluginErr(
-                  WARNING_LEVEL,
-                  ER_GRP_RPL_ENABLE_READ_ONLY_FAILED); /* purecov: inspected */
-            }
-          }
-        }
-        /* code position limits messaging to primary change */
-        if (is_primary_local)
-          LogPluginErr(INFORMATION_LEVEL, ER_GRP_RPL_SRV_PRIMARY_MEM);
-        else
-          LogPluginErr(INFORMATION_LEVEL, ER_GRP_RPL_SRV_SECONDARY_MEM,
-                       the_primary->get_hostname().c_str(),
-                       the_primary->get_port());
-      }
-    } else if (!skip_set_super_readonly) {
-      /*
-       If there is only one server in the group, no need to pollute the error
-       log with an entry about no suitable candidate while (quick) recovery is
-       running for the first member.
-      */
-      if (all_members_info->size() != 1) {
-        // There are no servers in the group or they are all
-        // recoverying WARN to the user
-        LogPluginErr(
-            WARNING_LEVEL,
-            ER_GRP_RPL_NO_SUITABLE_PRIMARY_MEM); /* purecov: inspected */
-      }
-
-      if (enable_super_read_only_mode(sql_command_interface)) {
-        LogPluginErr(
-            WARNING_LEVEL,
-            ER_GRP_RPL_ENABLE_READ_ONLY_FAILED); /* purecov: inspected */
-      }
-    }
-    delete sql_command_interface;
-  }
-
-  // clean the members
-  for (it = all_members_info->begin(); it != all_members_info->end(); it++) {
-    delete (*it);
-  }
-  delete all_members_info;
+  primary_election_handler->execute_primary_election(
+      suggested_primary, election_mode, &m_notification_ctx);
 }
 
 int Plugin_gcs_events_handler::update_group_info_manager(
@@ -893,10 +853,10 @@ void Plugin_gcs_events_handler::handle_joining_members(const Gcs_view &new_view,
   if (is_joining) {
     int error = 0;
     if ((error = check_group_compatibility(number_of_members))) {
-      view_change_notifier->cancel_view_modification(error);
+      gcs_module->notify_of_view_change_cancellation(error);
       return;
     }
-    view_change_notifier->end_view_modification();
+    gcs_module->notify_of_view_change_end();
 
     /**
      On the joining list there can be 2 types of members: online/recovering
@@ -909,30 +869,30 @@ void Plugin_gcs_events_handler::handle_joining_members(const Gcs_view &new_view,
     update_member_status(
         new_view.get_joined_members(), Group_member_info::MEMBER_IN_RECOVERY,
         Group_member_info::MEMBER_OFFLINE, Group_member_info::MEMBER_END);
+
+    /** Is an election running while I'm joining?*/
+    primary_election_handler->set_election_running(
+        is_group_running_a_primary_election());
+
     /**
       Set the read mode if not set during start (auto-start)
     */
     if (enable_server_read_mode(PSESSION_DEDICATED_THREAD)) {
-      LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_SUPER_READ_ONLY_ACTIVATE_ERROR);
-
       /*
         The notification will be triggered in the top level handle function
         that calls this one. In this case, the on_view_changed handle.
       */
-      group_member_mgr->update_member_status(local_member_info->get_uuid(),
-                                             Group_member_info::MEMBER_ERROR,
-                                             m_notification_ctx);
-      this->leave_group_on_error();
-      plugin_is_setting_read_mode = false;
-
-      /*
-        unblock threads waiting for the member to become ONLINE
-      */
-      terminate_wait_on_start_process();
+      leave_group_on_failure::mask leave_actions;
+      leave_actions.set(leave_group_on_failure::SKIP_SET_READ_ONLY, true);
+      leave_actions.set(leave_group_on_failure::SKIP_LEAVE_VIEW_WAIT, true);
+      leave_group_on_failure::leave(
+          leave_actions, ER_GRP_RPL_SUPER_READ_ONLY_ACTIVATE_ERROR,
+          PSESSION_DEDICATED_THREAD, &m_notification_ctx, "");
+      set_plugin_is_setting_read_mode(false);
 
       return;
     } else {
-      plugin_is_setting_read_mode = false;
+      set_plugin_is_setting_read_mode(false);
     }
 
     /**
@@ -964,23 +924,80 @@ void Plugin_gcs_events_handler::handle_joining_members(const Gcs_view &new_view,
     applier_module->add_view_change_packet(view_change_packet);
 
     /*
-     Launch the recovery thread so we can receive missing data and the
-     certification information needed to apply the transactions queued after
-     this view change.
-
-     Recovery receives a view id, as a means to identify logically on joiners
-     and donors alike where this view change happened in the data. With that
-     info we can then ask for the donor to give the member all the data until
-     this point in the data, and the certification information for all the data
-     that comes next.
-
-     When alone, the server will go through Recovery to wait for the consumption
-     of his applier relay log that may contain transactions from previous
-     executions.
+     Chose what is the strategy for recovery.
+     Note that even if clone is chosen, if an error occurs on its launch,
+     incremental recovery is again selected as the default choice.
     */
-    recovery_module->start_recovery(
-        new_view.get_group_id().get_group_id(),
-        new_view.get_view_id().get_representation());
+    Remote_clone_handler::enum_clone_check_result recovery_strategy =
+        Remote_clone_handler::DO_RECOVERY;
+
+    // The check is not needed if the member is alone
+    if (number_of_members > 1)
+      recovery_strategy = remote_clone_handler->check_clone_preconditions();
+
+    if (Remote_clone_handler::DO_CLONE == recovery_strategy) {
+      LogPluginErr(SYSTEM_LEVEL, ER_GRP_RPL_RECOVERY_STRAT_CHOICE,
+                   "Cloning from a remote group donor.");
+      /*
+       Launch the clone process. It will configure SSL options and the list
+       of allowed donors.
+       When terminated, the clone process will restart the server.
+       The whole start join process is still done as an error on cloning can
+       mean we fall back to incremental recovery.
+      */
+      if (remote_clone_handler->clone_server(
+              new_view.get_group_id().get_group_id(),
+              new_view.get_view_id().get_representation())) {
+        /* purecov: begin inspected */
+        LogPluginErr(WARNING_LEVEL, ER_GRP_RPL_RECOVERY_STRAT_FALLBACK,
+                     "Incremental Recovery.");
+        recovery_strategy = Remote_clone_handler::DO_RECOVERY;
+        /* purecov: end */
+      }
+    }
+
+    if (Remote_clone_handler::DO_RECOVERY == recovery_strategy) {
+      LogPluginErr(SYSTEM_LEVEL, ER_GRP_RPL_RECOVERY_STRAT_CHOICE,
+                   "Incremental recovery from a group donor");
+      /*
+       Launch the recovery thread so we can receive missing data and the
+       certification information needed to apply the transactions queued after
+       this view change.
+
+       Recovery receives a view id, as a means to identify logically on joiners
+       and donors alike where this view change happened in the data. With that
+       info we can then ask for the donor to give the member all the data until
+       this point in the data, and the certification information for all the
+       data that comes next.
+
+       When alone, the server will go through Recovery to wait for the
+       consumption of his applier relay log that may contain transactions from
+       previous executions.
+      */
+      recovery_module->start_recovery(
+          new_view.get_group_id().get_group_id(),
+          new_view.get_view_id().get_representation());
+    } else if (Remote_clone_handler::CHECK_ERROR == recovery_strategy ||
+               Remote_clone_handler::NO_RECOVERY_POSSIBLE ==
+                   recovery_strategy) {
+      if (Remote_clone_handler::NO_RECOVERY_POSSIBLE == recovery_strategy)
+        LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_NO_POSSIBLE_RECOVERY);
+      else {
+        /* purecov: begin inspected */
+        LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_RECOVERY_EVAL_ERROR, "");
+        /* purecov: end */
+      }
+
+      /*
+        The notification will be triggered in the top level handle function
+        that calls this one. In this case, the on_view_changed handle.
+      */
+      leave_group_on_failure::mask leave_actions;
+      leave_actions.set(leave_group_on_failure::SKIP_LEAVE_VIEW_WAIT, true);
+      leave_group_on_failure::leave(leave_actions, 0, PSESSION_DEDICATED_THREAD,
+                                    &m_notification_ctx, "");
+      return;
+    }
   }
   /*
     The condition
@@ -1029,6 +1046,11 @@ void Plugin_gcs_events_handler::handle_joining_members(const Gcs_view &new_view,
     View_change_packet *view_change_packet = new View_change_packet(view_id);
     collect_members_executed_sets(view_change_packet);
     applier_module->add_view_change_packet(view_change_packet);
+
+    if (group_action_coordinator->is_group_action_running()) {
+      LogPluginErr(WARNING_LEVEL,
+                   ER_GRP_RPL_JOINER_EXIT_WHEN_GROUP_ACTION_RUNNING);
+    }
   }
 }
 
@@ -1054,10 +1076,17 @@ void Plugin_gcs_events_handler::handle_leaving_members(const Gcs_view &new_view,
     update_member_status(
         new_view.get_leaving_members(), Group_member_info::MEMBER_OFFLINE,
         Group_member_info::MEMBER_END, Group_member_info::MEMBER_ERROR);
+
+    if (!is_leaving) {
+      Leaving_members_action_packet *leaving_members_action =
+          new Leaving_members_action_packet(new_view.get_leaving_members());
+      this->applier_module->add_leaving_members_action_packet(
+          leaving_members_action);
+    }
   }
 
   if (is_leaving) {
-    view_change_notifier->end_view_modification();
+    gcs_module->notify_of_view_change_end();
   }
 }
 
@@ -1089,14 +1118,15 @@ int Plugin_gcs_events_handler::process_local_exchanged_data(
     const uchar *data = exchanged_data_it->second->get_payload();
     size_t length = exchanged_data_it->second->get_payload_length();
     Gcs_member_identifier *member_id = exchanged_data_it->first;
-    if (data == NULL) {
+    if (data == nullptr) {
       /* purecov: begin inspected */
       Group_member_info *member_info =
           group_member_mgr->get_group_member_info_by_member_id(*member_id);
-      if (member_info != NULL) {
+      if (member_info != nullptr) {
         LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_DATA_NOT_PROVIDED_BY_MEM,
                      member_info->get_hostname().c_str(),
                      member_info->get_port());
+        delete member_info;
       }
       continue;
       /* purecov: end */
@@ -1155,6 +1185,7 @@ int Plugin_gcs_events_handler::process_local_exchanged_data(
 
 Gcs_message_data *Plugin_gcs_events_handler::get_exchangeable_data() const {
   std::string server_executed_gtids;
+  std::string server_purged_gtids;
   std::string applier_retrieved_gtids;
   Replication_thread_api applier_channel("group_replication_applier");
 
@@ -1163,17 +1194,23 @@ Gcs_message_data *Plugin_gcs_events_handler::get_exchangeable_data() const {
 
   if (sql_command_interface->establish_session_connection(
           PSESSION_DEDICATED_THREAD, GROUPREPL_USER, get_plugin_pointer())) {
-    LogPluginErr(
-        WARNING_LEVEL,
-        ER_GRP_RPL_GRP_CHANGE_INFO_EXTRACT_ERROR); /* purecov: inspected */
-    goto sending;                                  /* purecov: inspected */
+    /* purecov: begin inspected */
+    LogPluginErr(WARNING_LEVEL, ER_GRP_RPL_GRP_CHANGE_INFO_EXTRACT_ERROR);
+    goto sending;
+    /* purecov: end */
   }
 
   if (sql_command_interface->get_server_gtid_executed(server_executed_gtids)) {
-    LogPluginErr(
-        WARNING_LEVEL,
-        ER_GRP_RPL_GTID_EXECUTED_EXTRACT_ERROR); /* purecov: inspected */
-    goto sending;                                /* purecov: inspected */
+    /* purecov: begin inspected */
+    LogPluginErr(WARNING_LEVEL, ER_GRP_RPL_GTID_EXECUTED_EXTRACT_ERROR);
+    goto sending;
+    /* purecov: inspected */
+  }
+  if (sql_command_interface->get_server_gtid_purged(server_purged_gtids)) {
+    /* purecov: begin inspected */
+    LogPluginErr(WARNING_LEVEL, ER_GRP_RPL_GTID_PURGED_EXTRACT_ERROR);
+    goto sending;
+    /* purecov: end */
   }
   if (applier_channel.get_retrieved_gtid_set(applier_retrieved_gtids)) {
     LogPluginErr(WARNING_LEVEL,
@@ -1181,7 +1218,7 @@ Gcs_message_data *Plugin_gcs_events_handler::get_exchangeable_data() const {
   }
 
   group_member_mgr->update_gtid_sets(local_member_info->get_uuid(),
-                                     server_executed_gtids,
+                                     server_executed_gtids, server_purged_gtids,
                                      applier_retrieved_gtids);
 sending:
 
@@ -1189,6 +1226,28 @@ sending:
 
   std::vector<uchar> data;
 
+  /*
+    When a member is auto-rejoining, it starts in the ERROR state. Normally
+    the member would only change to the RECOVERY state when it was OFFLINE,
+    but we want the member to be in ERROR state when an auto-rejoin occurs,
+    so we force the change from ERROR to RECOVERY when the member is
+    undergoing an auto-rejoin procedure.
+    We do that change on the data exchange just before the view install, so
+    that when all members do receive the view on which this member joins
+    all do see the correct RECOVERY state.
+  */
+  if (autorejoin_module->is_autorejoin_ongoing() &&
+      !get_error_state_due_to_error_during_autorejoin()) {
+    group_member_mgr->update_member_status(
+        local_member_info->get_uuid(), Group_member_info::MEMBER_IN_RECOVERY,
+        m_notification_ctx);
+  }
+
+  // alert joiners that an action or election is running
+  local_member_info->set_is_group_action_running(
+      group_action_coordinator->is_group_action_running());
+  local_member_info->set_is_primary_election_running(
+      primary_election_handler->is_an_election_running());
   Group_member_info *local_member_copy =
       new Group_member_info(*local_member_info);
   Group_member_info_manager_message *group_info_message =
@@ -1213,7 +1272,7 @@ void Plugin_gcs_events_handler::update_member_status(
     Group_member_info *member_info =
         group_member_mgr->get_group_member_info_by_member_id(member);
 
-    if (member_info == NULL) {
+    if (member_info == nullptr) {
       // Trying to update a non-existing member
       continue;
     }
@@ -1234,6 +1293,8 @@ void Plugin_gcs_events_handler::update_member_status(
       group_member_mgr->update_member_status(member_info->get_uuid(), status,
                                              m_notification_ctx);
     }
+
+    delete member_info;
   }
 }
 
@@ -1276,6 +1337,9 @@ int Plugin_gcs_events_handler::check_group_compatibility(
     LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_MEMBER_VER_INCOMPATIBLE);
     return GROUP_REPLICATION_CONFIGURATION_ERROR;
   }
+  if (*joiner_compatibility_status == READ_COMPATIBLE) {
+    LogPluginErr(WARNING_LEVEL, ER_GRP_RPL_MEMBER_VER_READ_COMPATIBLE);
+  }
 
   /*
     All group members must have the same gtid_assignment_block_size
@@ -1304,30 +1368,46 @@ int Plugin_gcs_events_handler::check_group_compatibility(
     }
   }
 
+  if (is_group_running_a_configuration_change()) {
+    LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_JOIN_WHEN_GROUP_ACTION_RUNNING);
+    return GROUP_REPLICATION_CONFIGURATION_ERROR;
+  }
+
   return 0;
 }
 
 Compatibility_type
 Plugin_gcs_events_handler::check_version_compatibility_with_group() const {
   bool override_lower_incompatibility = false;
-  Compatibility_type compatibility_type = INCOMPATIBLE;
+  Compatibility_type compatibility_type = COMPATIBLE;
   bool read_compatible = false;
 
   std::vector<Group_member_info *> *all_members =
       group_member_mgr->get_all_members();
   std::vector<Group_member_info *>::iterator all_members_it;
+
+  Member_version lowest_version(0xFFFFFF);
+  std::set<Member_version> unique_version_set;
+  /* Find lowest member version and unique versions of the group for
+   * comparison. */
   for (all_members_it = all_members->begin();
        all_members_it != all_members->end(); all_members_it++) {
-    Member_version member_version = (*all_members_it)->get_member_version();
-    compatibility_type =
-        compatibility_manager->check_local_incompatibility(member_version);
+    /* Skip self */
+    if ((*all_members_it)->get_uuid() != local_member_info->get_uuid()) {
+      if ((*all_members_it)->get_member_version() < lowest_version)
+        lowest_version = (*all_members_it)->get_member_version();
+      unique_version_set.insert((*all_members_it)->get_member_version());
+    }
+  }
+  for (auto it = unique_version_set.begin();
+       it != unique_version_set.end() && compatibility_type != INCOMPATIBLE;
+       ++it) {
+    Member_version ver(*it);
+    compatibility_type = compatibility_manager->check_local_incompatibility(
+        ver, (ver == lowest_version));
 
     if (compatibility_type == READ_COMPATIBLE) {
       read_compatible = true;
-    }
-
-    if (compatibility_type == INCOMPATIBLE) {
-      break;
     }
 
     if (compatibility_type == INCOMPATIBLE_LOWER_VERSION) {
@@ -1342,7 +1422,6 @@ Plugin_gcs_events_handler::check_version_compatibility_with_group() const {
         compatibility_type = COMPATIBLE;
       } else {
         compatibility_type = INCOMPATIBLE;
-        break;
       }
     }
   }
@@ -1368,10 +1447,10 @@ Plugin_gcs_events_handler::check_version_compatibility_with_group() const {
 int Plugin_gcs_events_handler::compare_member_transaction_sets() const {
   int result = 0;
 
-  Sid_map local_sid_map(NULL);
-  Sid_map group_sid_map(NULL);
-  Gtid_set local_member_set(&local_sid_map, NULL);
-  Gtid_set group_set(&group_sid_map, NULL);
+  Sid_map local_sid_map(nullptr);
+  Sid_map group_sid_map(nullptr);
+  Gtid_set local_member_set(&local_sid_map, nullptr);
+  Gtid_set group_set(&group_sid_map, nullptr);
 
   std::vector<Group_member_info *> *all_members =
       group_member_mgr->get_all_members();
@@ -1512,12 +1591,24 @@ int Plugin_gcs_events_handler::compare_member_option_compatibility() const {
       goto cleaning;
     }
 
-    if (local_member_info->get_lower_case_table_names() !=
-        (*all_members_it)->get_lower_case_table_names()) {
+    if ((*all_members_it)->get_lower_case_table_names() !=
+            DEFAULT_NOT_RECEIVED_LOWER_CASE_TABLE_NAMES &&
+        local_member_info->get_lower_case_table_names() !=
+            (*all_members_it)->get_lower_case_table_names()) {
       result = 1;
       LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_LOWER_CASE_TABLE_NAMES_DIFF_FROM_GRP,
                    local_member_info->get_lower_case_table_names(),
                    (*all_members_it)->get_lower_case_table_names());
+      goto cleaning;
+    }
+
+    if (local_member_info->get_default_table_encryption() !=
+        (*all_members_it)->get_default_table_encryption()) {
+      result = 1;
+      LogPluginErr(ERROR_LEVEL,
+                   ER_GRP_RPL_DEFAULT_TABLE_ENCRYPTION_DIFF_FROM_GRP,
+                   local_member_info->get_default_table_encryption(),
+                   (*all_members_it)->get_default_table_encryption());
       goto cleaning;
     }
   }
@@ -1531,50 +1622,66 @@ cleaning:
   return result;
 }
 
-void Plugin_gcs_events_handler::leave_group_on_error() const {
-  Gcs_operations::enum_leave_state state = gcs_module->leave();
-  char **error_message = NULL;
-
-  int error = channel_stop_all(CHANNEL_APPLIER_THREAD | CHANNEL_RECEIVER_THREAD,
-                               stop_wait_timeout, error_message);
-  if (error) {
-    if (error_message != NULL && *error_message != NULL) {
-      LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_MEMBER_STOP_RPL_CHANNELS_ERROR,
-                   *error_message);
-      my_free(error_message);
-    } else {
-      char buff[MYSQL_ERRMSG_SIZE];
-      size_t len = 0;
-      len = snprintf(buff, sizeof(buff), "Got error: ");
-      len += snprintf((buff + len), sizeof(buff) - len, "%d", error);
-      snprintf((buff + len), sizeof(buff) - len,
-               "Please check the error log for more details.");
-      LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_MEMBER_STOP_RPL_CHANNELS_ERROR,
-                   buff);
+bool Plugin_gcs_events_handler::is_group_running_a_configuration_change()
+    const {
+  bool is_action_running = false;
+  std::vector<Group_member_info *> *all_members =
+      group_member_mgr->get_all_members();
+  for (Group_member_info *member_info : *all_members) {
+    if (member_info->is_group_action_running()) {
+      is_action_running = true;
+      break;
     }
   }
+  for (Group_member_info *member_info : *all_members) delete member_info;
+  delete all_members;
 
-  longlong errcode = 0;
-  longlong log_severity = WARNING_LEVEL;
-  switch (state) {
-    case Gcs_operations::ERROR_WHEN_LEAVING:
-      /* purecov: begin inspected */
-      errcode = ER_GRP_RPL_FAILED_TO_CONFIRM_IF_SERVER_LEFT_GRP;
-      log_severity = ERROR_LEVEL;
+  return is_action_running;
+}
+
+bool Plugin_gcs_events_handler::is_group_running_a_primary_election() const {
+  bool is_election_running = false;
+  std::vector<Group_member_info *> *all_members =
+      group_member_mgr->get_all_members();
+  for (Group_member_info *member_info : *all_members) {
+    if (member_info->is_primary_election_running()) {
+      is_election_running = true;
       break;
-      /* purecov: end */
-    case Gcs_operations::ALREADY_LEAVING:
-      /* purecov: begin inspected */
-      errcode = ER_GRP_RPL_SERVER_IS_ALREADY_LEAVING;
-      break;
-      /* purecov: end */
-    case Gcs_operations::ALREADY_LEFT:
-      /* purecov: begin inspected */
-      errcode = ER_GRP_RPL_SERVER_ALREADY_LEFT;
-      break;
-      /* purecov: end */
-    case Gcs_operations::NOW_LEAVING:
-      return;
+    }
   }
-  LogPluginErr(log_severity, errcode); /* purecov: inspected */
+  for (Group_member_info *member_info : *all_members) delete member_info;
+  delete all_members;
+
+  return is_election_running;
+}
+
+void Plugin_gcs_events_handler::disable_read_mode_for_compatible_members(
+    bool force_check) const {
+  Member_version lowest_version =
+      group_member_mgr->get_group_lowest_online_version();
+  /* We need to lock the operations of group_member_mgr so that member does not
+   * changes it state to ERROR and enables read only mode after we check its
+   * state here. If we read old ONLINE value and continue to disable read mode,
+   * member will continue to be writable even in ERROR state. So lock protects
+   * from this situation. */
+  MUTEX_LOCK(lock, group_member_mgr->get_update_lock());
+  if (local_member_info->get_recovery_status() ==
+          Group_member_info::MEMBER_ONLINE &&
+      (force_check || *joiner_compatibility_status != COMPATIBLE)) {
+    *joiner_compatibility_status =
+        Compatibility_module::check_version_incompatibility(
+            local_member_info->get_member_version(), lowest_version);
+    /* Some lower version left the group, now this member is new lowest
+     * version. */
+    if ((!local_member_info->in_primary_mode() &&
+         *joiner_compatibility_status == COMPATIBLE) ||
+        (local_member_info->in_primary_mode() &&
+         local_member_info->get_role() ==
+             Group_member_info::MEMBER_ROLE_PRIMARY)) {
+      if (disable_server_read_mode(PSESSION_DEDICATED_THREAD)) {
+        LogPluginErr(WARNING_LEVEL,
+                     ER_GRP_RPL_DISABLE_SRV_READ_MODE_RESTRICTED);
+      }
+    }
+  }
 }

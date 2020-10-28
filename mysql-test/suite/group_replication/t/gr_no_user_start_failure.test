@@ -38,7 +38,6 @@ START GROUP_REPLICATION;
 --source include/assert.inc
 
 --let $assert_file= $MYSQLTEST_VARDIR/log/mysqld.1.err
---let $assert_only_after = CURRENT_TEST: group_replication.gr_no_user_start_failure
 --let $assert_count = 1
 --let $assert_select = There was an error when trying to access the server with user: mysql.session. Make
 --let $assert_text = Found the expected error about the missing user in server log
@@ -68,7 +67,7 @@ START GROUP_REPLICATION;
 --echo #
 
 --disable_query_log
---eval INSERT IGNORE INTO mysql.user VALUES ('localhost','mysql.session','N','N','N','N','N','N','N','N','N','N','N','N','N','N','N','Y','N','N','N','N','N','N','N','N','N','N','N','N','N','','','','',0,0,0,0,'mysql_native_password','*THISISNOTAVALIDPASSWORDTHATCANBEUSEDHERE','N',"$date_to_restore",NULL,'Y', 'N', 'N', NULL, NULL);
+--eval INSERT IGNORE INTO mysql.user VALUES ('localhost','mysql.session','N','N','N','N','N','N','N','N','N','N','N','N','N','N','N','Y','N','N','N','N','N','N','N','N','N','N','N','N','N','','','','',0,0,0,0,'mysql_native_password','*THISISNOTAVALIDPASSWORDTHATCANBEUSEDHERE','N',"$date_to_restore",NULL,'Y', 'N', 'N', NULL, NULL, NULL, NULL);
 
 --eval INSERT IGNORE INTO mysql.tables_priv VALUES ('localhost', 'mysql', 'mysql.session', 'user', 'root\@localhost', "$date_to_restore_priv", 'Select', '');
 
@@ -85,7 +84,6 @@ SET SESSION sql_log_bin= 0;
 call mtr.add_suppression("There was an error when trying to access the server with user: mysql.session.*");
 call mtr.add_suppression("Failed to establish an internal server connection to execute plugin operations");
 call mtr.add_suppression("It was not possible to establish a connection to server SQL service");
-call mtr.add_suppression("Error calling group communication interfaces while trying to leave the group");
 call mtr.add_suppression("On plugin shutdown it was not possible to reset the server read mode settings.");
 SET SESSION sql_log_bin= 1;
 

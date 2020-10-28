@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -39,6 +39,7 @@
 #include <Ndb.hpp>
 #include "DictCache.hpp"
 #include <signaldata/DictSignal.hpp>
+#include "my_byteorder.h"
 
 class ListTablesReq;
 
@@ -139,10 +140,45 @@ public:
   int getBlobVersion() const;
   void setBlobVersion(int blobVersion);
 
+  enum supported_column_changes {
+    COLUMN_NAME = 1
+  };
+  typedef ulonglong column_change_flags;
+  static bool
+  check_change_flag(column_change_flags change_flags,
+                    enum supported_column_changes supported_change)
+  {
+    return (change_flags & (1ULL << supported_change));
+  }
+  static void
+  remove_change_flag(column_change_flags& change_flags,
+                     enum supported_column_changes supported_change)
+  {
+    change_flags &= ~(1ULL << supported_change);
+  }
+  static void
+  add_change_flag(column_change_flags& change_flags,
+                  enum supported_column_changes supported_change)
+  {
+    change_flags |= 1ULL << supported_change;
+  }
+  /**
+   * Compare two columns with optional skipping
+   * of parts of the column properties. This is
+   * to support for changing various parts of columns
+   * as part of an inplace alter table.
+   **/
+  bool equal_skip(const NdbColumnImpl&, column_change_flags&) const;
+
   /**
    * Equality/assign
    */
   bool equal(const NdbColumnImpl&) const;
+
+  /**
+   * Online column alter support
+   */
+  bool alter_supported(const NdbColumnImpl&, column_change_flags&) const;
 
   static NdbColumnImpl & getImpl(NdbDictionary::Column & t);
   static const NdbColumnImpl & getImpl(const NdbDictionary::Column & t);
@@ -160,8 +196,11 @@ class NdbTableImpl : public NdbDictionary::Table, public NdbDictObjectImpl {
 public:
   NdbTableImpl();
   NdbTableImpl(NdbDictionary::Table &);
-  ~NdbTableImpl();
+  ~NdbTableImpl() override;
   
+  static SimpleProperties::IndirectReader IndirectReader;
+  static SimpleProperties::IndirectWriter IndirectWriter;
+
   void init();
   int setName(const char * name);
   const char * getName() const;
@@ -236,11 +275,11 @@ public:
   Uint64 m_max_rows;
   Uint64 m_min_rows;
   Uint32 m_default_no_part_flag;
+  Uint32 m_row_checksum;
   bool m_linear_flag;
   bool m_logging;
   bool m_temporary;
   bool m_row_gci;
-  bool m_row_checksum;
   bool m_force_var_part;
   bool m_has_default_values; 
   bool m_read_backup;
@@ -327,7 +366,7 @@ class NdbIndexImpl : public NdbDictionary::Index, public NdbDictObjectImpl {
 public:
   NdbIndexImpl();
   NdbIndexImpl(NdbDictionary::Index &);
-  ~NdbIndexImpl();
+  ~NdbIndexImpl() override;
 
   void init();
   int setName(const char * name);
@@ -430,7 +469,7 @@ class NdbEventImpl : public NdbDictionary::Event, public NdbDictObjectImpl {
 public:
   NdbEventImpl();
   NdbEventImpl(NdbDictionary::Event &);
-  ~NdbEventImpl();
+  ~NdbEventImpl() override;
 
   void init();
   int setName(const char * name);
@@ -453,7 +492,7 @@ public:
     ndbout_c("NdbEventImpl: id=%d, key=%d",
 	     m_eventId,
 	     m_eventKey);
-  };
+  }
 
   Uint32 m_eventId;
   Uint32 m_eventKey;
@@ -500,7 +539,7 @@ class NdbTablespaceImpl : public NdbDictionary::Tablespace,
 public:
   NdbTablespaceImpl();
   NdbTablespaceImpl(NdbDictionary::Tablespace &);
-  ~NdbTablespaceImpl();
+  ~NdbTablespaceImpl() override;
 
   int assign(const NdbTablespaceImpl&);
 
@@ -514,7 +553,7 @@ class NdbLogfileGroupImpl : public NdbDictionary::LogfileGroup,
 public:
   NdbLogfileGroupImpl();
   NdbLogfileGroupImpl(NdbDictionary::LogfileGroup &);
-  ~NdbLogfileGroupImpl();
+  ~NdbLogfileGroupImpl() override;
 
   int assign(const NdbLogfileGroupImpl&);
 
@@ -539,7 +578,7 @@ class NdbDatafileImpl : public NdbDictionary::Datafile, public NdbFileImpl {
 public:
   NdbDatafileImpl();
   NdbDatafileImpl(NdbDictionary::Datafile &);
-  ~NdbDatafileImpl();
+  ~NdbDatafileImpl() override;
 
   int assign(const NdbDatafileImpl&);
 
@@ -552,7 +591,7 @@ class NdbUndofileImpl : public NdbDictionary::Undofile, public NdbFileImpl {
 public:
   NdbUndofileImpl();
   NdbUndofileImpl(NdbDictionary::Undofile &);
-  ~NdbUndofileImpl();
+  ~NdbUndofileImpl() override;
 
   int assign(const NdbUndofileImpl&);
 
@@ -566,7 +605,7 @@ class NdbHashMapImpl : public NdbDictionary::HashMap, public NdbDictObjectImpl
 public:
   NdbHashMapImpl();
   NdbHashMapImpl(NdbDictionary::HashMap &);
-  ~NdbHashMapImpl();
+  ~NdbHashMapImpl() override;
 
   int assign(const NdbHashMapImpl& src);
 
@@ -591,7 +630,7 @@ class NdbForeignKeyImpl : public NdbDictionary::ForeignKey,
 public:
   NdbForeignKeyImpl();
   NdbForeignKeyImpl(NdbDictionary::ForeignKey &);
-  ~NdbForeignKeyImpl();
+  ~NdbForeignKeyImpl() override;
 
   void init();
   int assign(const NdbForeignKeyImpl& src);
@@ -847,8 +886,6 @@ private:
 
   void execDROP_TABLE_REF(const NdbApiSignal*, const LinearSectionPtr ptr[3]);
   void execDROP_TABLE_CONF(const NdbApiSignal*, const LinearSectionPtr ptr[3]);
-  void execOLD_LIST_TABLES_CONF(const NdbApiSignal*,
-				const LinearSectionPtr ptr[3]);
   void execLIST_TABLES_CONF(const NdbApiSignal*, const LinearSectionPtr pt[3]);
 
   void execCREATE_FILE_REF(const NdbApiSignal*, const LinearSectionPtr ptr[3]);
@@ -1336,7 +1373,7 @@ public:
   InitTable(const BaseString &name) :
     GlobalCacheInitObject(name)
   {}
-  int init(NdbDictionaryImpl *dict, NdbTableImpl &tab) const
+  int init(NdbDictionaryImpl *dict, NdbTableImpl &tab) const override
   {
     int res= dict->getBlobTables(tab);
     if (res == 0)
@@ -1432,7 +1469,7 @@ public:
     m_prim(prim)
     {}
   
-  int init(NdbDictionaryImpl *dict, NdbTableImpl &tab) const {
+  int init(NdbDictionaryImpl *dict, NdbTableImpl &tab) const override {
     DBUG_ENTER("InitIndex::init");
     DBUG_ASSERT(tab.m_indexType != NdbDictionary::Object::TypeUndefined);
     /**

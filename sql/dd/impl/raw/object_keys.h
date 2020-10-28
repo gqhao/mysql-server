@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -24,13 +24,15 @@
 #define DD__OBJECT_KEYS_INCLUDED
 
 #include <stddef.h>
+#include <string.h>
 #include <sys/types.h>
-#include <string>
 
+#include "m_ctype.h"
 #include "my_inttypes.h"
 #include "sql/dd/impl/object_key.h"  // dd::Object_key
 #include "sql/dd/object_id.h"        // dd::Object_id
 #include "sql/dd/string_type.h"
+#include "template_utils.h"
 
 namespace dd {
 
@@ -54,11 +56,11 @@ class Void_key : public Object_key {
 
  public:
   /* purecov: begin inspected */
-  virtual Raw_key *create_access_key(Raw_table *) const { return NULL; }
+  Raw_key *create_access_key(Raw_table *) const override { return nullptr; }
   /* purecov: end */
 
   /* purecov: begin inspected */
-  virtual String_type str() const { return ""; }
+  String_type str() const override { return ""; }
   /* purecov: end */
 
   // We need a comparison operator since the type will be used
@@ -81,9 +83,9 @@ class Primary_id_key : public Object_key {
   void update(Object_id object_id) { m_object_id = object_id; }
 
  public:
-  virtual Raw_key *create_access_key(Raw_table *db_table) const;
+  Raw_key *create_access_key(Raw_table *db_table) const override;
 
-  virtual String_type str() const;
+  String_type str() const override;
 
   bool operator<(const Primary_id_key &rhs) const {
     return m_object_id < rhs.m_object_id;
@@ -104,9 +106,9 @@ class Parent_id_range_key : public Object_key {
         m_object_id(object_id) {}
 
  public:
-  virtual Raw_key *create_access_key(Raw_table *db_table) const;
+  Raw_key *create_access_key(Raw_table *db_table) const override;
 
-  virtual String_type str() const;
+  String_type str() const override;
 
  private:
   int m_id_index_no;
@@ -121,29 +123,40 @@ class Global_name_key : public Object_key {
  public:
   Global_name_key() {}
 
-  Global_name_key(int name_column_no, const String_type &object_name)
-      : m_name_column_no(name_column_no), m_object_name(object_name) {}
+  Global_name_key(int name_column_no, const String_type &object_name,
+                  const CHARSET_INFO *cs)
+      : m_name_column_no(name_column_no),
+        m_object_name(object_name),
+        m_cs(cs) {}
 
   // Update a preallocated instance.
-  void update(int name_column_no, const String_type &object_name) {
+  void update(int name_column_no, const String_type &object_name,
+              const CHARSET_INFO *cs) {
     m_name_column_no = name_column_no;
     m_object_name = object_name;
+    m_cs = cs;
   }
 
  public:
-  virtual Raw_key *create_access_key(Raw_table *db_table) const;
+  Raw_key *create_access_key(Raw_table *db_table) const override;
 
   /* purecov: begin inspected */
-  virtual String_type str() const { return m_object_name; }
+  String_type str() const override { return m_object_name; }
   /* purecov: end */
 
   bool operator<(const Global_name_key &rhs) const {
-    return m_object_name < rhs.m_object_name;
+    return (my_strnncoll(m_cs,
+                         pointer_cast<const uchar *>(m_object_name.c_str()),
+                         m_object_name.length(),
+                         pointer_cast<const uchar *>(rhs.m_object_name.c_str()),
+                         rhs.m_object_name.length()) < 0);
   }
 
  private:
   int m_name_column_no;
   String_type m_object_name;
+  // Collation used for the name in the table.
+  const CHARSET_INFO *m_cs;
 };
 
 ///////////////////////////////////////////////////////////////////////////
@@ -154,32 +167,39 @@ class Item_name_key : public Object_key {
   Item_name_key() {}
 
   Item_name_key(int container_id_column_no, Object_id container_id,
-                int name_column_no, const String_type &object_name)
+                int name_column_no, const String_type &object_name,
+                const CHARSET_INFO *cs)
       : m_container_id_column_no(container_id_column_no),
         m_name_column_no(name_column_no),
         m_container_id(container_id),
-        m_object_name(object_name) {}
+        m_object_name(object_name),
+        m_cs(cs) {}
 
   // Update a preallocated instance.
   void update(int container_id_column_no, Object_id container_id,
-              int name_column_no, const String_type &object_name) {
+              int name_column_no, const String_type &object_name,
+              const CHARSET_INFO *cs) {
     m_container_id_column_no = container_id_column_no;
     m_name_column_no = name_column_no;
     m_container_id = container_id;
     m_object_name = object_name;
+    m_cs = cs;
   }
 
  public:
-  virtual Raw_key *create_access_key(Raw_table *db_table) const;
+  Raw_key *create_access_key(Raw_table *db_table) const override;
 
-  virtual String_type str() const;
+  String_type str() const override;
 
   bool operator<(const Item_name_key &rhs) const {
-    return m_container_id < rhs.m_container_id
-               ? true
-               : rhs.m_container_id < m_container_id
-                     ? false
-                     : m_object_name < rhs.m_object_name;
+    if (m_container_id != rhs.m_container_id)
+      return (m_container_id < rhs.m_container_id);
+
+    return (my_strnncoll(m_cs,
+                         pointer_cast<const uchar *>(m_object_name.c_str()),
+                         m_object_name.length(),
+                         pointer_cast<const uchar *>(rhs.m_object_name.c_str()),
+                         rhs.m_object_name.length()) < 0);
   }
 
  private:
@@ -188,6 +208,8 @@ class Item_name_key : public Object_key {
 
   Object_id m_container_id;
   String_type m_object_name;
+  // Collation used for the name in the table.
+  const CHARSET_INFO *m_cs;
 };
 
 ///////////////////////////////////////////////////////////////////////////
@@ -219,9 +241,9 @@ class Se_private_id_key : public Object_key {
   }
 
  public:
-  virtual Raw_key *create_access_key(Raw_table *db_table) const;
+  Raw_key *create_access_key(Raw_table *db_table) const override;
 
-  virtual String_type str() const;
+  String_type str() const override;
 
   bool operator<(const Se_private_id_key &rhs) const {
     return m_private_id < rhs.m_private_id
@@ -253,9 +275,9 @@ class Composite_pk : public Object_key {
         m_second_id(second_id) {}
 
  public:
-  virtual Raw_key *create_access_key(Raw_table *db_table) const;
+  Raw_key *create_access_key(Raw_table *db_table) const override;
 
-  virtual String_type str() const;
+  String_type str() const override;
 
  private:
   int m_index_no;
@@ -271,8 +293,9 @@ class Composite_pk : public Object_key {
 
 class Composite_char_key : public Object_key {
  public:
-  Composite_char_key(int index_no, uint first_column_no, String_type first_name,
-                     uint second_column_no, String_type second_name)
+  Composite_char_key(int index_no, uint first_column_no,
+                     const String_type &first_name, uint second_column_no,
+                     const String_type &second_name)
       : m_index_no(index_no),
         m_first_column_no(first_column_no),
         m_first_name(first_name),
@@ -280,9 +303,9 @@ class Composite_char_key : public Object_key {
         m_second_name(second_name) {}
 
  public:
-  virtual Raw_key *create_access_key(Raw_table *db_table) const;
+  Raw_key *create_access_key(Raw_table *db_table) const override;
 
-  virtual String_type str() const;
+  String_type str() const override;
 
  private:
   int m_index_no;
@@ -299,10 +322,10 @@ class Composite_char_key : public Object_key {
 class Composite_4char_key : public Object_key {
  public:
   Composite_4char_key(int index_no, uint first_column_no,
-                      String_type first_name, uint second_column_no,
-                      String_type second_name, uint third_column_no,
-                      String_type third_name, uint fourth_column_no,
-                      String_type fourth_name)
+                      const String_type &first_name, uint second_column_no,
+                      const String_type &second_name, uint third_column_no,
+                      const String_type &third_name, uint fourth_column_no,
+                      const String_type &fourth_name)
       : m_index_no(index_no),
         m_first_column_no(first_column_no),
         m_first_name(first_name),
@@ -314,9 +337,9 @@ class Composite_4char_key : public Object_key {
         m_fourth_name(fourth_name) {}
 
  public:
-  virtual Raw_key *create_access_key(Raw_table *db_table) const;
+  Raw_key *create_access_key(Raw_table *db_table) const override;
 
-  virtual String_type str() const;
+  String_type str() const override;
 
  private:
   int m_index_no;
@@ -356,9 +379,9 @@ class Composite_obj_id_3char_key : public Object_key {
         m_third_name(third_name) {}
 
  public:
-  virtual Raw_key *create_access_key(Raw_table *db_table) const;
+  Raw_key *create_access_key(Raw_table *db_table) const override;
 
-  virtual String_type str() const;
+  String_type str() const override;
 
  private:
   int m_index_no;
@@ -392,9 +415,9 @@ class Index_stat_range_key : public Object_key {
         m_table_name(table_name) {}
 
  public:
-  virtual Raw_key *create_access_key(Raw_table *db_table) const;
+  Raw_key *create_access_key(Raw_table *db_table) const override;
 
-  virtual String_type str() const;
+  String_type str() const override;
 
  private:
   int m_index_no;
@@ -414,19 +437,21 @@ class Routine_name_key : public Object_key {
 
   Routine_name_key(int index_no, int container_id_column_no,
                    Object_id container_id, int type_column_no, uint type,
-                   int name_column_no, const String_type &object_name)
+                   int name_column_no, const String_type &object_name,
+                   const CHARSET_INFO *cs)
       : m_index_no(index_no),
         m_container_id_column_no(container_id_column_no),
         m_type_column_no(type_column_no),
         m_name_column_no(name_column_no),
         m_container_id(container_id),
         m_type(type),
-        m_object_name(object_name) {}
+        m_object_name(object_name),
+        m_cs(cs) {}
 
   // Update a preallocated instance.
   void update(int index_no, int container_id_column_no, Object_id container_id,
               int type_column_no, uint type, int name_column_no,
-              const String_type &object_name) {
+              const String_type &object_name, const CHARSET_INFO *cs) {
     m_index_no = index_no;
     m_container_id_column_no = container_id_column_no;
     m_type_column_no = type_column_no;
@@ -434,12 +459,13 @@ class Routine_name_key : public Object_key {
     m_container_id = container_id;
     m_type = type;
     m_object_name = object_name;
+    m_cs = cs;
   }
 
  public:
-  virtual Raw_key *create_access_key(Raw_table *db_table) const;
+  Raw_key *create_access_key(Raw_table *db_table) const override;
 
-  virtual String_type str() const;
+  String_type str() const override;
 
   bool operator<(const Routine_name_key &rhs) const;
 
@@ -452,6 +478,8 @@ class Routine_name_key : public Object_key {
   Object_id m_container_id;
   uint m_type;
   String_type m_object_name;
+  // Collation used for the routine name in the table.
+  const CHARSET_INFO *m_cs;
 };
 
 ///////////////////////////////////////////////////////////////////////////
@@ -474,9 +502,9 @@ class Table_reference_range_key : public Object_key {
         m_table_name(table_name) {}
 
  public:
-  virtual Raw_key *create_access_key(Raw_table *db_table) const;
+  Raw_key *create_access_key(Raw_table *db_table) const override;
 
-  virtual String_type str() const;
+  String_type str() const override;
 
  private:
   int m_index_no;
@@ -508,9 +536,9 @@ class Sub_partition_range_key : public Object_key {
         m_parent_partition_id(parent_partition_id) {}
 
  public:
-  virtual Raw_key *create_access_key(Raw_table *db_table) const;
+  Raw_key *create_access_key(Raw_table *db_table) const override;
 
-  virtual String_type str() const;
+  String_type str() const override;
 
  private:
   int m_index_no;
@@ -523,5 +551,55 @@ class Sub_partition_range_key : public Object_key {
 };
 
 ///////////////////////////////////////////////////////////////////////////
+
+// Range key to find rows using definer name.
+class Definer_reference_range_key : public Object_key {
+ public:
+  Definer_reference_range_key(int index_no, int definer_column_no,
+                              const String_type &definer)
+      : m_index_no(index_no),
+        m_definer_column_no(definer_column_no),
+        m_definer(definer) {}
+
+ public:
+  Raw_key *create_access_key(Raw_table *db_table) const override;
+
+  String_type str() const override;
+
+ private:
+  int m_index_no;
+  int m_definer_column_no;
+  String_type m_definer;
+};
+
+///////////////////////////////////////////////////////////////////////////
+
+// Range key to find rows using table type and definer name.
+class View_definer_reference_range_key : public Object_key {
+ public:
+  View_definer_reference_range_key(int index_no, int table_type_column_no,
+                                   uint table_type, int definer_column_no,
+                                   const String_type &definer)
+      : m_index_no(index_no),
+        m_table_type_column_no(table_type_column_no),
+        m_table_type(table_type),
+        m_definer_column_no(definer_column_no),
+        m_definer(definer) {}
+
+ public:
+  Raw_key *create_access_key(Raw_table *db_table) const override;
+
+  String_type str() const override;
+
+ private:
+  int m_index_no;
+  int m_table_type_column_no;
+  uint m_table_type;
+  int m_definer_column_no;
+  String_type m_definer;
+};
+
+//////////////////////////////////////////////////////////////////////////////
+
 }  // namespace dd
 #endif  // DD__OBJECT_KEYS_INCLUDED

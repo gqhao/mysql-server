@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -24,6 +24,7 @@
 
 #include <stddef.h>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -36,10 +37,11 @@
 #include "my_dbug.h"
 #include "my_inttypes.h"
 #include "my_sys.h"
-#include "mysqld_error.h"                 // ER_*
-#include "sql/dd/impl/properties_impl.h"  // Properties_impl
-#include "sql/dd/impl/raw/raw_record.h"   // Raw_record
-#include "sql/dd/impl/sdi_impl.h"         // sdi read/write functions
+#include "mysqld_error.h"                         // ER_*
+#include "sql/dd/impl/bootstrap/bootstrap_ctx.h"  // dd::bootstrap::DD_bootstrap_ctx
+#include "sql/dd/impl/properties_impl.h"          // Properties_impl
+#include "sql/dd/impl/raw/raw_record.h"           // Raw_record
+#include "sql/dd/impl/sdi_impl.h"                 // sdi read/write functions
 #include "sql/dd/impl/tables/column_type_elements.h"  // Column_type_elements
 #include "sql/dd/impl/tables/columns.h"               // Colummns
 #include "sql/dd/impl/transaction_impl.h"  // Open_dictionary_tables_ctx
@@ -59,6 +61,10 @@ namespace dd {
 class Abstract_table;
 class Sdi_rcontext;
 class Sdi_wcontext;
+
+static const std::set<String_type> default_valid_option_keys = {
+    "column_format", "geom_type",         "interval_count", "not_secondary",
+    "storage",       "treat_bit_as_char", "is_array"};
 
 ///////////////////////////////////////////////////////////////////////////
 // Column_impl implementation.
@@ -82,9 +88,9 @@ Column_impl::Column_impl()
       m_has_no_default(false),
       m_default_value_null(true),
       m_default_value_utf8_null(true),
-      m_options(new Properties_impl()),
-      m_se_private_data(new Properties_impl()),
-      m_table(NULL),
+      m_options(default_valid_option_keys),
+      m_se_private_data(),
+      m_table(nullptr),
       m_elements(),
       m_collation_id(INVALID_OBJECT_ID),
       m_is_explicit_collation(false),
@@ -108,8 +114,8 @@ Column_impl::Column_impl(Abstract_table_impl *table)
       m_has_no_default(false),
       m_default_value_null(true),
       m_default_value_utf8_null(true),
-      m_options(new Properties_impl()),
-      m_se_private_data(new Properties_impl()),
+      m_options(default_valid_option_keys),
+      m_se_private_data(),
       m_table(table),
       m_elements(),
       m_collation_id(INVALID_OBJECT_ID),
@@ -123,32 +129,6 @@ Column_impl::~Column_impl() {}
 const Abstract_table &Column_impl::table() const { return *m_table; }
 
 Abstract_table &Column_impl::table() { return *m_table; }
-
-///////////////////////////////////////////////////////////////////////////
-
-bool Column_impl::set_options_raw(const String_type &options_raw) {
-  Properties *properties = Properties_impl::parse_properties(options_raw);
-
-  if (!properties)
-    return true;  // Error status, current values has not changed.
-
-  m_options.reset(properties);
-  return false;
-}
-
-///////////////////////////////////////////////////////////////////////////
-
-bool Column_impl::set_se_private_data_raw(
-    const String_type &se_private_data_raw) {
-  Properties *properties =
-      Properties_impl::parse_properties(se_private_data_raw);
-
-  if (!properties)
-    return true;  // Error status, current values has not changed.
-
-  m_se_private_data.reset(properties);
-  return false;
-}
 
 ///////////////////////////////////////////////////////////////////////////
 
@@ -250,8 +230,16 @@ bool Column_impl::restore_attributes(const Raw_record &r) {
 
   // Special cases dealing with NULL values for nullable fields
 
-  set_options_raw(r.read_str(Columns::FIELD_OPTIONS, ""));
-  set_se_private_data_raw(r.read_str(Columns::FIELD_SE_PRIVATE_DATA, ""));
+  set_options(r.read_str(Columns::FIELD_OPTIONS, ""));
+  set_se_private_data(r.read_str(Columns::FIELD_SE_PRIVATE_DATA, ""));
+
+  // m_engine_attribute and m_secondary_engine_attribute added in 80021
+  if (!bootstrap::DD_bootstrap_ctx::instance().is_dd_upgrade_from_before(
+          bootstrap::DD_VERSION_80021)) {
+    m_engine_attribute = r.read_str(Columns::FIELD_ENGINE_ATTRIBUTE, "");
+    m_secondary_engine_attribute =
+        r.read_str(Columns::FIELD_SECONDARY_ENGINE_ATTRIBUTE, "");
+  }
 
   set_default_option(r.read_str(Columns::FIELD_DEFAULT_OPTION, ""));
   set_update_option(r.read_str(Columns::FIELD_UPDATE_OPTION, ""));
@@ -281,6 +269,18 @@ bool Column_impl::store_attributes(Raw_record *r) {
   // What value should we store in those columns in case when specific
   // attribute doesn't make sense for the type ? E.g. "unsigned" for
   // VARCHAR column
+
+  // Store engine_attribute and secondary_engine_attribute only if we're
+  // not upgrading
+  if (!bootstrap::DD_bootstrap_ctx::instance().is_dd_upgrade_from_before(
+          bootstrap::DD_VERSION_80021) &&
+      (r->store(Columns::FIELD_ENGINE_ATTRIBUTE, m_engine_attribute,
+                m_engine_attribute.empty()) ||
+       r->store(Columns::FIELD_SECONDARY_ENGINE_ATTRIBUTE,
+                m_secondary_engine_attribute,
+                m_secondary_engine_attribute.empty()))) {
+    return true;
+  }
 
   return store_id(r, Columns::FIELD_ID) || store_name(r, Columns::FIELD_NAME) ||
          r->store(Columns::FIELD_TABLE_ID, m_table->id()) ||
@@ -317,8 +317,8 @@ bool Column_impl::store_attributes(Raw_record *r) {
                   m_generation_expression_utf8.empty()) ||
          r->store(Columns::FIELD_COMMENT, m_comment) ||
          r->store(Columns::FIELD_HIDDEN, static_cast<int>(m_hidden)) ||
-         r->store(Columns::FIELD_OPTIONS, *m_options) ||
-         r->store(Columns::FIELD_SE_PRIVATE_DATA, *m_se_private_data) ||
+         r->store(Columns::FIELD_OPTIONS, m_options) ||
+         r->store(Columns::FIELD_SE_PRIVATE_DATA, m_se_private_data) ||
          r->store(Columns::FIELD_COLUMN_KEY, m_column_key) ||
          r->store(Columns::FIELD_COLUMN_TYPE_UTF8, m_column_type_utf8) ||
          r->store(Columns::FIELD_SRS_ID,
@@ -327,8 +327,9 @@ bool Column_impl::store_attributes(Raw_record *r) {
 }
 
 ///////////////////////////////////////////////////////////////////////////
-static_assert(Columns::FIELD_SE_PRIVATE_DATA == 25,
-              "Columns definition has changed, review (de)ser memfuns!");
+static_assert(Columns::NUMBER_OF_FIELDS == 32,
+              "Columns definition has changed, check if serialize() and "
+              "deserialize() need to be updated!!");
 void Column_impl::serialize(Sdi_wcontext *wctx, Sdi_writer *w) const {
   w->StartObject();
   Entity_object_impl::serialize(wctx, w);
@@ -366,11 +367,16 @@ void Column_impl::serialize(Sdi_wcontext *wctx, Sdi_writer *w) const {
         STRING_WITH_LEN("generation_expression_utf8"));
   write_properties(w, m_options, STRING_WITH_LEN("options"));
   write_properties(w, m_se_private_data, STRING_WITH_LEN("se_private_data"));
+  write(w, m_engine_attribute, STRING_WITH_LEN("engine_attribute"));
+  write(w, m_secondary_engine_attribute,
+        STRING_WITH_LEN("secondary_engine_attribute"));
+
   write_enum(w, m_column_key, STRING_WITH_LEN("column_key"));
   write(w, m_column_type_utf8, STRING_WITH_LEN("column_type_utf8"));
   serialize_each(wctx, w, m_elements, STRING_WITH_LEN("elements"));
   write(w, m_collation_id, STRING_WITH_LEN("collation_id"));
   write(w, m_is_explicit_collation, STRING_WITH_LEN("is_explicit_collation"));
+
   w->EndObject();
 }
 
@@ -404,6 +410,8 @@ bool Column_impl::deserialize(Sdi_rcontext *rctx, const RJ_Value &val) {
   read(&m_generation_expression_utf8, val, "generation_expression_utf8");
   read_properties(&m_options, val, "options");
   read_properties(&m_se_private_data, val, "se_private_data");
+  read(&m_engine_attribute, val, "engine_attribute");
+  read(&m_secondary_engine_attribute, val, "secondary_engine_attribute");
   read_enum(&m_column_key, val, "column_key");
   read(&m_column_type_utf8, val, "column_type_utf8");
   read_enum(&m_hidden, val, "hidden");
@@ -417,7 +425,8 @@ bool Column_impl::deserialize(Sdi_rcontext *rctx, const RJ_Value &val) {
     m_srs_id = srs_id;
   }
 
-  deserialize_each(rctx, [this]() { return add_element(); }, val, "elements");
+  deserialize_each(
+      rctx, [this]() { return add_element(); }, val, "elements");
 
   read(&m_collation_id, val, "collation_id");
   read(&m_is_explicit_collation, val, "is_explicit_collation");
@@ -459,7 +468,10 @@ void Column_impl::debug_print(String_type &outb) const {
      << "m_generation_expression: " << m_generation_expression << "; "
      << "m_generation_expression_utf8: " << m_generation_expression_utf8 << "; "
      << "m_hidden: " << static_cast<int>(m_hidden) << "; "
-     << "m_options: " << m_options->raw_string() << "; "
+     << "m_options: " << m_options.raw_string() << "; "
+     << "m_se_private_data: " << m_se_private_data.raw_string() << "; "
+     << "m_engine_attribute: " << m_engine_attribute << "; "
+     << "m_secondary_engine_attribute: " << m_secondary_engine_attribute << "; "
      << "m_column_key: " << m_column_key << "; "
      << "m_column_type_utf8: " << m_column_type_utf8 << "; "
      << "m_srs_id_null: " << !m_srs_id.has_value() << "; ";
@@ -526,9 +538,10 @@ Column_impl::Column_impl(const Column_impl &src, Abstract_table_impl *parent)
       m_comment(src.m_comment),
       m_generation_expression(src.m_generation_expression),
       m_generation_expression_utf8(src.m_generation_expression_utf8),
-      m_options(Properties_impl::parse_properties(src.m_options->raw_string())),
-      m_se_private_data(Properties_impl::parse_properties(
-          src.m_se_private_data->raw_string())),
+      m_options(src.m_options),
+      m_se_private_data(src.m_se_private_data),
+      m_engine_attribute(src.m_engine_attribute),
+      m_secondary_engine_attribute(src.m_secondary_engine_attribute),
       m_table(parent),
       m_elements(),
       m_column_type_utf8(src.m_column_type_utf8),

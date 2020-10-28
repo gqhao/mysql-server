@@ -3,6 +3,10 @@ SET default_storage_engine=InnoDB;
 # A series of tests to make sure tables are opened after restart.
 # Bug#13357607 Compressed file-per-table tablespaces fail to open
 #
+#
+# Restart with innodb-directories set to MYSQL_TMP_DIR/alt_dir.
+#
+# restart:--innodb-directories=MYSQL_TMP_DIR/alt_dir
 CREATE DATABASE move_test;
 USE move_test;
 set global innodb_file_per_table=on;
@@ -11,6 +15,8 @@ set global innodb_file_per_table=on;
 #
 CREATE TABLE t1_restart(c1 DOUBLE AUTO_INCREMENT KEY, c2 CHAR(10), c3 VARCHAR(100), c4 DATE, c5 TEXT)
 ROW_FORMAT=REDUNDANT  ENGINE=InnoDB;
+Warnings:
+Warning	3856	AUTO_INCREMENT support for FLOAT/DOUBLE columns is deprecated and will be removed in a future release. Consider removing AUTO_INCREMENT from column 'c1'.
 INSERT INTO t1_restart VALUES (1000000000, 'MySQL', 'InnoDB', '2011-11-11', 'Read this after reboot');
 INSERT INTO t1_restart (SELECT 0, c2, c3, c4, c5 FROM t1_restart);
 INSERT INTO t1_restart (SELECT 0, c2, c3, c4, c5 FROM t1_restart);
@@ -34,6 +40,8 @@ count(*)
 #
 CREATE TABLE t2_restart(c1 DOUBLE AUTO_INCREMENT KEY, c2 CHAR(10), c3 VARCHAR(100), c4 DATE, c5 TEXT)
 ROW_FORMAT=COMPACT  ENGINE=InnoDB;
+Warnings:
+Warning	3856	AUTO_INCREMENT support for FLOAT/DOUBLE columns is deprecated and will be removed in a future release. Consider removing AUTO_INCREMENT from column 'c1'.
 INSERT INTO t2_restart VALUES (1000000000, 'MySQL', 'InnoDB', '2011-11-11', 'Read this after reboot');
 INSERT INTO t2_restart (SELECT 0, c2, c3, c4, c5 FROM t2_restart);
 INSERT INTO t2_restart (SELECT 0, c2, c3, c4, c5 FROM t2_restart);
@@ -57,6 +65,8 @@ count(*)
 #
 CREATE TABLE t3_restart(c1 DOUBLE AUTO_INCREMENT KEY, c2 CHAR(10), c3 VARCHAR(100), c4 DATE, c5 TEXT)
 ROW_FORMAT=COMPRESSED  KEY_BLOCK_SIZE=2  ENGINE=InnoDB;
+Warnings:
+Warning	3856	AUTO_INCREMENT support for FLOAT/DOUBLE columns is deprecated and will be removed in a future release. Consider removing AUTO_INCREMENT from column 'c1'.
 INSERT INTO t3_restart VALUES (1000000000, 'MySQL', 'InnoDB', '2011-11-11', 'Read this after reboot');
 INSERT INTO t3_restart (SELECT 0, c2, c3, c4, c5 FROM t3_restart);
 INSERT INTO t3_restart (SELECT 0, c2, c3, c4, c5 FROM t3_restart);
@@ -80,6 +90,8 @@ count(*)
 #
 CREATE TABLE t4_restart(c1 DOUBLE AUTO_INCREMENT KEY, c2 CHAR(10), c3 VARCHAR(100), c4 DATE, c5 TEXT)
 ROW_FORMAT=DYNAMIC  ENGINE=InnoDB;
+Warnings:
+Warning	3856	AUTO_INCREMENT support for FLOAT/DOUBLE columns is deprecated and will be removed in a future release. Consider removing AUTO_INCREMENT from column 'c1'.
 INSERT INTO t4_restart VALUES (1000000000, 'MySQL', 'InnoDB', '2011-11-11', 'Read this after reboot');
 INSERT INTO t4_restart (SELECT 0, c2, c3, c4, c5 FROM t4_restart);
 INSERT INTO t4_restart (SELECT 0, c2, c3, c4, c5 FROM t4_restart);
@@ -104,6 +116,8 @@ count(*)
 #
 CREATE TABLE t5_restart(c1 DOUBLE AUTO_INCREMENT KEY, c2 CHAR(10), c3 VARCHAR(100), c4 DATE, c5 TEXT)
 ROW_FORMAT=DYNAMIC  ENGINE=InnoDB  DATA DIRECTORY='MYSQL_TMP_DIR/alt_dir';
+Warnings:
+Warning	3856	AUTO_INCREMENT support for FLOAT/DOUBLE columns is deprecated and will be removed in a future release. Consider removing AUTO_INCREMENT from column 'c1'.
 INSERT INTO t5_restart VALUES (1000000000, 'MySQL', 'InnoDB', '2011-11-11', 'Read this after reboot');
 INSERT INTO t5_restart (SELECT 0, c2, c3, c4, c5 FROM t5_restart);
 INSERT INTO t5_restart (SELECT 0, c2, c3, c4, c5 FROM t5_restart);
@@ -123,7 +137,8 @@ SELECT count(*) FROM t5_restart;
 count(*)
 16
 #
-# Create and insert records into a partitioned table that uses-echo # a remote DATA DIRECTORY for each partition.
+# Create and insert records into a partitioned table that uses
+# a remote DATA DIRECTORY for each partition.
 CREATE TABLE t6_restart(
 c1 INT AUTO_INCREMENT KEY, c2 CHAR(10), c3 VARCHAR(100), c4 DATE, c5 TEXT)
 ROW_FORMAT=COMPRESSED  KEY_BLOCK_SIZE=2  ENGINE=InnoDB
@@ -139,7 +154,7 @@ INSERT INTO t6_restart (SELECT 0, c2, c3, c4, c5 FROM t6_restart);
 SHOW CREATE TABLE t6_restart;
 Table	Create Table
 t6_restart	CREATE TABLE `t6_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -175,7 +190,7 @@ INSERT INTO t7_restart (SELECT 0, c2, c3, c4, c5 FROM t7_restart);
 SHOW CREATE TABLE t7_restart;
 Table	Create Table
 t7_restart	CREATE TABLE `t7_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -199,6 +214,8 @@ count(*)
 CREATE TABLESPACE s1_restart ADD DATAFILE 's1_restart.ibd';
 CREATE TABLE t8_restart(c1 DOUBLE AUTO_INCREMENT KEY, c2 CHAR(10), c3 VARCHAR(100), c4 DATE, c5 TEXT)
 ROW_FORMAT=COMPACT  ENGINE=InnoDB TABLESPACE=s1_restart;
+Warnings:
+Warning	3856	AUTO_INCREMENT support for FLOAT/DOUBLE columns is deprecated and will be removed in a future release. Consider removing AUTO_INCREMENT from column 'c1'.
 INSERT INTO t8_restart VALUES (1000000000, 'MySQL', 'InnoDB', '2011-11-11', 'Read this after reboot');
 INSERT INTO t8_restart (SELECT 0, c2, c3, c4, c5 FROM t2_restart);
 INSERT INTO t8_restart (SELECT 0, c2, c3, c4, c5 FROM t2_restart);
@@ -219,6 +236,8 @@ count(*)
 65
 CREATE TABLE t9_restart(c1 DOUBLE AUTO_INCREMENT KEY, c2 CHAR(10), c3 VARCHAR(100), c4 DATE, c5 TEXT)
 ROW_FORMAT=DYNAMIC  ENGINE=InnoDB TABLESPACE=s1_restart;
+Warnings:
+Warning	3856	AUTO_INCREMENT support for FLOAT/DOUBLE columns is deprecated and will be removed in a future release. Consider removing AUTO_INCREMENT from column 'c1'.
 INSERT INTO t9_restart VALUES (1000000000, 'MySQL', 'InnoDB', '2011-11-11', 'Read this after reboot');
 INSERT INTO t9_restart (SELECT 0, c2, c3, c4, c5 FROM t2_restart);
 INSERT INTO t9_restart (SELECT 0, c2, c3, c4, c5 FROM t2_restart);
@@ -256,6 +275,8 @@ move_test/t7_restart#p#p1#sp#s2	move_test/t7_restart#p#p1#sp#s2	97	8	Dynamic	0	S
 move_test/t7_restart#p#p1#sp#s3	move_test/t7_restart#p#p1#sp#s3	97	8	Dynamic	0	Single
 move_test/t8_restart	s1_restart	129	8	Compact	0	General
 move_test/t9_restart	s1_restart	161	8	Dynamic	0	General
+mtr/global_suppressions	mtr/global_suppressions	33	4	Dynamic	0	Single
+mtr/test_suppressions	mtr/test_suppressions	33	4	Dynamic	0	Single
 === information_schema.innodb_tablespaces and innodb_datafiles ===
 Space_Name	Space_Type	Page_Size	Zip_Size	Formats_Permitted	Path
 move_test/t1_restart	Single	DEFAULT	0	Compact or Redundant	MYSQLD_DATADIR/move_test/t1_restart.ibd
@@ -270,6 +291,8 @@ move_test/t7_restart#p#p0#sp#s0	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/m
 move_test/t7_restart#p#p0#sp#s1	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p0#sp#s1.ibd
 move_test/t7_restart#p#p1#sp#s2	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s2.ibd
 move_test/t7_restart#p#p1#sp#s3	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 s1_restart	General	DEFAULT	0	Any	s1_restart.ibd
 === information_schema.files ===
 Space_Name	File_Type	Engine	Status	Tablespace_Name	Path
@@ -285,6 +308,8 @@ move_test/t7_restart#p#p0#sp#s0	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#
 move_test/t7_restart#p#p0#sp#s1	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#p0#sp#s1	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p0#sp#s1.ibd
 move_test/t7_restart#p#p1#sp#s2	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#p1#sp#s2	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s2.ibd
 move_test/t7_restart#p#p1#sp#s3	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#p1#sp#s3	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/global_suppressions	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/test_suppressions	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 s1_restart	TABLESPACE	InnoDB	NORMAL	s1_restart	MYSQLD_DATADIR/s1_restart.ibd
 #
 # Shutdown the server and list the tablespace OS files
@@ -364,7 +389,7 @@ t5_restart	CREATE TABLE `t5_restart` (
 SHOW CREATE TABLE t6_restart;
 Table	Create Table
 t6_restart	CREATE TABLE `t6_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -378,7 +403,7 @@ t6_restart	CREATE TABLE `t6_restart` (
 SHOW CREATE TABLE t7_restart;
 Table	Create Table
 t7_restart	CREATE TABLE `t7_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -468,6 +493,8 @@ move_test/t7_restart#p#p1#sp#s2	move_test/t7_restart#p#p1#sp#s2	97	8	Dynamic	0	S
 move_test/t7_restart#p#p1#sp#s3	move_test/t7_restart#p#p1#sp#s3	97	8	Dynamic	0	Single
 move_test/t8_restart	s1_restart	129	8	Compact	0	General
 move_test/t9_restart	s1_restart	161	8	Dynamic	0	General
+mtr/global_suppressions	mtr/global_suppressions	33	4	Dynamic	0	Single
+mtr/test_suppressions	mtr/test_suppressions	33	4	Dynamic	0	Single
 === information_schema.innodb_tablespaces and innodb_datafiles ===
 Space_Name	Space_Type	Page_Size	Zip_Size	Formats_Permitted	Path
 move_test/t1_restart	Single	DEFAULT	0	Compact or Redundant	MYSQLD_DATADIR/move_test/t1_restart.ibd
@@ -482,6 +509,8 @@ move_test/t7_restart#p#p0#sp#s0	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/m
 move_test/t7_restart#p#p0#sp#s1	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p0#sp#s1.ibd
 move_test/t7_restart#p#p1#sp#s2	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s2.ibd
 move_test/t7_restart#p#p1#sp#s3	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 s1_restart	General	DEFAULT	0	Any	s1_restart.ibd
 === information_schema.files ===
 Space_Name	File_Type	Engine	Status	Tablespace_Name	Path
@@ -497,6 +526,8 @@ move_test/t7_restart#p#p0#sp#s0	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#
 move_test/t7_restart#p#p0#sp#s1	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#p0#sp#s1	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p0#sp#s1.ibd
 move_test/t7_restart#p#p1#sp#s2	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#p1#sp#s2	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s2.ibd
 move_test/t7_restart#p#p1#sp#s3	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#p1#sp#s3	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/global_suppressions	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/test_suppressions	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 s1_restart	TABLESPACE	InnoDB	NORMAL	s1_restart	MYSQLD_DATADIR/s1_restart.ibd
 DROP TABLE t1_restart;
 DROP TABLE t2_restart;
@@ -513,25 +544,29 @@ ALTER TABLE t7_restart TRUNCATE PARTITION p1;
 === information_schema.innodb_tablespaces and innodb_datafiles ===
 Space_Name	Space_Type	Page_Size	Zip_Size	Formats_Permitted	Path
 move_test/t4_restart	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/move_test/t4_restart.ibd
+move_test/t5_restart	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t5_restart.ibd
 move_test/t6_restart#p#p0	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p0.ibd
 move_test/t6_restart#p#p1	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p1.ibd
+move_test/t6_restart#p#p2	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p2.ibd
 move_test/t7_restart#p#p0#sp#s0	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p0#sp#s0.ibd
 move_test/t7_restart#p#p0#sp#s1	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p0#sp#s1.ibd
-move_test/t5_restart	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t5_restart.ibd
-move_test/t6_restart#p#p2	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p2.ibd
 move_test/t7_restart#p#p1#sp#s2	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s2.ibd
 move_test/t7_restart#p#p1#sp#s3	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 === information_schema.files ===
 Space_Name	File_Type	Engine	Status	Tablespace_Name	Path
 move_test/t4_restart	TABLESPACE	InnoDB	NORMAL	move_test/t4_restart	MYSQLD_DATADIR/move_test/t4_restart.ibd
+move_test/t5_restart	TABLESPACE	InnoDB	NORMAL	move_test/t5_restart	MYSQL_TMP_DIR/alt_dir/move_test/t5_restart.ibd
 move_test/t6_restart#p#p0	TABLESPACE	InnoDB	NORMAL	move_test/t6_restart#p#p0	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p0.ibd
 move_test/t6_restart#p#p1	TABLESPACE	InnoDB	NORMAL	move_test/t6_restart#p#p1	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p1.ibd
+move_test/t6_restart#p#p2	TABLESPACE	InnoDB	NORMAL	move_test/t6_restart#p#p2	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p2.ibd
 move_test/t7_restart#p#p0#sp#s0	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#p0#sp#s0	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p0#sp#s0.ibd
 move_test/t7_restart#p#p0#sp#s1	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#p0#sp#s1	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p0#sp#s1.ibd
-move_test/t5_restart	TABLESPACE	InnoDB	NORMAL	move_test/t5_restart	MYSQL_TMP_DIR/alt_dir/move_test/t5_restart.ibd
-move_test/t6_restart#p#p2	TABLESPACE	InnoDB	NORMAL	move_test/t6_restart#p#p2	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p2.ibd
 move_test/t7_restart#p#p1#sp#s2	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#p1#sp#s2	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s2.ibd
 move_test/t7_restart#p#p1#sp#s3	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#p1#sp#s3	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/global_suppressions	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/test_suppressions	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 INSERT INTO t5_restart VALUES (1000000000, 'MySQL', 'InnoDB', '2011-11-11', 'Read this after reboot');
 INSERT INTO t5_restart (SELECT 0, c2, c3, c4, c5 FROM t5_restart);
 INSERT INTO t5_restart (SELECT 0, c2, c3, c4, c5 FROM t5_restart);
@@ -555,13 +590,13 @@ count(*)
 SHOW CREATE TABLE t6_restart;
 Table	Create Table
 t6_restart	CREATE TABLE `t6_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
   `c5` text,
   PRIMARY KEY (`c1`)
-) ENGINE=InnoDB AUTO_INCREMENT=32 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=2
+) ENGINE=InnoDB AUTO_INCREMENT=33 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=COMPRESSED KEY_BLOCK_SIZE=2
 /*!50100 PARTITION BY HASH (`c1`)
 (PARTITION p0 DATA DIRECTORY = 'MYSQL_TMP_DIR/alt_dir' ENGINE = InnoDB,
  PARTITION p1 DATA DIRECTORY = 'MYSQL_TMP_DIR/alt_dir' ENGINE = InnoDB,
@@ -572,13 +607,13 @@ count(*)
 SHOW CREATE TABLE t7_restart;
 Table	Create Table
 t7_restart	CREATE TABLE `t7_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
   `c5` text,
   PRIMARY KEY (`c1`)
-) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC
+) ENGINE=InnoDB AUTO_INCREMENT=33 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci ROW_FORMAT=DYNAMIC
 /*!50100 PARTITION BY RANGE (`c1`)
 SUBPARTITION BY HASH (`c1`)
 (PARTITION p0 VALUES LESS THAN (10)
@@ -612,25 +647,29 @@ innodb_file_per_table	ON
 === information_schema.innodb_tablespaces and innodb_datafiles ===
 Space_Name	Space_Type	Page_Size	Zip_Size	Formats_Permitted	Path
 move_test/t4_restart	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/move_test/t4_restart.ibd
+move_test/t5_restart	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t5_restart.ibd
 move_test/t6_restart#p#p0	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p0.ibd
 move_test/t6_restart#p#p1	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p1.ibd
+move_test/t6_restart#p#p2	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p2.ibd
 move_test/t7_restart#p#p0#sp#s0	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p0#sp#s0.ibd
 move_test/t7_restart#p#p0#sp#s1	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p0#sp#s1.ibd
-move_test/t5_restart	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t5_restart.ibd
-move_test/t6_restart#p#p2	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p2.ibd
 move_test/t7_restart#p#p1#sp#s2	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s2.ibd
 move_test/t7_restart#p#p1#sp#s3	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 === information_schema.files ===
 Space_Name	File_Type	Engine	Status	Tablespace_Name	Path
 move_test/t4_restart	TABLESPACE	InnoDB	NORMAL	move_test/t4_restart	MYSQLD_DATADIR/move_test/t4_restart.ibd
+move_test/t5_restart	TABLESPACE	InnoDB	NORMAL	move_test/t5_restart	MYSQL_TMP_DIR/alt_dir/move_test/t5_restart.ibd
 move_test/t6_restart#p#p0	TABLESPACE	InnoDB	NORMAL	move_test/t6_restart#p#p0	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p0.ibd
 move_test/t6_restart#p#p1	TABLESPACE	InnoDB	NORMAL	move_test/t6_restart#p#p1	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p1.ibd
+move_test/t6_restart#p#p2	TABLESPACE	InnoDB	NORMAL	move_test/t6_restart#p#p2	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p2.ibd
 move_test/t7_restart#p#p0#sp#s0	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#p0#sp#s0	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p0#sp#s0.ibd
 move_test/t7_restart#p#p0#sp#s1	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#p0#sp#s1	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p0#sp#s1.ibd
-move_test/t5_restart	TABLESPACE	InnoDB	NORMAL	move_test/t5_restart	MYSQL_TMP_DIR/alt_dir/move_test/t5_restart.ibd
-move_test/t6_restart#p#p2	TABLESPACE	InnoDB	NORMAL	move_test/t6_restart#p#p2	MYSQL_TMP_DIR/alt_dir/move_test/t6_restart#p#p2.ibd
 move_test/t7_restart#p#p1#sp#s2	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#p1#sp#s2	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s2.ibd
 move_test/t7_restart#p#p1#sp#s3	TABLESPACE	InnoDB	NORMAL	move_test/t7_restart#p#p1#sp#s3	MYSQL_TMP_DIR/alt_dir/move_test/t7_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/global_suppressions	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/test_suppressions	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 SELECT count(*) FROM t5_restart;
 count(*)
 8
@@ -650,7 +689,7 @@ count(*)
 SHOW CREATE TABLE t6_restart;
 Table	Create Table
 t6_restart	CREATE TABLE `t6_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -667,7 +706,7 @@ count(*)
 SHOW CREATE TABLE t7_restart;
 Table	Create Table
 t7_restart	CREATE TABLE `t7_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -705,25 +744,29 @@ RENAME TABLE t7_restart TO t77_restart;
 === information_schema.innodb_tablespaces and innodb_datafiles ===
 Space_Name	Space_Type	Page_Size	Zip_Size	Formats_Permitted	Path
 move_test/t4_restart	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/move_test/t4_restart.ibd
+move_test/t55_restart	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
 move_test/t66_restart#p#p0	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p0.ibd
 move_test/t66_restart#p#p1	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p1.ibd
+move_test/t66_restart#p#p2	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p0#sp#s0	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s0.ibd
 move_test/t77_restart#p#p0#sp#s1	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s1.ibd
-move_test/t55_restart	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
-move_test/t66_restart#p#p2	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p1#sp#s2	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s2.ibd
 move_test/t77_restart#p#p1#sp#s3	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 === information_schema.files ===
 Space_Name	File_Type	Engine	Status	Tablespace_Name	Path
 move_test/t4_restart	TABLESPACE	InnoDB	NORMAL	move_test/t4_restart	MYSQLD_DATADIR/move_test/t4_restart.ibd
+move_test/t55_restart	TABLESPACE	InnoDB	NORMAL	move_test/t55_restart	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
 move_test/t66_restart#p#p0	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p0	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p0.ibd
 move_test/t66_restart#p#p1	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p1	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p1.ibd
+move_test/t66_restart#p#p2	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p2	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p0#sp#s0	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p0#sp#s0	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s0.ibd
 move_test/t77_restart#p#p0#sp#s1	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p0#sp#s1	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s1.ibd
-move_test/t55_restart	TABLESPACE	InnoDB	NORMAL	move_test/t55_restart	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
-move_test/t66_restart#p#p2	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p2	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p1#sp#s2	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p1#sp#s2	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s2.ibd
 move_test/t77_restart#p#p1#sp#s3	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p1#sp#s3	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/global_suppressions	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/test_suppressions	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 INSERT INTO t55_restart (SELECT 0, c2, c3, c4, c5 FROM t55_restart);
 SELECT count(*) FROM t55_restart;
 count(*)
@@ -745,7 +788,7 @@ count(*)
 SHOW CREATE TABLE t66_restart;
 Table	Create Table
 t66_restart	CREATE TABLE `t66_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -763,7 +806,7 @@ count(*)
 SHOW CREATE TABLE t77_restart;
 Table	Create Table
 t77_restart	CREATE TABLE `t77_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -799,25 +842,29 @@ innodb_file_per_table	ON
 === information_schema.innodb_tablespaces and innodb_datafiles ===
 Space_Name	Space_Type	Page_Size	Zip_Size	Formats_Permitted	Path
 move_test/t4_restart	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/move_test/t4_restart.ibd
+move_test/t55_restart	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
 move_test/t66_restart#p#p0	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p0.ibd
 move_test/t66_restart#p#p1	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p1.ibd
+move_test/t66_restart#p#p2	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p0#sp#s0	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s0.ibd
 move_test/t77_restart#p#p0#sp#s1	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s1.ibd
-move_test/t55_restart	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
-move_test/t66_restart#p#p2	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p1#sp#s2	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s2.ibd
 move_test/t77_restart#p#p1#sp#s3	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 === information_schema.files ===
 Space_Name	File_Type	Engine	Status	Tablespace_Name	Path
 move_test/t4_restart	TABLESPACE	InnoDB	NORMAL	move_test/t4_restart	MYSQLD_DATADIR/move_test/t4_restart.ibd
+move_test/t55_restart	TABLESPACE	InnoDB	NORMAL	move_test/t55_restart	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
 move_test/t66_restart#p#p0	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p0	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p0.ibd
 move_test/t66_restart#p#p1	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p1	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p1.ibd
+move_test/t66_restart#p#p2	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p2	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p0#sp#s0	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p0#sp#s0	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s0.ibd
 move_test/t77_restart#p#p0#sp#s1	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p0#sp#s1	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s1.ibd
-move_test/t55_restart	TABLESPACE	InnoDB	NORMAL	move_test/t55_restart	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
-move_test/t66_restart#p#p2	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p2	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p1#sp#s2	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p1#sp#s2	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s2.ibd
 move_test/t77_restart#p#p1#sp#s3	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p1#sp#s3	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/global_suppressions	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/test_suppressions	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 INSERT INTO t55_restart (SELECT 0, c2, c3, c4, c5 FROM t55_restart);
 SELECT count(*) FROM t55_restart;
 count(*)
@@ -839,7 +886,7 @@ count(*)
 SHOW CREATE TABLE t66_restart;
 Table	Create Table
 t66_restart	CREATE TABLE `t66_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -857,7 +904,7 @@ count(*)
 SHOW CREATE TABLE t77_restart;
 Table	Create Table
 t77_restart	CREATE TABLE `t77_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -893,25 +940,29 @@ t77_restart#p#p1#sp#s3.ibd
 === information_schema.innodb_tablespaces and innodb_datafiles ===
 Space_Name	Space_Type	Page_Size	Zip_Size	Formats_Permitted	Path
 move_test/t4_restart	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/move_test/t4_restart.ibd
+move_test/t55_restart	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
 move_test/t66_restart#p#p0	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p0.ibd
 move_test/t66_restart#p#p1	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p1.ibd
+move_test/t66_restart#p#p2	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p0#sp#s0	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s0.ibd
 move_test/t77_restart#p#p0#sp#s1	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s1.ibd
-move_test/t55_restart	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
-move_test/t66_restart#p#p2	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p1#sp#s2	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s2.ibd
 move_test/t77_restart#p#p1#sp#s3	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 === information_schema.files ===
 Space_Name	File_Type	Engine	Status	Tablespace_Name	Path
 move_test/t4_restart	TABLESPACE	InnoDB	NORMAL	move_test/t4_restart	MYSQLD_DATADIR/move_test/t4_restart.ibd
+move_test/t55_restart	TABLESPACE	InnoDB	NORMAL	move_test/t55_restart	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
 move_test/t66_restart#p#p0	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p0	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p0.ibd
 move_test/t66_restart#p#p1	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p1	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p1.ibd
+move_test/t66_restart#p#p2	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p2	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p0#sp#s0	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p0#sp#s0	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s0.ibd
 move_test/t77_restart#p#p0#sp#s1	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p0#sp#s1	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s1.ibd
-move_test/t55_restart	TABLESPACE	InnoDB	NORMAL	move_test/t55_restart	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
-move_test/t66_restart#p#p2	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p2	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p1#sp#s2	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p1#sp#s2	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s2.ibd
 move_test/t77_restart#p#p1#sp#s3	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p1#sp#s3	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/global_suppressions	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/test_suppressions	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 INSERT INTO t4_restart (SELECT 0, c2, c3, c4, c5 FROM t4_restart);
 SELECT count(*) FROM t4_restart;
 count(*)
@@ -947,7 +998,7 @@ count(*)
 SHOW CREATE TABLE t66_restart;
 Table	Create Table
 t66_restart	CREATE TABLE `t66_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -965,7 +1016,7 @@ count(*)
 SHOW CREATE TABLE t77_restart;
 Table	Create Table
 t77_restart	CREATE TABLE `t77_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -990,25 +1041,29 @@ SUBPARTITION BY HASH (`c1`)
 === information_schema.innodb_tablespaces and innodb_datafiles ===
 Space_Name	Space_Type	Page_Size	Zip_Size	Formats_Permitted	Path
 move_test/t4_restart	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/move_test/t4_restart.ibd
+move_test/t55_restart	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
 move_test/t66_restart#p#p0	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p0.ibd
 move_test/t66_restart#p#p1	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p1.ibd
+move_test/t66_restart#p#p2	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p0#sp#s0	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s0.ibd
 move_test/t77_restart#p#p0#sp#s1	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s1.ibd
-move_test/t55_restart	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
-move_test/t66_restart#p#p2	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p1#sp#s2	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s2.ibd
 move_test/t77_restart#p#p1#sp#s3	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 === information_schema.files ===
 Space_Name	File_Type	Engine	Status	Tablespace_Name	Path
 move_test/t4_restart	TABLESPACE	InnoDB	NORMAL	move_test/t4_restart	MYSQLD_DATADIR/move_test/t4_restart.ibd
+move_test/t55_restart	TABLESPACE	InnoDB	NORMAL	move_test/t55_restart	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
 move_test/t66_restart#p#p0	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p0	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p0.ibd
 move_test/t66_restart#p#p1	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p1	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p1.ibd
+move_test/t66_restart#p#p2	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p2	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p0#sp#s0	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p0#sp#s0	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s0.ibd
 move_test/t77_restart#p#p0#sp#s1	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p0#sp#s1	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p0#sp#s1.ibd
-move_test/t55_restart	TABLESPACE	InnoDB	NORMAL	move_test/t55_restart	MYSQL_TMP_DIR/alt_dir/move_test/t55_restart.ibd
-move_test/t66_restart#p#p2	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p2	MYSQL_TMP_DIR/alt_dir/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p1#sp#s2	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p1#sp#s2	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s2.ibd
 move_test/t77_restart#p#p1#sp#s3	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p1#sp#s3	MYSQL_TMP_DIR/alt_dir/move_test/t77_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/global_suppressions	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/test_suppressions	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 INSERT INTO t4_restart (SELECT 0, c2, c3, c4, c5 FROM t4_restart);
 SELECT count(*) FROM t4_restart;
 count(*)
@@ -1044,7 +1099,7 @@ count(*)
 SHOW CREATE TABLE t66_restart;
 Table	Create Table
 t66_restart	CREATE TABLE `t66_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -1062,7 +1117,7 @@ count(*)
 SHOW CREATE TABLE t77_restart;
 Table	Create Table
 t77_restart	CREATE TABLE `t77_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -1129,7 +1184,7 @@ count(*)
 SHOW CREATE TABLE t66_restart;
 Table	Create Table
 t66_restart	CREATE TABLE `t66_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -1147,7 +1202,7 @@ count(*)
 SHOW CREATE TABLE t77_restart;
 Table	Create Table
 t77_restart	CREATE TABLE `t77_restart` (
-  `c1` int(11) NOT NULL AUTO_INCREMENT,
+  `c1` int NOT NULL AUTO_INCREMENT,
   `c2` char(10) DEFAULT NULL,
   `c3` varchar(100) DEFAULT NULL,
   `c4` date DEFAULT NULL,
@@ -1176,29 +1231,37 @@ move_test/t77_restart#p#p0#sp#s0	move_test/t77_restart#p#p0#sp#s0	97	8	Dynamic	0
 move_test/t77_restart#p#p0#sp#s1	move_test/t77_restart#p#p0#sp#s1	97	8	Dynamic	0	Single
 move_test/t77_restart#p#p1#sp#s2	move_test/t77_restart#p#p1#sp#s2	97	8	Dynamic	0	Single
 move_test/t77_restart#p#p1#sp#s3	move_test/t77_restart#p#p1#sp#s3	97	8	Dynamic	0	Single
+mtr/global_suppressions	mtr/global_suppressions	33	4	Dynamic	0	Single
+mtr/test_suppressions	mtr/test_suppressions	33	4	Dynamic	0	Single
 === information_schema.innodb_tablespaces and innodb_datafiles ===
 Space_Name	Space_Type	Page_Size	Zip_Size	Formats_Permitted	Path
 move_test/t4_restart	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/move_test/t4_restart.ibd
+move_test/t55_restart	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir_moved/move_test/t55_restart.ibd
 move_test/t66_restart#p#p0	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir_moved/move_test/t66_restart#p#p0.ibd
 move_test/t66_restart#p#p1	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir_moved/move_test/t66_restart#p#p1.ibd
+move_test/t66_restart#p#p2	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir_moved/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p0#sp#s0	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir_moved/move_test/t77_restart#p#p0#sp#s0.ibd
 move_test/t77_restart#p#p0#sp#s1	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir_moved/move_test/t77_restart#p#p0#sp#s1.ibd
-move_test/t55_restart	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir_moved/move_test/t55_restart.ibd
-move_test/t66_restart#p#p2	Single	DEFAULT	2048	Compressed	MYSQL_TMP_DIR/alt_dir_moved/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p1#sp#s2	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir_moved/move_test/t77_restart#p#p1#sp#s2.ibd
 move_test/t77_restart#p#p1#sp#s3	Single	DEFAULT	0	Dynamic	MYSQL_TMP_DIR/alt_dir_moved/move_test/t77_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	Single	DEFAULT	0	Dynamic	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 === information_schema.files ===
 Space_Name	File_Type	Engine	Status	Tablespace_Name	Path
 move_test/t4_restart	TABLESPACE	InnoDB	NORMAL	move_test/t4_restart	MYSQLD_DATADIR/move_test/t4_restart.ibd
+move_test/t55_restart	TABLESPACE	InnoDB	NORMAL	move_test/t55_restart	MYSQL_TMP_DIR/alt_dir_moved/move_test/t55_restart.ibd
 move_test/t66_restart#p#p0	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p0	MYSQL_TMP_DIR/alt_dir_moved/move_test/t66_restart#p#p0.ibd
 move_test/t66_restart#p#p1	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p1	MYSQL_TMP_DIR/alt_dir_moved/move_test/t66_restart#p#p1.ibd
+move_test/t66_restart#p#p2	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p2	MYSQL_TMP_DIR/alt_dir_moved/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p0#sp#s0	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p0#sp#s0	MYSQL_TMP_DIR/alt_dir_moved/move_test/t77_restart#p#p0#sp#s0.ibd
 move_test/t77_restart#p#p0#sp#s1	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p0#sp#s1	MYSQL_TMP_DIR/alt_dir_moved/move_test/t77_restart#p#p0#sp#s1.ibd
-move_test/t55_restart	TABLESPACE	InnoDB	NORMAL	move_test/t55_restart	MYSQL_TMP_DIR/alt_dir_moved/move_test/t55_restart.ibd
-move_test/t66_restart#p#p2	TABLESPACE	InnoDB	NORMAL	move_test/t66_restart#p#p2	MYSQL_TMP_DIR/alt_dir_moved/move_test/t66_restart#p#p2.ibd
 move_test/t77_restart#p#p1#sp#s2	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p1#sp#s2	MYSQL_TMP_DIR/alt_dir_moved/move_test/t77_restart#p#p1#sp#s2.ibd
 move_test/t77_restart#p#p1#sp#s3	TABLESPACE	InnoDB	NORMAL	move_test/t77_restart#p#p1#sp#s3	MYSQL_TMP_DIR/alt_dir_moved/move_test/t77_restart#p#p1#sp#s3.ibd
+mtr/global_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/global_suppressions	MYSQLD_DATADIR/mtr/global_suppressions.ibd
+mtr/test_suppressions	TABLESPACE	InnoDB	NORMAL	mtr/test_suppressions	MYSQLD_DATADIR/mtr/test_suppressions.ibd
 #
 # Cleanup
 #
 DROP DATABASE move_test;
+# restart
+set global innodb_file_per_table=1;

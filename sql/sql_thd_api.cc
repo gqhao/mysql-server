@@ -1,5 +1,4 @@
-/*
-   Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -19,8 +18,7 @@
 
    You should have received a copy of the GNU General Public License
    along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
-*/
+   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
 #include <string.h>
 #include <sys/types.h>
@@ -48,10 +46,10 @@
 #include "sql/mysqld.h"  // key_thread_one_connection
 #include "sql/protocol_classic.h"
 #include "sql/query_options.h"
-#include "sql/rpl_rli.h"  // is_mts_worker
-#include "sql/rpl_slave_commit_order_manager.h"
+#include "sql/resourcegroups/platform/thread_attrs_api.h"  // num_vcpus
+#include "sql/rpl_rli.h"                                   // is_mts_worker
+#include "sql/rpl_slave_commit_order_manager.h"  // check_and_report_deadlock
 #include "sql/sql_alter.h"
-// commit_order_manager_check_deadlock
 #include "sql/sql_callback.h"  // MYSQL_CALLBACK
 #include "sql/sql_class.h"     // THD
 #include "sql/sql_error.h"
@@ -59,6 +57,7 @@
 #include "sql/sql_plugin.h"  // plugin_unlock
 #include "sql/sql_plugin_ref.h"
 #include "sql/sql_thd_internal_api.h"
+#include "sql/strfunc.h"
 #include "sql/system_variables.h"
 #include "sql/transaction_info.h"
 #include "sql/xa.h"
@@ -266,11 +265,9 @@ my_socket thd_get_fd(THD *thd) {
   Set thread specific environment required for thd cleanup in thread pool.
 
   @param thd            THD object
-
-  @retval               1 if thread-specific enviroment could be set else 0
 */
 
-int thd_store_globals(THD *thd) { return thd->store_globals(); }
+void thd_store_globals(THD *thd) { thd->store_globals(); }
 
 /**
   Get thread attributes for connection threads
@@ -312,11 +309,12 @@ int thd_tablespace_op(const MYSQL_THD thd) {
     code and the Alter_info::flags.
   */
   if (thd->lex->sql_command != SQLCOM_ALTER_TABLE) return 0;
-  DBUG_ASSERT(thd->lex->alter_info != NULL);
+  DBUG_ASSERT(thd->lex->alter_info != nullptr);
 
-  return MY_TEST(
-      (thd->lex->alter_info->flags & (Alter_info::ALTER_DISCARD_TABLESPACE |
-                                      Alter_info::ALTER_IMPORT_TABLESPACE)));
+  return (thd->lex->alter_info->flags & (Alter_info::ALTER_DISCARD_TABLESPACE |
+                                         Alter_info::ALTER_IMPORT_TABLESPACE))
+             ? 1
+             : 0;
 }
 
 static void set_thd_stage_info(MYSQL_THD thd, const PSI_stage_info *new_stage,
@@ -324,7 +322,7 @@ static void set_thd_stage_info(MYSQL_THD thd, const PSI_stage_info *new_stage,
                                const char *calling_func,
                                const char *calling_file,
                                const unsigned int calling_line) {
-  if (thd == NULL) thd = current_thd;
+  if (thd == nullptr) thd = current_thd;
 
   thd->enter_stage(new_stage, old_stage, calling_func, calling_file,
                    calling_line);
@@ -369,12 +367,12 @@ void thd_set_ha_data(MYSQL_THD thd, const struct handlerton *hton,
                      const void *ha_data) {
   plugin_ref *lock = &thd->get_ha_data(hton->slot)->lock;
   if (ha_data && !*lock)
-    *lock = ha_lock_engine(NULL, (handlerton *)hton);
+    *lock = ha_lock_engine(nullptr, hton);
   else if (!ha_data && *lock) {
-    plugin_unlock(NULL, *lock);
-    *lock = NULL;
+    plugin_unlock(nullptr, *lock);
+    *lock = nullptr;
   }
-  *thd_ha_data(thd, hton) = (void *)ha_data;
+  *thd_ha_data(thd, hton) = const_cast<void *>(ha_data);
 }
 
 long long thd_test_options(const MYSQL_THD thd, long long test_options) {
@@ -484,7 +482,7 @@ char *thd_security_context(MYSQL_THD thd, char *buffer, size_t length,
     We have to copy the new string to the destination buffer because the string
     was reallocated to a larger buffer to be able to fit.
   */
-  DBUG_ASSERT(buffer != NULL);
+  DBUG_ASSERT(buffer != nullptr);
   length = min(str.length(), length - 1);
   memcpy(buffer, str.c_ptr_quick(), length);
   /* Make sure that the new string is null terminated */
@@ -493,18 +491,21 @@ char *thd_security_context(MYSQL_THD thd, char *buffer, size_t length,
 }
 
 void thd_get_xid(const MYSQL_THD thd, MYSQL_XID *xid) {
-  *xid = *(MYSQL_XID *)thd->get_transaction()->xid_state()->get_xid();
+  *xid = *pointer_cast<const MYSQL_XID *>(
+      thd->get_transaction()->xid_state()->get_xid());
 }
 
 /**
   Check the killed state of a user thread
-  @param thd  user thread
+  @param v_thd  user thread
   @retval 0 the user thread is active
   @retval 1 the user thread has been killed
 */
 
-int thd_killed(const MYSQL_THD thd) {
-  if (thd == NULL) return current_thd != NULL ? current_thd->killed : 0;
+int thd_killed(const void *v_thd) {
+  const THD *thd = static_cast<const THD *>(v_thd);
+  if (thd == nullptr) thd = current_thd;
+  if (thd == nullptr) return 0;
   return thd->killed;
 }
 
@@ -541,7 +542,7 @@ int thd_allow_batch(MYSQL_THD thd) {
 }
 
 void thd_mark_transaction_to_rollback(MYSQL_THD thd, int all) {
-  DBUG_ENTER("thd_mark_transaction_to_rollback");
+  DBUG_TRACE;
   DBUG_ASSERT(thd);
   /*
     The parameter "all" has type int since the function is defined
@@ -551,7 +552,6 @@ void thd_mark_transaction_to_rollback(MYSQL_THD thd, int all) {
     specifically.
   */
   thd->mark_transaction_to_rollback((all != 0));
-  DBUG_VOID_RETURN;
 }
 
 //////////////////////////////////////////////////////////
@@ -575,7 +575,10 @@ char *thd_strmake(MYSQL_THD thd, const char *str, size_t size) {
 MYSQL_LEX_STRING *thd_make_lex_string(MYSQL_THD thd, MYSQL_LEX_STRING *lex_str,
                                       const char *str, size_t size,
                                       int allocate_lex_string) {
-  return thd->make_lex_string(lex_str, str, size, (bool)allocate_lex_string);
+  if (allocate_lex_string != 0)
+    return make_lex_string_root(thd->mem_root, str, size);
+  if (lex_string_strmake(thd->mem_root, lex_str, str, size)) return nullptr;
+  return lex_str;
 }
 
 void *thd_memdup(MYSQL_THD thd, const void *str, size_t size) {
@@ -637,13 +640,11 @@ void thd_wait_end(MYSQL_THD thd) {
    called.
 */
 void thd_report_row_lock_wait(THD *self, THD *wait_for) {
-  DBUG_ENTER("thd_report_row_lock_wait");
+  DBUG_TRACE;
 
-  if (self != NULL && wait_for != NULL && is_mts_worker(self) &&
+  if (self != nullptr && wait_for != nullptr && is_mts_worker(self) &&
       is_mts_worker(wait_for))
-    commit_order_manager_check_deadlock(self, wait_for);
-
-  DBUG_VOID_RETURN;
+    Commit_order_manager::check_and_report_deadlock(self, wait_for);
 }
 
 /**
@@ -651,7 +652,11 @@ void thd_report_row_lock_wait(THD *self, THD *wait_for) {
 */
 
 void remove_ssl_err_thread_state() {
-#if !defined(HAVE_WOLFSSL) && !defined(HAVE_OPENSSL11)
+#if !defined(HAVE_OPENSSL11)
   ERR_remove_thread_state(nullptr);
 #endif
+}
+
+unsigned int thd_get_num_vcpus() {
+  return resourcegroups::platform::num_vcpus();
 }

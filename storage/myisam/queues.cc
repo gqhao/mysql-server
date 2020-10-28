@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -36,6 +36,8 @@
 #include <stdio.h>
 #include <sys/types.h>
 
+#include <algorithm>
+
 #include "my_dbug.h"
 #include "my_macros.h"
 #include "my_sys.h"
@@ -71,57 +73,18 @@ extern "C" int init_queue(QUEUE *queue, PSI_memory_key psi_key,
                           bool max_at_top,
                           int (*compare)(void *, uchar *, uchar *),
                           void *first_cmp_arg) {
-  DBUG_ENTER("init_queue");
+  DBUG_TRACE;
   if ((queue->root = (uchar **)my_malloc(
-           psi_key, (max_elements + 1) * sizeof(void *), MYF(MY_WME))) == 0)
-    DBUG_RETURN(1);
+           psi_key, (max_elements + 1) * sizeof(void *), MYF(MY_WME))) ==
+      nullptr)
+    return 1;
   queue->elements = 0;
   queue->compare = compare;
   queue->first_cmp_arg = first_cmp_arg;
   queue->max_elements = max_elements;
   queue->offset_to_key = offset_to_key;
   queue_set_max_at_top(queue, max_at_top);
-  DBUG_RETURN(0);
-}
-
-/*
-  Init queue, uses init_queue internally for init work but also accepts
-  auto_extent as parameter
-
-  SYNOPSIS
-    init_queue_ex()
-    queue		Queue to initialise
-    max_elements	Max elements that will be put in queue
-    offset_to_key	Offset to key in element stored in queue
-                        Used when sending pointers to compare function
-    max_at_top		Set to 1 if you want biggest element on top.
-    compare		Compare function for elements, takes 3 arguments.
-    first_cmp_arg	First argument to compare function
-    auto_extent         When the queue is full and there is insert operation
-                        extend the queue.
-
-  NOTES
-    Will allocate max_element pointers for queue array
-
-  RETURN
-    0	ok
-    1	Could not allocate memory
-*/
-
-extern "C" int init_queue_ex(QUEUE *queue, PSI_memory_key psi_key,
-                             uint max_elements, uint offset_to_key,
-                             bool max_at_top,
-                             int (*compare)(void *, uchar *, uchar *),
-                             void *first_cmp_arg, uint auto_extent) {
-  int ret;
-  DBUG_ENTER("init_queue_ex");
-
-  if ((ret = init_queue(queue, psi_key, max_elements, offset_to_key, max_at_top,
-                        compare, first_cmp_arg)))
-    DBUG_RETURN(ret);
-
-  queue->auto_extent = auto_extent;
-  DBUG_RETURN(0);
+  return 0;
 }
 
 /*
@@ -151,14 +114,14 @@ extern "C" int reinit_queue(QUEUE *queue, PSI_memory_key psi_key,
                             bool max_at_top,
                             int (*compare)(void *, uchar *, uchar *),
                             void *first_cmp_arg) {
-  DBUG_ENTER("reinit_queue");
+  DBUG_TRACE;
   queue->elements = 0;
   queue->compare = compare;
   queue->first_cmp_arg = first_cmp_arg;
   queue->offset_to_key = offset_to_key;
   queue_set_max_at_top(queue, max_at_top);
   resize_queue(queue, psi_key, max_elements);
-  DBUG_RETURN(0);
+  return 0;
 }
 
 /*
@@ -181,16 +144,16 @@ extern "C" int reinit_queue(QUEUE *queue, PSI_memory_key psi_key,
 static int resize_queue(QUEUE *queue, PSI_memory_key psi_key,
                         uint max_elements) {
   uchar **new_root;
-  DBUG_ENTER("resize_queue");
-  if (queue->max_elements == max_elements) DBUG_RETURN(0);
+  DBUG_TRACE;
+  if (queue->max_elements == max_elements) return 0;
   if ((new_root = (uchar **)my_realloc(psi_key, (void *)queue->root,
                                        (max_elements + 1) * sizeof(void *),
-                                       MYF(MY_WME))) == 0)
-    DBUG_RETURN(1);
-  set_if_smaller(queue->elements, max_elements);
+                                       MYF(MY_WME))) == nullptr)
+    return 1;
+  queue->elements = std::min(queue->elements, max_elements);
   queue->max_elements = max_elements;
   queue->root = new_root;
-  DBUG_RETURN(0);
+  return 0;
 }
 
 /*
@@ -208,10 +171,9 @@ static int resize_queue(QUEUE *queue, PSI_memory_key psi_key,
 */
 
 void delete_queue(QUEUE *queue) {
-  DBUG_ENTER("delete_queue");
+  DBUG_TRACE;
   my_free(queue->root);
-  queue->root = NULL;
-  DBUG_VOID_RETURN;
+  queue->root = nullptr;
 }
 
 /* Code for insert, search and delete of elements */

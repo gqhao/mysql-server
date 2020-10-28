@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2013, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -38,8 +38,8 @@ using my_testing::Server_initializer;
 
 class UniqueCostTest : public ::testing::Test {
  protected:
-  virtual void SetUp() { initializer.SetUp(); }
-  virtual void TearDown() { initializer.TearDown(); }
+  void SetUp() override { initializer.SetUp(); }
+  void TearDown() override { initializer.TearDown(); }
 
   THD *thd() { return initializer.thd(); }
 
@@ -56,8 +56,7 @@ TEST_F(UniqueCostTest, GetUseCost) {
 
   size_t unique_calc_buff_size =
       Unique::get_cost_calc_buff_size(num_keys, key_size, MIN_SORT_MEMORY);
-  void *rawmem =
-      alloc_root(thd()->mem_root, unique_calc_buff_size * sizeof(uint));
+  void *rawmem = thd()->mem_root->Alloc(unique_calc_buff_size * sizeof(uint));
   Bounds_checked_array<uint> cost_buff = Bounds_checked_array<uint>(
       static_cast<uint *>(rawmem), unique_calc_buff_size);
   const double dup_removal_cost = Unique::get_use_cost(

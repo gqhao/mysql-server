@@ -23,11 +23,11 @@ perl;
                pid-file slow-query-log-file
                language lc-messages-dir
                datadir slave-load-tmpdir tmpdir socket table-definition-cache table-open-cache
-               tls-version secure-file-priv/;
+               tls-version admin-tls-version secure-file-priv/;
 
   # Variables which we don't want to display in result file since
   # they depend on type of build
-  @build_specific=qw/auto-generate-certs/;
+  @build_specific=qw/auto-generate-certs lock-order/;
 
   # Plugins which may or may not be there:
   @plugins=qw/innodb ngram mecab ndb ndbinfo archive blackhole federated partition ndbcluster debug ssl des-key-file
@@ -61,6 +61,7 @@ perl;
     # s/\b196608\b/262144/;
     # s/\b524288\b/262144/;
     # s/\b393216\b/262144/;
+    s/\b860160\b/262144/;
     s/\b573440\b/262144/;
     s/\b286720\b/262144/;
     s/\b442368\b/262144/;
@@ -71,6 +72,9 @@ perl;
     s/^log-tc-size \d+/log-tc-size #####/;
     # Avoid test failures when adding new error message
     s/^performance-schema-error-size \d+/performance-schema-error-size ####/;
+    # Avoid test failures if PARTIAL_REVOKES_DEFAULT build flag is ON
+    s/^partial-revokes (TRUE|FALSE)/partial-revokes ####/;
+    next if/use --skip-partial-revokes to disable/;
     foreach $var (@env) { s/$ENV{$var}/$var/ }
     next if /use --skip-(use-)?symbolic-links to disable/; # for valgrind, again
     next if $skip;
@@ -79,5 +83,6 @@ perl;
   close F;
 EOF
 
+--remove_file $MYSQL_TMP_DIR/mysqld--help.txt
 --rmdir $TMP_DATADIR
 --rmdir $MYDIR

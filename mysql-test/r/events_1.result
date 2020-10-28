@@ -50,7 +50,7 @@ SECOND	10	SELECT 1
 SELECT execute_at IS NULL, starts IS NULL, ends IS NULL, event_comment FROM information_schema.events WHERE event_schema='events_test' AND event_name='event_starts_test';
 execute_at IS NULL	starts IS NULL	ends IS NULL	EVENT_COMMENT
 1	0	1	
-ALTER EVENT event_starts_test ON SCHEDULE AT '2020-02-02 20:00:02';
+ALTER EVENT event_starts_test ON SCHEDULE AT date_add(now(), interval 5 day);
 SELECT execute_at IS NULL, starts IS NULL, ends IS NULL, event_comment FROM information_schema.events WHERE event_schema='events_test' AND event_name='event_starts_test';
 execute_at IS NULL	starts IS NULL	ends IS NULL	EVENT_COMMENT
 0	1	1	
@@ -63,7 +63,7 @@ SELECT execute_at IS NULL, starts IS NULL, ends IS NULL, event_comment FROM info
 execute_at IS NULL	starts IS NULL	ends IS NULL	EVENT_COMMENT
 0	1	1	
 DROP EVENT event_starts_test;
-CREATE EVENT event_starts_test ON SCHEDULE EVERY 20 SECOND STARTS '2020-02-02 20:00:02' ENDS '2022-02-02 20:00:02' DO SELECT 2;
+CREATE EVENT event_starts_test ON SCHEDULE EVERY 20 SECOND STARTS date_add(now(), interval 5 day) ENDS date_add(now(), interval 10 day) DO SELECT 2;
 SELECT execute_at IS NULL, starts IS NULL, ends IS NULL, event_comment FROM information_schema.events WHERE event_schema='events_test' AND event_name='event_starts_test';
 execute_at IS NULL	starts IS NULL	ends IS NULL	EVENT_COMMENT
 1	0	0	
@@ -122,7 +122,7 @@ drop event event3;
 drop table t_event3;
 set names utf8;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 CREATE EVENT root6 ON SCHEDULE EVERY '10:20' MINUTE_SECOND ON COMPLETION PRESERVE ENABLE COMMENT 'some comment' DO select 1;
 SHOW CREATE EVENT root6;
 Event	sql_mode	time_zone	Create Event	character_set_client	collation_connection	Database Collation
@@ -223,6 +223,8 @@ DROP EVENT event_test;
 #
 SET @orig_character_set_client = @@character_set_client;
 SET character_set_client = utf8;
+Warnings:
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 CREATE EVENT t÷est ON SCHEDULE AT NOW() ON COMPLETION NOT PRESERVE DO SELECT 1;
 ERROR HY000: Invalid utf8 character string: 't\xF7est'
 CREATE EVENT event ON SCHEDULE EVERY 1 SECOND COMMENT 'testÿ' DO SELECT 1;

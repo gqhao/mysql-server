@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -42,62 +42,52 @@
 #include "mysys/mysys_priv.h"
 
 bool init_dynamic_string(DYNAMIC_STRING *str, const char *init_str,
-                         size_t init_alloc, size_t alloc_increment) {
-  size_t length;
-  DBUG_ENTER("init_dynamic_string");
+                         size_t init_alloc) {
+  DBUG_TRACE;
 
-  if (!alloc_increment) alloc_increment = 128;
-  length = 1;
-  if (init_str && (length = strlen(init_str) + 1) < init_alloc)
-    init_alloc =
-        ((length + alloc_increment - 1) / alloc_increment) * alloc_increment;
-  if (!init_alloc) init_alloc = alloc_increment;
+  size_t length = init_str == nullptr ? 0 : strlen(init_str);
+  init_alloc = std::max(init_alloc, length + 1);
 
   if (!(str->str = (char *)my_malloc(key_memory_DYNAMIC_STRING, init_alloc,
                                      MYF(MY_WME))))
-    DBUG_RETURN(true);
-  str->length = length - 1;
-  if (init_str) memcpy(str->str, init_str, length);
+    return true;
+  str->length = length;
+  if (init_str) memcpy(str->str, init_str, length + 1);
   str->max_length = init_alloc;
-  str->alloc_increment = alloc_increment;
-  DBUG_RETURN(false);
+  return false;
 }
 
 bool dynstr_set(DYNAMIC_STRING *str, const char *init_str) {
   uint length = 0;
-  DBUG_ENTER("dynstr_set");
+  DBUG_TRACE;
 
   if (init_str && (length = (uint)strlen(init_str) + 1) > str->max_length) {
     str->max_length =
-        ((length + str->alloc_increment - 1) / str->alloc_increment) *
-        str->alloc_increment;
-    if (!str->max_length) str->max_length = str->alloc_increment;
+        std::max(str->max_length * 3 / 2, str->length + length + 1);
     if (!(str->str = (char *)my_realloc(key_memory_DYNAMIC_STRING, str->str,
                                         str->max_length, MYF(MY_WME))))
-      DBUG_RETURN(true);
+      return true;
   }
   if (init_str) {
     str->length = length - 1;
     memcpy(str->str, init_str, length);
   } else
     str->length = 0;
-  DBUG_RETURN(false);
+  return false;
 }
 
 bool dynstr_realloc(DYNAMIC_STRING *str, size_t additional_size) {
-  DBUG_ENTER("dynstr_realloc");
+  DBUG_TRACE;
 
-  if (!additional_size) DBUG_RETURN(false);
+  if (!additional_size) return false;
   if (str->length + additional_size > str->max_length) {
     str->max_length =
-        ((str->length + additional_size + str->alloc_increment - 1) /
-         str->alloc_increment) *
-        str->alloc_increment;
+        std::max(str->max_length * 3 / 2, str->length + additional_size + 1);
     if (!(str->str = (char *)my_realloc(key_memory_DYNAMIC_STRING, str->str,
                                         str->max_length, MYF(MY_WME))))
-      DBUG_RETURN(true);
+      return true;
   }
-  DBUG_RETURN(false);
+  return false;
 }
 
 bool dynstr_append(DYNAMIC_STRING *str, const char *append) {
@@ -108,15 +98,14 @@ bool dynstr_append_mem(DYNAMIC_STRING *str, const char *append, size_t length) {
   char *new_ptr;
   if (str->length + length >= str->max_length) {
     size_t new_length =
-        (str->length + length + str->alloc_increment) / str->alloc_increment;
-    new_length *= str->alloc_increment;
+        std::max(str->max_length * 3 / 2, str->length + length + 1);
     if (!(new_ptr = (char *)my_realloc(key_memory_DYNAMIC_STRING, str->str,
                                        new_length, MYF(MY_WME))))
       return true;
     str->str = new_ptr;
     str->max_length = new_length;
   }
-  memcpy(str->str + str->length, append, length);
+  if (length > 0) memcpy(str->str + str->length, append, length);
   str->length += length;
   str->str[str->length] = 0; /* Safety for C programs */
   return false;
@@ -179,5 +168,5 @@ bool dynstr_append_os_quoted(DYNAMIC_STRING *str, const char *append, ...) {
 
 void dynstr_free(DYNAMIC_STRING *str) {
   my_free(str->str);
-  str->str = NULL;
+  str->str = nullptr;
 }

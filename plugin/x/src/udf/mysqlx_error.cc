@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2.0,
@@ -23,7 +23,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 #include "plugin/x/src/udf/mysqlx_error.h"
 
 #include <cstring>
-#include "include/my_sys.h"
+
+#include "my_sys.h"  // NOLINT(build/include_subdir)
 
 namespace xpl {
 
@@ -35,20 +36,27 @@ bool mysqlx_error_init(UDF_INIT *, UDF_ARGS *args, char *message) {
   return true;
 }
 
-char *mysqlx_error(UDF_INIT *, UDF_ARGS *args, char *, unsigned long *, char *,
-                   char *error) {
+// NOLINTNEXTLINE(runtime/int)
+char *mysqlx_error(UDF_INIT *, UDF_ARGS *args, char *, unsigned long *,
+                   unsigned char *is_null, unsigned char *error) {
+  // NOLINTNEXTLINE(runtime/int)
   my_message(*reinterpret_cast<long long *>(args->args[0]),
              "Mysqlx internal error", MYF(0));
   *error = 1;
+  *is_null = 1;
   return nullptr;
 }
 }  // namespace
 
 namespace udf {
 Registrator::Record get_mysqlx_error_record() {
-  return {"mysqlx_error", STRING_RESULT,
-          reinterpret_cast<Udf_func_any>(mysqlx_error),
-          reinterpret_cast<Udf_func_init>(mysqlx_error_init), nullptr};
+  return {
+      "mysqlx_error",
+      STRING_RESULT,
+      reinterpret_cast<Udf_func_any>(mysqlx_error),
+      mysqlx_error_init,
+      nullptr,
+  };
 }
 }  // namespace udf
 }  // namespace xpl

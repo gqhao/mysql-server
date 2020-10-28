@@ -28,14 +28,13 @@ let $MYSQLD_DATADIR1 = $MYSQL_TMP_DIR/data57;
 --echo # Create an orphan .frm
 --copy_file $MYSQL_TMP_DIR/data57/sakila/actor.frm $MYSQL_TMP_DIR/data57/sakila/zzz.frm
 
-let $MYSQLD_LOG= $MYSQL_TMP_DIR/server.log;
-let $MYSQL_UPGRADE_LOG= $MYSQL_TMP_DIR/mysql_upgrade.log;
+let $MYSQLD_LOG= $MYSQLTEST_VARDIR/log/innodb_upgrade_orphan.log;
 
 --source include/shutdown_mysqld.inc
 
 --echo # start server and we expect failure because of orphan .frm(sakila/zzz.frm)
 --error 1
---exec $MYSQLD --loose-skip-log-bin --read-only --skip-log-slave-updates --skip-slave-preserve-commit-order --datadir=$MYSQLD_DATADIR1 --log-error=$MYSQLD_LOG --innodb-page-size=16k
+--exec $MYSQLD --secure-file-priv="" --loose-skip-log-bin --read-only --skip-log-slave-updates --skip-slave-preserve-commit-order --datadir=$MYSQLD_DATADIR1 --log-error=$MYSQLD_LOG --innodb-page-size=16k
 
 --echo # Remove orphan .frm
 --remove_file $MYSQL_TMP_DIR/data57/sakila/zzz.frm
@@ -43,6 +42,7 @@ let $MYSQL_UPGRADE_LOG= $MYSQL_TMP_DIR/mysql_upgrade.log;
 --echo # Retry upgrade on the failed datadir
 --exec echo "restart: --loose-skip-log-bin --read-only --skip-log-slave-updates --skip-slave-preserve-commit-order --datadir=$MYSQLD_DATADIR1 --log-error=$MYSQLD_LOG --innodb-page-size=16k" > $MYSQLTEST_VARDIR/tmp/mysqld.1.expect
 --enable_reconnect
+--let $wait_counter= 10000
 --source include/wait_until_connected_again.inc
 
 --echo # Sanity Testing after Server start
@@ -52,12 +52,6 @@ INSERT INTO test123.t1 values(1);
 SELECT * FROM test123.t1;
 DROP SCHEMA test123;
 
---echo # Execute mysql_upgrade
-
---source include/mysql_upgrade_preparation.inc
---exec $MYSQL_UPGRADE --skip-verbose --force 2>&1 > $MYSQL_UPGRADE_LOG
---source include/mysql_upgrade_cleanup.inc
-
 SHOW DATABASES;
 --echo # Check table structures
 SHOW CREATE TABLE mysql.user;
@@ -65,6 +59,7 @@ SHOW CREATE TABLE mysql.user;
 SHOW CREATE TABLE mysql.innodb_table_stats;
 SHOW CREATE TABLE mysql.innodb_index_stats;
 
+--sorted_result
 SELECT COLUMN_NAME,CHARACTER_MAXIMUM_LENGTH
   FROM INFORMATION_SCHEMA.COLUMNS col
     JOIN INFORMATION_SCHEMA.TABLES tab ON col.table_name=tab.table_name
@@ -86,6 +81,7 @@ SHOW CREATE TABLE test.t_gen_stored_myisam2;
 SHOW CREATE TABLE test.jemp_myisam;
 
 
+--sorted_result
 SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE, ENGINE, VERSION, ROW_FORMAT
  FROM INFORMATION_SCHEMA.tables WHERE table_schema='test';
 --echo # Check for views
@@ -128,6 +124,7 @@ SHOW CREATE TABLE test.geom;
 --echo # Restart on the upgraded data dir
 --replace_result $MYSQLD_DATADIR1 MYSQLD_DATADIR1 $MYSQLD_LOG MYSQLD_LOG
 let $restart_parameters = "restart: --loose-skip-log-bin --skip-log-slave-updates --skip-slave-preserve-commit-order --datadir=$MYSQLD_DATADIR1 --log-error=$MYSQLD_LOG --innodb-page-size=16k";
+--let $wait_counter= 3000
 --source include/restart_mysqld.inc
 
 --echo # Execute FTS queries that modify FTS pages
@@ -140,8 +137,8 @@ optimize table sakila.film_text;
 
 let $restart_parameters =;
 --echo # Restart the server with default options.
+--let $shutdown_server_timeout= 300
+--let $wait_counter= 3000
 --source include/restart_mysqld.inc
 --force-rmdir $MYSQLD_DATADIR1
 --remove_file $MYSQL_TMP_DIR/data57.zip
---remove_file $MYSQLD_LOG
---remove_file $MYSQL_UPGRADE_LOG

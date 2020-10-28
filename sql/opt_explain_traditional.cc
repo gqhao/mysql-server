@@ -1,4 +1,4 @@
-/* Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2011, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -24,6 +24,8 @@
 
 #include <sys/types.h>
 
+#include <cstddef>  // size_t
+
 #include "m_ctype.h"
 #include "m_string.h"
 #include "my_dbug.h"
@@ -42,66 +44,77 @@
   This array must be in sync with Extra_tag enum.
 */
 static const char *traditional_extra_tags[ET_total] = {
-    NULL,                                 // ET_none
-    "Using temporary",                    // ET_USING_TEMPORARY
-    "Using filesort",                     // ET_USING_FILESORT
-    "Using index condition",              // ET_USING_INDEX_CONDITION
-    "Using",                              // ET_USING
-    "Range checked for each record",      // ET_RANGE_CHECKED_FOR_EACH_RECORD
-    "Using where with pushed condition",  // ET_USING_WHERE_WITH_PUSHED_CONDITION
-    "Using where",                        // ET_USING_WHERE
-    "Not exists",                         // ET_NOT_EXISTS
-    "Using MRR",                          // ET_USING_MRR
-    "Using index",                        // ET_USING_INDEX
-    "Full scan on NULL key",              // ET_FULL_SCAN_ON_NULL_KEY
-    "Skip_open_table",                    // ET_SKIP_OPEN_TABLE
-    "Open_frm_only",                      // ET_OPEN_FRM_ONLY
-    "Open_full_table",                    // ET_OPEN_FULL_TABLE
-    "Scanned",                            // ET_SCANNED_DATABASES
-    "Using index for group-by",           // ET_USING_INDEX_FOR_GROUP_BY
-    "Distinct",                           // ET_DISTINCT
-    "LooseScan",                          // ET_LOOSESCAN
-    "Start temporary",                    // ET_START_TEMPORARY
-    "End temporary",                      // ET_END_TEMPORARY
-    "FirstMatch",                         // ET_FIRST_MATCH
-    "Materialize",                        // ET_MATERIALIZE
-    "Start materialize",                  // ET_START_MATERIALIZE
-    "End materialize",                    // ET_END_MATERIALIZE
-    "Scan",                               // ET_SCAN
-    "Using join buffer",                  // ET_USING_JOIN_BUFFER
-    "const row not found",                // ET_CONST_ROW_NOT_FOUND
-    "unique row not found",               // ET_UNIQUE_ROW_NOT_FOUND
-    "Impossible ON condition",            // ET_IMPOSSIBLE_ON_CONDITION
-    "",                                   // ET_PUSHED_JOIN
-    "Ft_hints:",                          // ET_FT_HINTS
-    "Backward index scan",                // ET_BACKWARD_SCAN
-    "Recursive",                          // ET_RECURSIVE
-    "Table function:",                    // ET_TABLE_FUNCTION
-    "Index dive skipped due to FORCE"     // ET_SKIP_RECORDS_IN_RANGE
+    nullptr,                            // ET_none
+    "Using temporary",                  // ET_USING_TEMPORARY
+    "Using filesort",                   // ET_USING_FILESORT
+    "Using index condition",            // ET_USING_INDEX_CONDITION
+    "Using",                            // ET_USING
+    "Range checked for each record",    // ET_RANGE_CHECKED_FOR_EACH_RECORD
+    "Using pushed condition",           // ET_USING_PUSHED_CONDITION
+    "Using where",                      // ET_USING_WHERE
+    "Not exists",                       // ET_NOT_EXISTS
+    "Using MRR",                        // ET_USING_MRR
+    "Using index",                      // ET_USING_INDEX
+    "Full scan on NULL key",            // ET_FULL_SCAN_ON_NULL_KEY
+    "Using index for group-by",         // ET_USING_INDEX_FOR_GROUP_BY
+    "Using index for skip scan",        // ET_USING_INDEX_FOR_SKIP_SCAN,
+    "Distinct",                         // ET_DISTINCT
+    "LooseScan",                        // ET_LOOSESCAN
+    "Start temporary",                  // ET_START_TEMPORARY
+    "End temporary",                    // ET_END_TEMPORARY
+    "FirstMatch",                       // ET_FIRST_MATCH
+    "Materialize",                      // ET_MATERIALIZE
+    "Start materialize",                // ET_START_MATERIALIZE
+    "End materialize",                  // ET_END_MATERIALIZE
+    "Scan",                             // ET_SCAN
+    "Using join buffer",                // ET_USING_JOIN_BUFFER
+    "const row not found",              // ET_CONST_ROW_NOT_FOUND
+    "unique row not found",             // ET_UNIQUE_ROW_NOT_FOUND
+    "Impossible ON condition",          // ET_IMPOSSIBLE_ON_CONDITION
+    "",                                 // ET_PUSHED_JOIN
+    "Ft_hints:",                        // ET_FT_HINTS
+    "Backward index scan",              // ET_BACKWARD_SCAN
+    "Recursive",                        // ET_RECURSIVE
+    "Table function:",                  // ET_TABLE_FUNCTION
+    "Index dive skipped due to FORCE",  // ET_SKIP_RECORDS_IN_RANGE
+    "Using secondary engine",           // ET_USING_SECONDARY_ENGINE
+    "Rematerialize"                     // ET_REMATERIALIZE
 };
 
 static const char *mod_type_name[] = {"NONE", "INSERT", "UPDATE", "DELETE",
                                       "REPLACE"};
 
 bool Explain_format_traditional::send_headers(Query_result *result) {
-  return ((nil = new Item_null) == NULL ||
+  return ((nil = new Item_null) == nullptr ||
           Explain_format::send_headers(result) ||
           current_thd->send_explain_fields(output));
 }
 
-static bool push(List<Item> *items, qep_row::mem_root_str &s, Item_null *nil) {
-  if (s.is_empty()) return items->push_back(nil);
+static bool push(mem_root_deque<Item *> *items, qep_row::mem_root_str &s,
+                 Item_null *nil) {
+  if (s.is_empty()) {
+    items->push_back(nil);
+    return false;
+  }
   Item_string *item = new Item_string(s.str, s.length, system_charset_info);
-  return item == NULL || items->push_back(item);
+  if (item == nullptr) return true;
+  items->push_back(item);
+  return false;
 }
 
-static bool push(List<Item> *items, const char *s, size_t length) {
+static bool push(mem_root_deque<Item *> *items, const char *s, size_t length) {
   Item_string *item = new Item_string(s, length, system_charset_info);
-  return item == NULL || items->push_back(item);
+  if (item == nullptr) return true;
+  items->push_back(item);
+  return false;
 }
 
-static bool push(List<Item> *items, List<const char> &c, Item_null *nil) {
-  if (c.is_empty()) return items->push_back(nil);
+static bool push(mem_root_deque<Item *> *items, List<const char> &c,
+                 Item_null *nil) {
+  if (c.is_empty()) {
+    items->push_back(nil);
+    return false;
+  }
 
   StringBuffer<1024> buff;
   List_iterator<const char> it(c);
@@ -113,31 +126,57 @@ static bool push(List<Item> *items, List<const char> &c, Item_null *nil) {
   if (!buff.is_empty()) buff.length(buff.length() - 1);  // remove last ","
   Item_string *item = new Item_string(buff.dup(current_thd->mem_root),
                                       buff.length(), system_charset_info);
-  return item == NULL || items->push_back(item);
+  if (item == nullptr) {
+    return true;
+  }
+  items->push_back(item);
+  return false;
 }
 
-static bool push(List<Item> *items, const qep_row::column<uint> &c,
+static bool push(mem_root_deque<Item *> *items, const qep_row::column<uint> &c,
                  Item_null *nil) {
-  if (c.is_empty()) return items->push_back(nil);
+  if (c.is_empty()) {
+    items->push_back(nil);
+    return false;
+  }
   Item_uint *item = new Item_uint(c.get());
-  return item == NULL || items->push_back(item);
+  if (item == nullptr) {
+    return true;
+  }
+  items->push_back(item);
+  return false;
 }
 
-static bool push(List<Item> *items, const qep_row::column<ulonglong> &c,
-                 Item_null *nil) {
-  if (c.is_empty()) return items->push_back(nil);
+static bool push(mem_root_deque<Item *> *items,
+                 const qep_row::column<ulonglong> &c, Item_null *nil) {
+  if (c.is_empty()) {
+    items->push_back(nil);
+    return false;
+  }
   Item_int *item = new Item_int(c.get(), MY_INT64_NUM_DECIMAL_DIGITS);
-  return item == NULL || items->push_back(item);
+  if (item == nullptr) {
+    return true;
+  }
+  items->push_back(item);
+  return false;
 }
 
-static bool push(List<Item> *items, const qep_row::column<float> &c,
+static bool push(mem_root_deque<Item *> *items, const qep_row::column<float> &c,
                  Item_null *nil) {
-  if (c.is_empty()) return items->push_back(nil);
+  if (c.is_empty()) {
+    items->push_back(nil);
+    return false;
+  }
   Item_float *item = new Item_float(c.get(), 2);
-  return item == NULL || items->push_back(item);
+  if (item == nullptr) {
+    return true;
+  }
+  items->push_back(item);
+  return false;
 }
 
-bool Explain_format_traditional::push_select_type(List<Item> *items) {
+bool Explain_format_traditional::push_select_type(
+    mem_root_deque<Item *> *items) {
   DBUG_ASSERT(!column_buffer.col_select_type.is_empty());
   StringBuffer<32> buff;
   if (column_buffer.is_dependent) {
@@ -158,7 +197,11 @@ bool Explain_format_traditional::push_select_type(List<Item> *items) {
 
   Item_string *item = new Item_string(buff.dup(current_thd->mem_root),
                                       buff.length(), system_charset_info);
-  return item == NULL || items->push_back(item);
+  if (item == nullptr) {
+    return true;
+  }
+  items->push_back(item);
+  return false;
 }
 
 class Buffer_cleanup {
@@ -176,7 +219,7 @@ bool Explain_format_traditional::flush_entry() {
     clear for the next row.
   */
   Buffer_cleanup bc(&column_buffer);
-  List<Item> items;
+  mem_root_deque<Item *> items(current_thd->mem_root);
   if (push(&items, column_buffer.col_id, nil) || push_select_type(&items) ||
       push(&items, column_buffer.col_table_name, nil) ||
       push(&items, column_buffer.col_partitions, nil) ||
@@ -191,13 +234,13 @@ bool Explain_format_traditional::flush_entry() {
 
   if (column_buffer.col_message.is_empty() &&
       column_buffer.col_extra.is_empty()) {
-    if (items.push_back(nil)) return true;
+    items.push_back(nil);
   } else if (!column_buffer.col_extra.is_empty()) {
     StringBuffer<64> buff(system_charset_info);
     List_iterator<qep_row::extra> it(column_buffer.col_extra);
     qep_row::extra *e;
     while ((e = it++)) {
-      DBUG_ASSERT(traditional_extra_tags[e->tag] != NULL);
+      DBUG_ASSERT(traditional_extra_tags[e->tag] != nullptr);
       if (buff.append(traditional_extra_tags[e->tag])) return true;
       if (e->data) {
         bool brackets = false;
@@ -206,6 +249,7 @@ bool Explain_format_traditional::flush_entry() {
           case ET_USING_INDEX_FOR_GROUP_BY:
           case ET_USING_JOIN_BUFFER:
           case ET_FIRST_MATCH:
+          case ET_REMATERIALIZE:
             brackets = true;  // for backward compatibility
             break;
           default:
@@ -216,9 +260,6 @@ bool Explain_format_traditional::flush_entry() {
           return true;
         if (brackets && buff.append("(")) return true;
         if (buff.append(e->data)) return true;
-        if (e->tag == ET_SCANNED_DATABASES &&
-            buff.append(e->data[0] == '1' ? " database" : " databases"))
-          return true;
         if (brackets && buff.append(")")) return true;
       }
       if (buff.append("; ")) return true;
@@ -230,6 +271,6 @@ bool Explain_format_traditional::flush_entry() {
     if (push(&items, column_buffer.col_message, nil)) return true;
   }
 
-  if (output->send_data(items)) return true;
+  if (output->send_data(current_thd, items)) return true;
   return false;
 }

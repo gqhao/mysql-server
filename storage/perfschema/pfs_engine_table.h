@@ -1,4 +1,4 @@
-/* Copyright (c) 2008, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2008, 2020, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -193,7 +193,10 @@ class PFS_engine_table {
     @param pos              address of the m_pos position member
   */
   PFS_engine_table(const PFS_engine_table_share *share, void *pos)
-      : m_share_ptr(share), m_pos_ptr(pos), m_normalizer(NULL), m_index(NULL) {}
+      : m_share_ptr(share),
+        m_pos_ptr(pos),
+        m_normalizer(nullptr),
+        m_index(nullptr) {}
 
   /** Table share. */
   const PFS_engine_table_share *m_share_ptr;
@@ -229,8 +232,23 @@ struct PFS_key_reader {
         m_remaining_key_len(key_len),
         m_parts_found(0) {}
 
-  enum ha_rkey_function read_uchar(enum ha_rkey_function find_flag,
+  enum ha_rkey_function read_int8(enum ha_rkey_function find_flag, bool &isnull,
+                                  char *value);
+
+  enum ha_rkey_function read_uint8(enum ha_rkey_function find_flag,
                                    bool &isnull, uchar *value);
+
+  enum ha_rkey_function read_int16(enum ha_rkey_function find_flag,
+                                   bool &isnull, short *value);
+
+  enum ha_rkey_function read_uint16(enum ha_rkey_function find_flag,
+                                    bool &isnull, ushort *value);
+
+  enum ha_rkey_function read_int24(enum ha_rkey_function find_flag,
+                                   bool &isnull, long *value);
+
+  enum ha_rkey_function read_uint24(enum ha_rkey_function find_flag,
+                                    bool &isnull, ulong *value);
 
   enum ha_rkey_function read_long(enum ha_rkey_function find_flag, bool &isnull,
                                   long *value);
@@ -238,8 +256,15 @@ struct PFS_key_reader {
   enum ha_rkey_function read_ulong(enum ha_rkey_function find_flag,
                                    bool &isnull, ulong *value);
 
+  enum ha_rkey_function read_longlong(enum ha_rkey_function find_flag,
+                                      bool &isnull, longlong *value);
+
   enum ha_rkey_function read_ulonglong(enum ha_rkey_function find_flag,
                                        bool &isnull, ulonglong *value);
+
+  enum ha_rkey_function read_timestamp(enum ha_rkey_function find_flag,
+                                       bool &isnull, ulonglong *value,
+                                       uint dec);
 
   enum ha_rkey_function read_varchar_utf8(enum ha_rkey_function find_flag,
                                           bool &isnull, char *buffer,
@@ -286,7 +311,7 @@ class PFS_engine_key {
 
 class PFS_engine_index_abstract {
  public:
-  PFS_engine_index_abstract() : m_fields(0), m_key_info(NULL) {}
+  PFS_engine_index_abstract() : m_fields(0), m_key_info(nullptr) {}
 
   virtual ~PFS_engine_index_abstract() {}
 
@@ -304,22 +329,22 @@ class PFS_engine_index : public PFS_engine_index_abstract {
  public:
   PFS_engine_index(PFS_engine_key *key_1)
       : m_key_ptr_1(key_1),
-        m_key_ptr_2(NULL),
-        m_key_ptr_3(NULL),
-        m_key_ptr_4(NULL) {}
+        m_key_ptr_2(nullptr),
+        m_key_ptr_3(nullptr),
+        m_key_ptr_4(nullptr) {}
 
   PFS_engine_index(PFS_engine_key *key_1, PFS_engine_key *key_2)
       : m_key_ptr_1(key_1),
         m_key_ptr_2(key_2),
-        m_key_ptr_3(NULL),
-        m_key_ptr_4(NULL) {}
+        m_key_ptr_3(nullptr),
+        m_key_ptr_4(nullptr) {}
 
   PFS_engine_index(PFS_engine_key *key_1, PFS_engine_key *key_2,
                    PFS_engine_key *key_3)
       : m_key_ptr_1(key_1),
         m_key_ptr_2(key_2),
         m_key_ptr_3(key_3),
-        m_key_ptr_4(NULL) {}
+        m_key_ptr_4(nullptr) {}
 
   PFS_engine_index(PFS_engine_key *key_1, PFS_engine_key *key_2,
                    PFS_engine_key *key_3, PFS_engine_key *key_4)
@@ -328,10 +353,10 @@ class PFS_engine_index : public PFS_engine_index_abstract {
         m_key_ptr_3(key_3),
         m_key_ptr_4(key_4) {}
 
-  virtual ~PFS_engine_index() {}
+  ~PFS_engine_index() override {}
 
-  virtual void read_key(const uchar *key, uint key_len,
-                        enum ha_rkey_function find_flag);
+  void read_key(const uchar *key, uint key_len,
+                enum ha_rkey_function find_flag) override;
 
   PFS_engine_key *m_key_ptr_1;
   PFS_engine_key *m_key_ptr_2;
@@ -423,10 +448,10 @@ class PFS_readonly_acl : public ACL_internal_table_access {
  public:
   PFS_readonly_acl() {}
 
-  ~PFS_readonly_acl() {}
+  ~PFS_readonly_acl() override {}
 
-  virtual ACL_internal_access_result check(ulong want_access,
-                                           ulong *save_priv) const;
+  ACL_internal_access_result check(ulong want_access,
+                                   ulong *save_priv) const override;
 };
 
 /** Singleton instance of PFS_readonly_acl. */
@@ -440,9 +465,10 @@ class PFS_truncatable_acl : public ACL_internal_table_access {
  public:
   PFS_truncatable_acl() {}
 
-  ~PFS_truncatable_acl() {}
+  ~PFS_truncatable_acl() override {}
 
-  ACL_internal_access_result check(ulong want_access, ulong *save_priv) const;
+  ACL_internal_access_result check(ulong want_access,
+                                   ulong *save_priv) const override;
 };
 
 /** Singleton instance of PFS_truncatable_acl. */
@@ -456,9 +482,10 @@ class PFS_updatable_acl : public ACL_internal_table_access {
  public:
   PFS_updatable_acl() {}
 
-  ~PFS_updatable_acl() {}
+  ~PFS_updatable_acl() override {}
 
-  ACL_internal_access_result check(ulong want_access, ulong *save_priv) const;
+  ACL_internal_access_result check(ulong want_access,
+                                   ulong *save_priv) const override;
 };
 
 /** Singleton instance of PFS_updatable_acl. */
@@ -472,9 +499,10 @@ class PFS_editable_acl : public ACL_internal_table_access {
  public:
   PFS_editable_acl() {}
 
-  ~PFS_editable_acl() {}
+  ~PFS_editable_acl() override {}
 
-  ACL_internal_access_result check(ulong want_access, ulong *save_priv) const;
+  ACL_internal_access_result check(ulong want_access,
+                                   ulong *save_priv) const override;
 };
 
 /** Singleton instance of PFS_editable_acl. */
@@ -487,9 +515,10 @@ class PFS_unknown_acl : public ACL_internal_table_access {
  public:
   PFS_unknown_acl() {}
 
-  ~PFS_unknown_acl() {}
+  ~PFS_unknown_acl() override {}
 
-  ACL_internal_access_result check(ulong want_access, ulong *save_priv) const;
+  ACL_internal_access_result check(ulong want_access,
+                                   ulong *save_priv) const override;
 };
 
 /** Singleton instance of PFS_unknown_acl. */
@@ -502,9 +531,9 @@ class PFS_readonly_world_acl : public PFS_readonly_acl {
  public:
   PFS_readonly_world_acl() {}
 
-  ~PFS_readonly_world_acl() {}
-  virtual ACL_internal_access_result check(ulong want_access,
-                                           ulong *save_priv) const;
+  ~PFS_readonly_world_acl() override {}
+  ACL_internal_access_result check(ulong want_access,
+                                   ulong *save_priv) const override;
 };
 
 /** Singleton instance of PFS_readonly_world_acl */
@@ -517,13 +546,28 @@ class PFS_truncatable_world_acl : public PFS_truncatable_acl {
  public:
   PFS_truncatable_world_acl() {}
 
-  ~PFS_truncatable_world_acl() {}
-  virtual ACL_internal_access_result check(ulong want_access,
-                                           ulong *save_priv) const;
+  ~PFS_truncatable_world_acl() override {}
+  ACL_internal_access_result check(ulong want_access,
+                                   ulong *save_priv) const override;
 };
 
 /** Singleton instance of PFS_readonly_world_acl */
 extern PFS_truncatable_world_acl pfs_truncatable_world_acl;
+
+/**
+  Privileges for readable processlist tables.
+*/
+class PFS_readonly_processlist_acl : public PFS_readonly_acl {
+ public:
+  PFS_readonly_processlist_acl() {}
+
+  ~PFS_readonly_processlist_acl() override {}
+  ACL_internal_access_result check(ulong want_access,
+                                   ulong *save_priv) const override;
+};
+
+/** Singleton instance of PFS_readonly_processlist_acl */
+extern PFS_readonly_processlist_acl pfs_readonly_processlist_acl;
 
 /** Position of a cursor, for simple iterations. */
 struct PFS_simple_index {
@@ -651,4 +695,7 @@ struct PFS_triple_index {
 };
 
 /** @} */
+
+extern thread_local PFS_table_context *THR_PFS_contexts[THR_PFS_NUM_KEYS];
+
 #endif

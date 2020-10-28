@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,17 +22,17 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-#ifndef _XPL_SHA256_PASSWORD_CACHE_H_
-#define _XPL_SHA256_PASSWORD_CACHE_H_
+#ifndef PLUGIN_X_SRC_SHA256_PASSWORD_CACHE_H_
+#define PLUGIN_X_SRC_SHA256_PASSWORD_CACHE_H_
 
 #include <string>
 #include <unordered_map>
 #include <utility>
 
-#include "plugin/x/ngs/include/ngs/interface/sha256_password_cache_interface.h"
 #include "plugin/x/ngs/include/ngs/thread.h"
+#include "plugin/x/src/helper/multithread/rw_lock.h"
+#include "plugin/x/src/interface/sha256_password_cache.h"
 #include "plugin/x/src/xpl_performance_schema.h"
-
 #include "sql/auth/i_sha2_password_common.h"
 
 namespace xpl {
@@ -41,8 +41,7 @@ namespace xpl {
   Class used for storing hashed passwords for each authenticated user. This
   allows for fast authentication.
 */
-class SHA256_password_cache final
-    : public ngs::SHA256_password_cache_interface {
+class SHA256_password_cache final : public iface::SHA256_password_cache {
  public:
   using sha2_cache_entry_t = std::string;
   using password_cache_t = std::unordered_map<std::string, sha2_cache_entry_t>;
@@ -50,8 +49,8 @@ class SHA256_password_cache final
   SHA256_password_cache();
   SHA256_password_cache(SHA256_password_cache &) = delete;
   SHA256_password_cache &operator=(const SHA256_password_cache &) = delete;
-  SHA256_password_cache(SHA256_password_cache &&) = default;
-  SHA256_password_cache &operator=(SHA256_password_cache &&) = default;
+  SHA256_password_cache(SHA256_password_cache &&) = delete;
+  SHA256_password_cache &operator=(SHA256_password_cache &&) = delete;
 
   void enable() override;
   void disable() override;
@@ -72,11 +71,11 @@ class SHA256_password_cache final
   std::pair<bool, sha2_cache_entry_t> create_hash(
       const std::string &value) const;
 
-  mutable ngs::RWLock m_cache_lock;
+  mutable RWLock m_cache_lock;
   password_cache_t m_password_cache;
   bool m_accepting_input = false;
 };
 
 }  // namespace xpl
 
-#endif  // _XPL_SHA256_PASSWORD_CACHE_H_
+#endif  // PLUGIN_X_SRC_SHA256_PASSWORD_CACHE_H_

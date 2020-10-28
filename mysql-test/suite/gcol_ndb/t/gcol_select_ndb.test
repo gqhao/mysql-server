@@ -1,3 +1,4 @@
+--source include/have_ndb.inc
 
 #------------------------------------------------------------------------------#
 # General not engine specific settings and requirements
@@ -10,6 +11,11 @@
 ##### Storage engine to be tested
 # Set the session storage engine
 eval SET @@session.default_storage_engine = 'ndbcluster';
+
+## Disable NDB index statistics. This test uses a small table, so stats are not
+## reliable, and can cause the "EXPLAIN" portion of the test results to vary
+## unpredictably.
+SET ndb_index_stat_enable=OFF;
 
 #------------------------------------------------------------------------------#
 # Execute the tests to be applied to all storage engines

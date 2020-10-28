@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -60,13 +60,10 @@ class Sdi_wcontext;
 ///////////////////////////////////////////////////////////////////////////
 
 Tablespace_file_impl::Tablespace_file_impl()
-    : m_ordinal_position(0),
-      m_se_private_data(new Properties_impl()) {} /* purecov: tested */
+    : m_ordinal_position(0), m_se_private_data() {} /* purecov: tested */
 
 Tablespace_file_impl::Tablespace_file_impl(Tablespace_impl *tablespace)
-    : m_ordinal_position(0),
-      m_se_private_data(new Properties_impl()),
-      m_tablespace(tablespace) {}
+    : m_ordinal_position(0), m_se_private_data(), m_tablespace(tablespace) {}
 
 ///////////////////////////////////////////////////////////////////////////
 
@@ -78,29 +75,15 @@ Tablespace &Tablespace_file_impl::tablespace() { return *m_tablespace; }
 
 ///////////////////////////////////////////////////////////////////////////
 
-bool Tablespace_file_impl::set_se_private_data_raw(
-    const String_type &se_private_data_raw) {
-  Properties *properties =
-      Properties_impl::parse_properties(se_private_data_raw);
-
-  if (!properties)
-    return true;  // Error status, current values has not changed.
-
-  m_se_private_data.reset(properties);
-  return false;
-}
-
-///////////////////////////////////////////////////////////////////////////
-
 class Tablespace_filename_error_handler : public Internal_error_handler {
   const char *name;
 
  public:
   Tablespace_filename_error_handler(const char *name_arg) : name(name_arg) {}
 
-  virtual bool handle_condition(THD *, uint sql_errno, const char *,
-                                Sql_condition::enum_severity_level *,
-                                const char *) {
+  bool handle_condition(THD *, uint sql_errno, const char *,
+                        Sql_condition::enum_severity_level *,
+                        const char *) override {
     if (sql_errno == ER_DUP_ENTRY) {
       my_error(ER_TABLESPACE_DUP_FILENAME, MYF(0), name);
       return true;
@@ -144,8 +127,7 @@ bool Tablespace_file_impl::restore_attributes(const Raw_record &r) {
   m_ordinal_position = r.read_uint(Tablespace_files::FIELD_ORDINAL_POSITION);
   m_filename = r.read_str(Tablespace_files::FIELD_FILE_NAME);
 
-  m_se_private_data.reset(Properties_impl::parse_properties(
-      r.read_str(Tablespace_files::FIELD_SE_PRIVATE_DATA)));
+  set_se_private_data(r.read_str(Tablespace_files::FIELD_SE_PRIVATE_DATA));
 
   return false;
 }
@@ -156,16 +138,15 @@ bool Tablespace_file_impl::store_attributes(Raw_record *r) {
   return r->store(Tablespace_files::FIELD_ORDINAL_POSITION,
                   m_ordinal_position) ||
          r->store(Tablespace_files::FIELD_FILE_NAME, m_filename) ||
-         r->store(Tablespace_files::FIELD_SE_PRIVATE_DATA,
-                  *m_se_private_data) ||
+         r->store(Tablespace_files::FIELD_SE_PRIVATE_DATA, m_se_private_data) ||
          r->store(Tablespace_files::FIELD_TABLESPACE_ID, m_tablespace->id());
 }
 
 ///////////////////////////////////////////////////////////////////////////
 
-static_assert(
-    Tablespace_files::FIELD_SE_PRIVATE_DATA == 3,
-    "Tablespace_files definition has changed, review (de)ser memfuns");
+static_assert(Tablespace_files::NUMBER_OF_FIELDS == 4,
+              "Tablespace_files definition has changed, check if serialize() "
+              "and deserialize() need to be updated!");
 void Tablespace_file_impl::serialize(Sdi_wcontext *, Sdi_writer *w) const {
   w->StartObject();
   write(w, m_ordinal_position, STRING_WITH_LEN("ordinal_position"));
@@ -190,7 +171,7 @@ void Tablespace_file_impl::debug_print(String_type &outb) const {
   ss << "TABLESPACE FILE OBJECT: { "
      << "m_ordinal_position: " << m_ordinal_position << "; "
      << "m_filename: " << m_filename << "; "
-     << "m_se_private_data " << m_se_private_data->raw_string() << "; "
+     << "m_se_private_data " << m_se_private_data.raw_string() << "; "
      << "m_tablespace {OID: " << m_tablespace->id() << "}";
 
   outb = ss.str();
@@ -214,8 +195,7 @@ Tablespace_file_impl::Tablespace_file_impl(const Tablespace_file_impl &src,
     : Weak_object(src),
       m_ordinal_position(src.m_ordinal_position),
       m_filename(src.m_filename),
-      m_se_private_data(Properties_impl::parse_properties(
-          src.m_se_private_data->raw_string())),
+      m_se_private_data(src.m_se_private_data),
       m_tablespace(parent) {}
 
 ///////////////////////////////////////////////////////////////////////////

@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2017, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, 2020, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -33,7 +33,10 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include "clone0clone.h"
 #include "dict0dict.h"
 #include "fsp0sysspace.h"
-#include "handler.h"
+#include "sql/binlog.h"
+#include "sql/clone_handler.h"
+#include "sql/handler.h"
+#include "sql/mysqld.h"
 #include "srv0start.h"
 
 /** Callback to add an archived redo file to current snapshot
@@ -42,14 +45,11 @@ this program; if not, write to the Free Software Foundation, Inc.,
 @param[in]	file_offset	start offset in bytes
 @param[in]	context		snapshot
 @return	error code */
-static dberr_t add_redo_file_callback(char *file_name, ib_uint64_t file_size,
-                                      ib_uint64_t file_offset, void *context) {
-  dberr_t err;
+static int add_redo_file_callback(char *file_name, ib_uint64_t file_size,
+                                  ib_uint64_t file_offset, void *context) {
+  auto snapshot = static_cast<Clone_Snapshot *>(context);
 
-  Clone_Snapshot *snapshot;
-  snapshot = static_cast<Clone_Snapshot *>(context);
-
-  err = snapshot->add_redo_file(file_name, file_size, file_offset);
+  auto err = snapshot->add_redo_file(file_name, file_size, file_offset);
 
   return (err);
 }
@@ -59,12 +59,11 @@ static dberr_t add_redo_file_callback(char *file_name, ib_uint64_t file_size,
 @param[in]	buff		buffer having page IDs
 @param[in]	num_pages	number of tracked pages
 @return	error code */
-static dberr_t add_page_callback(void *context, byte *buff, uint num_pages) {
-  dberr_t err;
+static int add_page_callback(void *context, byte *buff, uint num_pages) {
   uint index;
   Clone_Snapshot *snapshot;
 
-  ib_uint32_t space_id;
+  space_id_t space_id;
   ib_uint32_t page_num;
 
   snapshot = static_cast<Clone_Snapshot *>(context);
@@ -77,51 +76,50 @@ static dberr_t add_page_callback(void *context, byte *buff, uint num_pages) {
     page_num = mach_read_from_4(buff);
     buff += 4;
 
-    err = snapshot->add_page(space_id, page_num);
+    auto err = snapshot->add_page(space_id, page_num);
 
-    if (err != DB_SUCCESS) {
+    if (err != 0) {
       return (err);
     }
   }
 
-  return (DB_SUCCESS);
+  return (0);
 }
 
-/** Add buffer pool dump file to the file list
-@return error code */
-dberr_t Clone_Snapshot::add_buf_pool_file() {
-  dberr_t err = DB_SUCCESS;
-
-  os_file_type_t type;
-  os_file_size_t file_size;
-
-  ib_uint64_t size_bytes;
+int Clone_Snapshot::add_buf_pool_file() {
   char path[OS_FILE_MAX_PATH];
-  bool exists = false;
-
   /* Generate the file name. */
   buf_dump_generate_path(path, sizeof(path));
 
-  os_file_status(path, &exists, &type);
-
   /* Add if the file is found. */
-  if (exists) {
-    file_size = os_file_get_size(path);
-    size_bytes = file_size.m_total_size;
+  int err = 0;
+
+  if (os_file_exists(path)) {
+    auto file_size = os_file_get_size(path);
+    auto size_bytes = file_size.m_total_size;
+
+    /* Check for error */
+    if (size_bytes == static_cast<os_offset_t>(~0)) {
+      char errbuf[MYSYS_STRERROR_SIZE];
+      my_error(ER_CANT_OPEN_FILE, MYF(0), path, errno,
+               my_strerror(errbuf, sizeof(errbuf), errno));
+      return (ER_CANT_OPEN_FILE);
+    }
 
     /* Always the first file in list */
     ut_ad(m_num_data_files == 0);
 
-    err = add_file(path, size_bytes, dict_sys_t::s_invalid_space_id, true);
+    m_data_bytes_disk += size_bytes;
+    m_monitor.add_estimate(size_bytes);
+
+    err = add_file(path, size_bytes, size_bytes, nullptr, true);
   }
 
   return (err);
 }
 
-/** Initialize snapshot state for file copy
-@return error code */
-dberr_t Clone_Snapshot::init_file_copy() {
-  dberr_t err = DB_SUCCESS;
+int Clone_Snapshot::init_file_copy() {
+  int err = 0;
 
   ut_ad(m_snapshot_handle_type == CLONE_HDL_COPY);
 
@@ -131,14 +129,18 @@ dberr_t Clone_Snapshot::init_file_copy() {
                                m_redo_trailer_size);
 
     m_redo_header = static_cast<byte *>(mem_heap_zalloc(
-        m_snapshot_heap, m_redo_header_size + m_redo_trailer_size));
+        m_snapshot_heap,
+        m_redo_header_size + m_redo_trailer_size + UNIV_SECTOR_SIZE));
 
     if (m_redo_header == nullptr) {
       my_error(ER_OUTOFMEMORY, MYF(0),
                m_redo_header_size + m_redo_trailer_size);
 
-      return (DB_OUT_OF_MEMORY);
+      return (ER_OUTOFMEMORY);
     }
+
+    m_redo_header =
+        static_cast<byte *>(ut_align(m_redo_header, UNIV_SECTOR_SIZE));
 
     m_redo_trailer = m_redo_header + m_redo_header_size;
   }
@@ -150,19 +152,22 @@ dberr_t Clone_Snapshot::init_file_copy() {
   } else if (m_snapshot_type == HA_CLONE_HYBRID ||
              m_snapshot_type == HA_CLONE_PAGE) {
     /* Start modified Page ID Archiving */
-    err = m_page_ctx.start();
+    err = m_page_ctx.start(false, nullptr);
   } else {
     ut_ad(m_snapshot_type == HA_CLONE_BLOCKING);
   }
 
-  if (err != DB_SUCCESS) {
+  if (err != 0) {
     return (err);
   }
+
+  /* Initialize estimation about on disk bytes. */
+  init_disk_estimate();
 
   /* Add buffer pool dump file. Always the first one in the list. */
   err = add_buf_pool_file();
 
-  if (err != DB_SUCCESS) {
+  if (err != 0) {
     return (err);
   }
 
@@ -170,29 +175,23 @@ dberr_t Clone_Snapshot::init_file_copy() {
   bool include_log = (m_snapshot_type == HA_CLONE_BLOCKING);
 
   /* Iterate all tablespace files and add persistent data files. */
-  err = Fil_iterator::for_each_file(
+  auto error = Fil_iterator::for_each_file(
       include_log, [&](fil_node_t *file) { return (add_node(file)); });
 
-  if (err != DB_SUCCESS) {
-    return (err);
+  if (error != DB_SUCCESS) {
+    return (ER_INTERNAL_ERROR);
   }
 
-  ib::info(ER_IB_MSG_151) << "Clone State FILE COPY : " << m_num_current_chunks
-                          << " chunks, "
-                          << " chunk size : "
-                          << (chunk_size() * UNIV_PAGE_SIZE) / (1024 * 1024)
-                          << " M";
+  ib::info(ER_IB_CLONE_OPERATION)
+      << "Clone State FILE COPY : " << m_num_current_chunks << " chunks, "
+      << " chunk size : " << (chunk_size() * UNIV_PAGE_SIZE) / (1024 * 1024)
+      << " M";
 
-  return (err);
+  return (0);
 }
 
-/** Initialize snapshot state for page copy
-@param[in]	page_buffer	temporary buffer to copy page IDs
-@param[in]	page_buffer_len	buffer length
-@return error code */
-dberr_t Clone_Snapshot::init_page_copy(byte *page_buffer,
-                                       uint page_buffer_len) {
-  dberr_t err = DB_SUCCESS;
+int Clone_Snapshot::init_page_copy(byte *page_buffer, uint page_buffer_len) {
+  int err = 0;
 
   ut_ad(m_snapshot_handle_type == CLONE_HDL_COPY);
 
@@ -207,15 +206,19 @@ dberr_t Clone_Snapshot::init_page_copy(byte *page_buffer,
     ut_ad(false);
   }
 
-  if (err != DB_SUCCESS) {
-    goto func_end;
+  if (err != 0) {
+    m_page_ctx.release();
+    return (err);
   }
 
   /* Stop modified page archiving. */
-  err = m_page_ctx.stop();
+  err = m_page_ctx.stop(nullptr);
 
-  if (err != DB_SUCCESS) {
-    goto func_end;
+  DEBUG_SYNC_C("clone_stop_page_archiving_without_releasing");
+
+  if (err != 0) {
+    m_page_ctx.release();
+    return (err);
   }
 
   /* Collect modified page Ids from Page Archiver. */
@@ -223,6 +226,13 @@ dberr_t Clone_Snapshot::init_page_copy(byte *page_buffer,
   uint aligned_size;
 
   context = static_cast<void *>(this);
+
+  /* Check pages added for encryption. */
+  auto num_pages_encryption = m_page_set.size();
+
+  if (num_pages_encryption > 0) {
+    m_monitor.add_estimate(num_pages_encryption * UNIV_PAGE_SIZE);
+  }
 
   err = m_page_ctx.get_pages(add_page_callback, context, page_buffer,
                              page_buffer_len);
@@ -232,79 +242,232 @@ dberr_t Clone_Snapshot::init_page_copy(byte *page_buffer,
   aligned_size = ut_calc_align(m_num_pages, chunk_size());
   m_num_current_chunks = aligned_size >> m_chunk_size_pow2;
 
-  ib::info(ER_IB_MSG_152) << "Clone State PAGE COPY : " << m_num_pages
-                          << " pages, " << m_num_duplicate_pages
-                          << " duplicate pages, " << m_num_current_chunks
-                          << " chunks, "
-                          << " chunk size : "
-                          << (chunk_size() * UNIV_PAGE_SIZE) / (1024 * 1024)
-                          << " M";
-
-func_end:
+  ib::info(ER_IB_CLONE_OPERATION)
+      << "Clone State PAGE COPY : " << m_num_pages << " pages, "
+      << m_num_duplicate_pages << " duplicate pages, " << m_num_current_chunks
+      << " chunks, "
+      << " chunk size : " << (chunk_size() * UNIV_PAGE_SIZE) / (1024 * 1024)
+      << " M";
   m_page_ctx.release();
-
   return (err);
 }
 
-/** Initialize snapshot state for redo copy
-@return error code */
-dberr_t Clone_Snapshot::init_redo_copy() {
-  dberr_t err;
+int Clone_Snapshot::synchronize_binlog_gtid(Clone_Alert_Func cbk) {
+  /* Get a list of binlog prepared transactions and wait for them to commit
+  or rollback. This is to ensure that any possible unordered transactions
+  are completed. */
+  auto error = wait_for_binlog_prepared_trx();
 
+  if (error != 0) {
+    return (error);
+  }
+
+  /* Persist non-innodb GTIDs */
+  auto &gtid_persistor = clone_sys->get_gtid_persistor();
+  gtid_persistor.wait_flush(true, true, false, cbk);
+
+  error = update_binlog_position();
+  return (error);
+}
+
+int Clone_Snapshot::update_binlog_position() {
+  /* Since the caller ensures all future commits are in order of binary log and
+  innodb updates trx sys page for all transactions by default, any single
+  transaction commit here would ensure that the binary log position is
+  synchronized. However, currently we don't create any special table for clone
+  and we cannot execute transaction/dml here. A possible simplification for
+  future.
+
+  Ideally the only case we need to update innodb trx sys page is when no
+  transaction commit has happened yet after forced ordering is imposed. We
+  end up updating the page in more cases but is harmless. We follow the steps
+  below.
+
+  1. Note the last updated Innodb binary log position - P1
+
+  2. Note the current log position from binary log - P2
+     All transactions up to this point are already prepared and may or may not
+     be committed.
+
+  3. Note the Innodb binary log position again - P3
+     if P1 != P3 then exit as there is already some new transaction committed.
+     if P1 == P3 then update the trx sys log position with P2
+  *Check and update in [3] are atomic for trx sys page.
+
+  4. Wait for all binary log prepared transaction to complete. We have
+  updated the trx sys page out of order but it is sufficient to ensure that
+  all transaction up to the updated binary log position are committed. */
+
+  /* 1. Read binary log position from innodb. */
+  LOG_INFO log_info1;
+  char file_name[TRX_SYS_MYSQL_LOG_NAME_LEN + 1];
+  uint64_t file_pos;
+  trx_sys_read_binlog_position(&file_name[0], file_pos);
+
+  /* 2. Get current binary log position. */
+  LOG_INFO log_info;
+  mysql_bin_log.get_current_log(&log_info);
+
+  /* 3. Check and write binary log position in Innodb. */
+  bool written = trx_sys_write_binlog_position(
+      &file_name[0], file_pos, &log_info.log_file_name[0], log_info.pos);
+
+  /* 4. If we had to write current binary log position, should wait for all
+  prepared transactions to finish to make sure that all transactions up to
+  the binary log position is committed. */
+  if (written) {
+    auto err = wait_for_binlog_prepared_trx();
+    return (err);
+  }
+  return (0);
+}
+
+int Clone_Snapshot::wait_trx_end(THD *thd, trx_id_t trx_id) {
+  auto trx = trx_rw_is_active(trx_id, nullptr, false);
+  if (trx == nullptr) {
+    return (0);
+  }
+
+  auto wait_cond = [&](bool alert, bool &result) {
+    /* Check if transaction is still active. */
+    auto trx = trx_rw_is_active(trx_id, nullptr, false);
+    if (trx == nullptr) {
+      result = false;
+      return (0);
+    }
+
+    result = true;
+    if (thd_killed(thd)) {
+      my_error(ER_QUERY_INTERRUPTED, MYF(0));
+      return (ER_QUERY_INTERRUPTED);
+    }
+
+    if (alert) {
+      ib::warn(ER_IB_CLONE_TIMEOUT)
+          << "Waiting for prepared transaction to exit";
+    }
+    return (0);
+  };
+
+  bool is_timeout = false;
+
+  /* Sleep for 10 millisecond */
+  Clone_Msec sleep_time(10);
+  /* Generate alert message every 5 second. */
+  Clone_Sec alert_interval(5);
+  /* Wait for 5 minutes. */
+  Clone_Sec time_out(Clone_Min(5));
+
+  auto err = Clone_Sys::wait(sleep_time, time_out, alert_interval, wait_cond,
+                             nullptr, is_timeout);
+
+  if (err == 0 && is_timeout) {
+    ib::info(ER_IB_CLONE_TIMEOUT)
+        << "Clone wait for prepared transaction timed out";
+    my_error(ER_INTERNAL_ERROR, MYF(0),
+             "Innodb Clone wait for prepared transaction timed out.");
+    err = ER_INTERNAL_ERROR;
+  }
+  return (err);
+}
+
+/* To get current session thread default THD */
+THD *thd_get_current_thd();
+
+int Clone_Snapshot::wait_for_binlog_prepared_trx() {
+  /* Return if binary log is not enabled. */
+  if (!opt_bin_log) {
+    return (0);
+  }
+  auto thd = thd_get_current_thd();
+  /* Get all binlog prepared transactions. */
+  std::vector<trx_id_t> trx_ids;
+  trx_sys_get_binlog_prepared(trx_ids);
+
+  /* Now wait for the transactions to finish. */
+  for (auto trx_id : trx_ids) {
+    auto err = wait_trx_end(thd, trx_id);
+    if (err != 0) {
+      return (err);
+    }
+  }
+  return (0);
+}
+
+int Clone_Snapshot::init_redo_copy(Clone_Alert_Func cbk) {
   ut_ad(m_snapshot_handle_type == CLONE_HDL_COPY);
   ut_ad(m_snapshot_type != HA_CLONE_BLOCKING);
 
-  /* Stop redo archiving. */
-  err = m_redo_ctx.stop(m_redo_trailer, m_redo_trailer_size,
-                        m_redo_trailer_offset);
+  /* Block external XA operations. XA prepare commit and rollback operations
+  are first logged to binlog and added to global gtid_executed before doing
+  operation in SE. Without blocking, we might persist such GTIDs from global
+  gtid_executed before the operations are persisted in Innodb. */
+  int binlog_error = 0;
+  auto thd = thd_get_current_thd();
+  Clone_handler::XA_Block xa_block_guard(thd);
 
-  if (err != DB_SUCCESS) {
-    return (err);
+  if (xa_block_guard.failed()) {
+    if (thd_killed(thd)) {
+      my_error(ER_QUERY_INTERRUPTED, MYF(0));
+      binlog_error = ER_QUERY_INTERRUPTED;
+    } else {
+      ut_ad(false);
+      my_error(ER_INTERNAL_ERROR, MYF(0),
+               "Clone wait for XA operation timed out.");
+      binlog_error = ER_INTERNAL_ERROR;
+    }
+  }
+
+  /* Before stopping redo log archiving synchronize with binlog and GTID. At
+  this point a transaction can commit only in the order they are written to
+  binary log. We have ensure this by forcing ordered commit and waiting for
+  all unordered transactions to finish. */
+  if (binlog_error == 0) {
+    binlog_error = synchronize_binlog_gtid(cbk);
+  }
+
+  /* Stop redo archiving even on error. */
+  auto redo_error = m_redo_ctx.stop(m_redo_trailer, m_redo_trailer_size,
+                                    m_redo_trailer_offset);
+
+  if (binlog_error != 0) {
+    return (binlog_error);
+  }
+
+  if (redo_error != 0) {
+    return (redo_error);
   }
 
   /* Collect archived redo log files from Log Archiver. */
-  void *context;
+  auto context = static_cast<void *>(this);
 
-  context = static_cast<void *>(this);
-
-  err = m_redo_ctx.get_files(add_redo_file_callback, context);
+  redo_error = m_redo_ctx.get_files(add_redo_file_callback, context);
 
   /* Add another chunk for the redo log header. */
   ++m_num_redo_chunks;
 
-#ifdef HAVE_PSI_STAGE_INTERFACE
   m_monitor.add_estimate(m_redo_header_size);
-#endif
 
   /* Add another chunk for the redo log trailer. */
   ++m_num_redo_chunks;
-#ifdef HAVE_PSI_STAGE_INTERFACE
+
   if (m_redo_trailer_size != 0) {
     m_monitor.add_estimate(m_redo_trailer_size);
   }
-#endif
 
   m_num_current_chunks = m_num_redo_chunks;
 
-  ib::info(ER_IB_MSG_153) << "Clone State REDO COPY : " << m_num_current_chunks
-                          << " chunks, "
-                          << " chunk size : "
-                          << (chunk_size() * UNIV_PAGE_SIZE) / (1024 * 1024)
-                          << " M";
+  ib::info(ER_IB_CLONE_OPERATION)
+      << "Clone State REDO COPY : " << m_num_current_chunks << " chunks, "
+      << " chunk size : " << (chunk_size() * UNIV_PAGE_SIZE) / (1024 * 1024)
+      << " M";
 
-  return (err);
+  return (redo_error);
 }
 
-/** Build file metadata entry
-@param[in]	file_name	name of the file
-@param[in]	file_size	file size in bytes
-@param[in]	file_offset	start offset
-@param[in]	num_chunks	total number of chunks in the file
-@param[in]	copy_file_name	copy the file name or use reference
-@return file metadata entry */
 Clone_File_Meta *Clone_Snapshot::build_file(const char *file_name,
-                                            ib_uint64_t file_size,
-                                            ib_uint64_t file_offset,
+                                            uint64_t file_size,
+                                            uint64_t file_offset,
                                             uint &num_chunks,
                                             bool copy_file_name) {
   Clone_File_Meta *file_meta;
@@ -343,11 +506,9 @@ Clone_File_Meta *Clone_Snapshot::build_file(const char *file_name,
 
   file_meta->m_file_size = file_size;
 
-  if (file_offset != 0) {
-    /* reduce offset amount from total size */
-    ut_ad(file_size >= file_offset);
-    file_size -= file_offset;
-  }
+  /* reduce offset amount from total size */
+  ut_ad(file_size >= file_offset);
+  file_size -= file_offset;
 
   /* Calculate and set chunk parameters. */
   size_in_pages = ut_uint64_align_up(file_size, UNIV_PAGE_SIZE);
@@ -400,27 +561,50 @@ static bool is_ddl_temp_table(fil_node_t *node) {
   return (false);
 }
 
-/** Add file to snapshot
-@param[in]	name		file name
-@param[in]	size_bytes	file size in bytes
-@param[in]	space_id	tablespace id
-@param[in]	copy_name	copy the file name or use reference
-@return error code. */
-dberr_t Clone_Snapshot::add_file(const char *name, ib_uint64_t size_bytes,
-                                 ulint space_id, bool copy_name) {
+int Clone_Snapshot::add_file(const char *name, uint64_t size_bytes,
+                             uint64_t alloc_bytes, fil_node_t *node,
+                             bool copy_name) {
   ut_ad(m_snapshot_handle_type == CLONE_HDL_COPY);
 
-  Clone_File_Meta *file_meta;
   uint num_chunks;
 
   /* Build file metadata entry and add to data file vector. */
-  file_meta = build_file(name, size_bytes, 0, num_chunks, copy_name);
+  auto file_meta = build_file(name, size_bytes, 0, num_chunks, copy_name);
 
   if (file_meta == nullptr) {
-    return (DB_OUT_OF_MEMORY);
+    return (ER_OUTOFMEMORY);
   }
 
-  file_meta->m_space_id = space_id;
+  file_meta->m_alloc_size = alloc_bytes;
+
+  /* Set space ID, compression and encryption attribute */
+  if (node == nullptr) {
+    file_meta->m_space_id = dict_sys_t::s_invalid_space_id;
+    file_meta->m_compress_type = Compression::NONE;
+    file_meta->m_encrypt_type = Encryption::NONE;
+    file_meta->m_fsp_flags = UINT32_UNDEFINED;
+    file_meta->m_punch_hole = false;
+    file_meta->m_fsblk_size = 0;
+
+  } else {
+    auto space = node->space;
+    file_meta->m_space_id = space->id;
+    file_meta->m_compress_type = space->compression_type;
+    file_meta->m_encrypt_type = space->encryption_type;
+    file_meta->m_fsp_flags = static_cast<uint32_t>(space->flags);
+    file_meta->m_punch_hole = node->punch_hole;
+    file_meta->m_fsblk_size = node->block_size;
+
+    /* If file node supports punch hole then check if we need it. */
+    if (file_meta->m_punch_hole) {
+      page_size_t page_size(space->flags);
+      /* Transparent compression is skipped if table compression is enabled. */
+      if (page_size.is_compressed() ||
+          space->compression_type == Compression::NONE) {
+        file_meta->m_punch_hole = false;
+      }
+    }
+  }
 
   file_meta->m_file_index = m_num_data_files;
 
@@ -439,31 +623,33 @@ dberr_t Clone_Snapshot::add_file(const char *name, ib_uint64_t size_bytes,
     m_max_file_name_len = static_cast<uint32_t>(file_meta->m_file_name_len);
   }
 
-  return (DB_SUCCESS);
+  return (0);
 }
 
-/** Extract file information from node and add to snapshot
-@param[in]	node	file node
-@return error code */
 dberr_t Clone_Snapshot::add_node(fil_node_t *node) {
   ut_ad(m_snapshot_handle_type == CLONE_HDL_COPY);
 
-  ib_uint64_t size_bytes;
-  fil_space_t *space;
-  dberr_t err;
-
-  space = node->space;
-
   /* Exit if concurrent DDL in progress. */
   if (is_ddl_temp_table(node)) {
-    my_error(ER_DDL_IN_PROGRESS, MYF(0));
+    my_error(ER_CLONE_DDL_IN_PROGRESS, MYF(0));
     return (DB_ERROR);
   }
 
-  /* Currently don't support encrypted tablespace. */
+  auto space = node->space;
+
+  /* Skip deleted tablespaces. Their pages may still be in
+  the buffer pool. */
+  if (space->is_deleted()) {
+    return (DB_SUCCESS);
+  }
+
   if (space->encryption_type != Encryption::NONE) {
-    my_error(ER_NOT_SUPPORTED_YET, MYF(0), "Clone Encrypted Tablespace");
-    return (DB_ERROR);
+    /* Add page 0 always for encrypted tablespace. */
+    Clone_Page page_zero;
+    page_zero.m_space_id = space->id;
+    page_zero.m_page_no = 0;
+    m_page_set.insert(page_zero);
+    ++m_num_pages;
   }
 
   /* Find out the file size from node. */
@@ -473,28 +659,30 @@ dberr_t Clone_Snapshot::add_node(fil_node_t *node) {
   physical page size multiplied by number of pages. It is
   because we use UNIV_PAGE_SIZE while creating the node
   and tablespace. */
-  if (node->is_open && !page_sz.is_compressed()) {
-    size_bytes = static_cast<ib_uint64_t>(node->size);
-    size_bytes *= page_sz.physical();
-  } else {
-    os_file_size_t file_size;
+  auto file_size = os_file_get_size(node->name);
+  auto size_bytes = file_size.m_total_size;
+  auto alloc_size = file_size.m_alloc_size;
 
-    file_size = os_file_get_size(node->name);
-    size_bytes = file_size.m_total_size;
+  /* Check for error */
+  if (size_bytes == static_cast<os_offset_t>(~0)) {
+    char errbuf[MYSYS_STRERROR_SIZE];
+    my_error(ER_CANT_OPEN_FILE, MYF(0), node->name, errno,
+             my_strerror(errbuf, sizeof(errbuf), errno));
+    return (DB_ERROR);
   }
 
-#ifdef HAVE_PSI_STAGE_INTERFACE
+  /* Update estimation */
+  m_data_bytes_disk += alloc_size;
   m_monitor.add_estimate(size_bytes);
-#endif
 
   /* Add file to snapshot. */
-  err = add_file(node->name, size_bytes, space->id, false);
+  auto err = add_file(node->name, size_bytes, alloc_size, node, false);
 
-  if (err != DB_SUCCESS) {
-    return (err);
+  if (err != 0) {
+    return (DB_ERROR);
   }
 
-  /* Add to hash map only for first node of the tablesapce. */
+  /* Add to hash map only for first node of the tablespace. */
   if (m_data_file_map[space->id] == 0) {
     m_data_file_map[space->id] = m_num_data_files;
   }
@@ -502,13 +690,17 @@ dberr_t Clone_Snapshot::add_node(fil_node_t *node) {
   return (DB_SUCCESS);
 }
 
-/** Add page ID to to the set of pages in snapshot
-@param[in]	space_id	page tablespace
-@param[in]	page_num	page number within tablespace
-@return error code */
-dberr_t Clone_Snapshot::add_page(ib_uint32_t space_id, ib_uint32_t page_num) {
-  Clone_Page cur_page;
+int Clone_Snapshot::add_page(space_id_t space_id, ib_uint32_t page_num) {
+  /* Skip pages belonging to tablespace not included for clone. This could
+  be some left over pages from drop or truncate in buffer pool which
+  would eventually get removed. Or it may be a page for an undo tablespace
+  that was deleted with BUF_REMOVE_NONE. */
+  auto count = m_data_file_map.count(space_id);
+  if (count == 0) {
+    return (0);
+  }
 
+  Clone_Page cur_page;
   cur_page.m_space_id = space_id;
   cur_page.m_page_no = page_num;
 
@@ -516,39 +708,28 @@ dberr_t Clone_Snapshot::add_page(ib_uint32_t space_id, ib_uint32_t page_num) {
 
   if (result.second) {
     m_num_pages++;
-#ifdef HAVE_PSI_STAGE_INTERFACE
     m_monitor.add_estimate(UNIV_PAGE_SIZE);
-#endif
   } else {
     m_num_duplicate_pages++;
   }
 
-  return (DB_SUCCESS);
+  return (0);
 }
 
-/** Add redo file to snapshot
-@param[in]	file_name	file name
-@param[in]	file_size	file size in bytes
-@param[in]	file_offset	start offset
-@return error code. */
-dberr_t Clone_Snapshot::add_redo_file(char *file_name, ib_uint64_t file_size,
-                                      ib_uint64_t file_offset) {
+int Clone_Snapshot::add_redo_file(char *file_name, uint64_t file_size,
+                                  uint64_t file_offset) {
   ut_ad(m_snapshot_handle_type == CLONE_HDL_COPY);
 
   Clone_File_Meta *file_meta;
   uint num_chunks;
 
-  file_offset = ut_uint64_align_down(file_offset, UNIV_PAGE_SIZE);
-
   /* Build redo file metadata and add to redo vector. */
   file_meta = build_file(file_name, file_size, file_offset, num_chunks, true);
 
-#ifdef HAVE_PSI_STAGE_INTERFACE
-  m_monitor.add_estimate(static_cast<uint>(file_meta->m_file_size));
-#endif
+  m_monitor.add_estimate(file_meta->m_file_size - file_offset);
 
   if (file_meta == nullptr) {
-    return (DB_OUT_OF_MEMORY);
+    return (ER_OUTOFMEMORY);
   }
 
   /* Set the start offset for first redo file. This could happen
@@ -560,7 +741,18 @@ dberr_t Clone_Snapshot::add_redo_file(char *file_name, ib_uint64_t file_size,
     ut_ad(file_offset == 0);
   }
 
+  file_meta->m_alloc_size = 0;
+
   file_meta->m_space_id = dict_sys_t::s_log_space_first_id;
+  file_meta->m_compress_type = Compression::NONE;
+
+  /* Fill encryption type from redo tablespace. */
+  auto redo_space = fil_space_get(dict_sys_t::s_log_space_first_id);
+  file_meta->m_encrypt_type = redo_space->encryption_type;
+
+  file_meta->m_fsp_flags = UINT32_UNDEFINED;
+  file_meta->m_punch_hole = false;
+  file_meta->m_fsblk_size = 0;
 
   file_meta->m_file_index = m_num_redo_files;
 
@@ -572,95 +764,148 @@ dberr_t Clone_Snapshot::add_redo_file(char *file_name, ib_uint64_t file_size,
   m_num_redo_chunks += num_chunks;
   m_num_current_chunks = m_num_redo_chunks;
 
-  return (DB_SUCCESS);
+  /* In rare case of small redo file, large concurrent DMLs and
+  slow data transfer. Currently we support maximum 1k redo files. */
+  if (m_num_redo_files > SRV_N_LOG_FILES_CLONE_MAX) {
+    my_error(ER_INTERNAL_ERROR, MYF(0),
+             "More than 1000 archived redo files. Please retry clone.");
+    return (ER_INTERNAL_ERROR);
+  }
+
+  return (0);
 }
 
-/** Send current task information via callback
-@param[in]	task		task that is sending the information
-@param[in]	callback	callback interface
-@return error code */
-dberr_t Clone_Handle::send_task_metadata(Clone_Task *task,
-                                         Ha_clone_cbk *callback) {
-  int err = 0;
-  mem_heap_t *heap;
-
+int Clone_Handle::send_task_metadata(Clone_Task *task, Ha_clone_cbk *callback) {
   Clone_Desc_Task_Meta task_desc;
-  uint desc_len;
 
   ut_ad(m_clone_handle_type == CLONE_HDL_COPY);
-
-  heap = m_clone_task_manager.get_heap();
 
   /* Build task descriptor with metadata */
   task_desc.init_header(get_version());
   task_desc.m_task_meta = task->m_task_meta;
 
-  desc_len = task->m_alloc_len;
-  task_desc.serialize(task->m_serial_desc, desc_len, heap);
+  auto desc_len = task->m_alloc_len;
+  task_desc.serialize(task->m_serial_desc, desc_len, nullptr);
 
   callback->set_data_desc(task->m_serial_desc, desc_len);
   callback->clear_flags();
   callback->set_ack();
 
-  err = callback->buffer_cbk(nullptr, 0);
+  auto err = callback->buffer_cbk(nullptr, 0);
 
-  return (err == 0 ? DB_SUCCESS : DB_ERROR);
+  return (err);
 }
 
-/** Send current state information via callback
-@param[in]	task		task that is sending the information
-@param[in]	callback	callback interface
-@return error code */
-dberr_t Clone_Handle::send_state_metadata(Clone_Task *task,
-                                          Ha_clone_cbk *callback) {
-  int err = 0;
-  Clone_Desc_State state_desc;
-  Clone_Snapshot *snapshot;
-
+int Clone_Handle::send_keep_alive(Clone_Task *task, Ha_clone_cbk *callback) {
   ut_ad(m_clone_handle_type == CLONE_HDL_COPY);
 
+  Clone_Desc_State state_desc;
   state_desc.init_header(get_version());
 
   /* Build state descriptor from snapshot and task */
-  snapshot = m_clone_task_manager.get_snapshot();
-  snapshot->get_state_info(&state_desc);
+  auto snapshot = m_clone_task_manager.get_snapshot();
+  snapshot->get_state_info(false, &state_desc);
 
-  Clone_Task_Meta *task_meta;
-  task_meta = &task->m_task_meta;
+  state_desc.m_is_ack = true;
+
+  auto task_meta = &task->m_task_meta;
   state_desc.m_task_index = task_meta->m_task_index;
 
-  mem_heap_t *heap;
-  uint desc_len;
+  auto desc_len = task->m_alloc_len;
+  state_desc.serialize(task->m_serial_desc, desc_len, nullptr);
 
-  heap = m_clone_task_manager.get_heap();
-  desc_len = task->m_alloc_len;
-  state_desc.serialize(task->m_serial_desc, desc_len, heap);
+  callback->set_data_desc(task->m_serial_desc, desc_len);
+  callback->clear_flags();
+
+  auto err = callback->buffer_cbk(nullptr, 0);
+
+  return (err);
+}
+
+int Clone_Handle::send_state_metadata(Clone_Task *task, Ha_clone_cbk *callback,
+                                      bool is_start) {
+  ut_ad(m_clone_handle_type == CLONE_HDL_COPY);
+
+  Clone_Desc_State state_desc;
+  state_desc.init_header(get_version());
+
+  /* Build state descriptor from snapshot and task */
+  auto snapshot = m_clone_task_manager.get_snapshot();
+
+  /* Master needs to send estimation while beginning state */
+  auto get_estimate = (task->m_is_master && is_start);
+
+  snapshot->get_state_info(get_estimate, &state_desc);
+
+  /* Indicate if it is the end of state */
+  state_desc.m_is_start = is_start;
+
+  /* Check if remote has already acknowledged state transfer */
+  if (!is_start && task->m_is_master &&
+      !m_clone_task_manager.check_ack(&state_desc)) {
+    ut_ad(task->m_is_master);
+    ut_ad(m_clone_task_manager.is_restarted());
+
+    ib::info(ER_IB_CLONE_RESTART)
+        << "CLONE COPY: Skip ACK after restart for state "
+        << state_desc.m_state;
+    return (0);
+  }
+
+  auto task_meta = &task->m_task_meta;
+  state_desc.m_task_index = task_meta->m_task_index;
+
+  auto desc_len = task->m_alloc_len;
+  state_desc.serialize(task->m_serial_desc, desc_len, nullptr);
 
   callback->set_data_desc(task->m_serial_desc, desc_len);
   callback->clear_flags();
   callback->set_ack();
 
-  err = callback->buffer_cbk(nullptr, 0);
+  auto err = callback->buffer_cbk(nullptr, 0);
 
-  return (err == 0 ? DB_SUCCESS : DB_ERROR);
+  if (err != 0) {
+    return (err);
+  }
+
+  if (is_start) {
+    /* Send all file metadata while starting state */
+    err = send_all_file_metadata(task, callback);
+
+  } else {
+    /* Wait for ACK while finishing state */
+    err = m_clone_task_manager.wait_ack(this, task, callback);
+  }
+
+  return (err);
 }
 
-/** Send current file information via callback
-@param[in]	task		task that is sending the information
-@param[in]	file_meta	file meta information
-@param[in]	callback	callback interface
-@return error code */
-dberr_t Clone_Handle::send_file_metadata(Clone_Task *task,
-                                         Clone_File_Meta *file_meta,
+int Clone_Handle::send_all_file_metadata(Clone_Task *task,
                                          Ha_clone_cbk *callback) {
-  int err = 0;
-
-  Clone_Desc_File_MetaData file_desc;
-  Clone_Snapshot *snapshot;
-
   ut_ad(m_clone_handle_type == CLONE_HDL_COPY);
 
-  snapshot = m_clone_task_manager.get_snapshot();
+  if (!task->m_is_master) {
+    return (0);
+  }
+
+  auto snapshot = m_clone_task_manager.get_snapshot();
+
+  /* Send all file metadata for data/redo files */
+  auto err = snapshot->iterate_files([&](Clone_File_Meta *file_meta) {
+    return (send_file_metadata(task, file_meta, callback));
+  });
+
+  return (err);
+}
+
+int Clone_Handle::send_file_metadata(Clone_Task *task,
+                                     Clone_File_Meta *file_meta,
+                                     Ha_clone_cbk *callback) {
+  ut_ad(m_clone_handle_type == CLONE_HDL_COPY);
+
+  auto snapshot = m_clone_task_manager.get_snapshot();
+
+  Clone_Desc_File_MetaData file_desc;
 
   file_desc.m_file_meta = *file_meta;
   file_desc.m_state = snapshot->get_state();
@@ -683,59 +928,49 @@ dberr_t Clone_Handle::send_file_metadata(Clone_Task *task,
         static_cast<uint32_t>(strlen(SRV_BUF_DUMP_FILENAME_DEFAULT)) + 1;
 
   } else if (!fsp_is_ibd_tablespace(
-                 static_cast<space_id_t>(file_meta->m_space_id)) &&
-             Fil_path::is_absolute_path(file_meta->m_file_name)) {
-    /* For system tablespace, remove absolute path. */
+                 static_cast<space_id_t>(file_meta->m_space_id))) {
+    /* For system tablespace, remove path. */
     ut_ad(file_desc.m_state == CLONE_SNAPSHOT_FILE_COPY);
 
-    const char *name_ptr;
+    auto name_ptr = strrchr(file_meta->m_file_name, OS_PATH_SEPARATOR);
 
-    name_ptr = strrchr(file_meta->m_file_name, OS_PATH_SEPARATOR);
-    name_ptr++;
-    ut_a(name_ptr != nullptr);
+    if (name_ptr != nullptr) {
+      name_ptr++;
 
-    file_desc.m_file_meta.m_file_name = name_ptr;
-    file_desc.m_file_meta.m_file_name_len =
-        static_cast<uint32_t>(strlen(name_ptr)) + 1;
+      file_desc.m_file_meta.m_file_name = name_ptr;
+      file_desc.m_file_meta.m_file_name_len =
+          static_cast<uint32_t>(strlen(name_ptr)) + 1;
+    }
   }
 
   file_desc.init_header(get_version());
 
-  mem_heap_t *heap;
-  uint desc_len;
-
-  heap = m_clone_task_manager.get_heap();
-  desc_len = task->m_alloc_len;
-  file_desc.serialize(task->m_serial_desc, desc_len, heap);
+  auto desc_len = task->m_alloc_len;
+  file_desc.serialize(task->m_serial_desc, desc_len, nullptr);
 
   callback->set_data_desc(task->m_serial_desc, desc_len);
   callback->clear_flags();
 
-  err = callback->buffer_cbk(nullptr, 0);
+  /* Check for secure transfer for encrypted table. */
+  if (file_meta->m_encrypt_type != Encryption::NONE || srv_undo_log_encrypt ||
+      srv_redo_log_encrypt) {
+    callback->set_secure();
+  }
 
-  return (err == 0 ? DB_SUCCESS : DB_ERROR);
+  auto err = callback->buffer_cbk(nullptr, 0);
+
+  return (err);
 }
 
-/** Send cloned data via callback
-@param[in]	task		task that is sending the information
-@param[in]	file_meta	file information
-@param[in]	offset		file offset
-@param[in]	buffer		data buffer or NULL if send from file
-@param[in]	size		data buffer size
-@param[in]	callback	callback interface
-@return error code */
-dberr_t Clone_Handle::send_data(Clone_Task *task, Clone_File_Meta *file_meta,
-                                ib_uint64_t offset, byte *buffer, uint size,
-                                Ha_clone_cbk *callback) {
-  dberr_t err;
-  Clone_Desc_Data data_desc;
-  Clone_Snapshot *snapshot;
-
+int Clone_Handle::send_data(Clone_Task *task, Clone_File_Meta *file_meta,
+                            uint64_t offset, byte *buffer, uint size,
+                            Ha_clone_cbk *callback) {
   ut_ad(m_clone_handle_type == CLONE_HDL_COPY);
 
-  snapshot = m_clone_task_manager.get_snapshot();
+  auto snapshot = m_clone_task_manager.get_snapshot();
 
   /* Build data descriptor */
+  Clone_Desc_Data data_desc;
   data_desc.init_header(get_version());
   data_desc.m_state = snapshot->get_state();
 
@@ -747,148 +982,161 @@ dberr_t Clone_Handle::send_data(Clone_Task *task, Clone_File_Meta *file_meta,
   data_desc.m_file_size = file_meta->m_file_size;
 
   /* Serialize data descriptor and set in callback */
-  mem_heap_t *heap;
-  uint desc_len;
-  ulint file_type;
-
-  heap = snapshot->get_heap();
-  desc_len = task->m_alloc_len;
-  data_desc.serialize(task->m_serial_desc, desc_len, heap);
+  auto desc_len = task->m_alloc_len;
+  data_desc.serialize(task->m_serial_desc, desc_len, nullptr);
 
   callback->set_data_desc(task->m_serial_desc, desc_len);
   callback->clear_flags();
 
-  if (data_desc.m_state == CLONE_SNAPSHOT_REDO_COPY ||
-      file_meta->m_space_id == dict_sys_t::s_invalid_space_id) {
+  auto file_type = OS_CLONE_DATA_FILE;
+  bool is_log_file = (data_desc.m_state == CLONE_SNAPSHOT_REDO_COPY);
+
+  if (is_log_file || file_meta->m_space_id == dict_sys_t::s_invalid_space_id) {
     file_type = OS_CLONE_LOG_FILE;
-  } else {
-    file_type = OS_CLONE_DATA_FILE;
   }
+
+  int err = 0;
 
   if (buffer != nullptr) {
     /* Send data from buffer. */
-    int int_err;
-    int_err = callback->buffer_cbk(buffer, size);
-
-#ifdef HAVE_PSI_STAGE_INTERFACE
-    /* Update PFS if success. */
-    if (!int_err) {
-      Clone_Monitor &monitor = snapshot->get_clone_monitor();
-      monitor.update_work(size);
-    }
-#endif
-
-    return (int_err == 0 ? DB_SUCCESS : DB_ERROR);
+    err = callback->buffer_cbk(buffer, size);
 
   } else {
     /* Send data from file. */
     if (task->m_current_file_des.m_file == OS_FILE_CLOSED) {
       err = open_file(task, file_meta, file_type, false, false);
 
-      if (err != DB_SUCCESS) {
+      if (err != 0) {
         return (err);
       }
     }
 
+    ut_ad(task->m_current_file_index == file_meta->m_file_index);
+
     os_file_t file_hdl;
-    bool success;
     char errbuf[MYSYS_STRERROR_SIZE];
 
     file_hdl = task->m_current_file_des.m_file;
-    success = os_file_seek(nullptr, file_hdl, offset);
+    auto success = os_file_seek(nullptr, file_hdl, offset);
 
     if (!success) {
       my_error(ER_ERROR_ON_READ, MYF(0), file_meta->m_file_name, errno,
                my_strerror(errbuf, sizeof(errbuf), errno));
-      return (DB_ERROR);
+      return (ER_ERROR_ON_READ);
     }
 
     if (task->m_file_cache) {
       callback->set_os_buffer_cache();
+      /* For data file recommend zero copy for cached IO. */
+      if (!is_log_file) {
+        callback->set_zero_copy();
+      }
     }
 
     callback->set_source_name(file_meta->m_file_name);
 
-    err = file_callback(callback, task, size
+    err = file_callback(callback, task, size, false, offset
 #ifdef UNIV_PFS_IO
                         ,
                         __FILE__, __LINE__
 #endif /* UNIV_PFS_IO */
     );
+  }
 
-#ifdef HAVE_PSI_STAGE_INTERFACE
-    /* Update PFS if success. */
-    if (err == DB_SUCCESS) {
-      Clone_Monitor &monitor = snapshot->get_clone_monitor();
-      monitor.update_work(size);
-    }
-#endif
+  task->m_data_size += size;
 
-    return (err);
+  return (err);
+}
+
+void Clone_Handle::display_progress(uint32_t cur_chunk, uint32_t max_chunk,
+                                    uint32_t &percent_done,
+                                    ib_time_monotonic_ms_t &disp_time) {
+  auto current_time = ut_time_monotonic_ms();
+  auto current_percent = (cur_chunk * 100) / max_chunk;
+
+  if (current_percent >= percent_done + 20 ||
+      (current_time - disp_time > 5000 && current_percent > percent_done)) {
+    percent_done = current_percent;
+    disp_time = current_time;
+
+    ib::info(ER_IB_CLONE_OPERATION)
+        << "Stage progress: " << percent_done << "% completed.";
   }
 }
 
-/** Transfer snapshot data via callback
-@param[in]	callback	user callback interface
-@return error code */
-dberr_t Clone_Handle::copy(Ha_clone_cbk *callback) {
-  dberr_t err = DB_SUCCESS;
-  Clone_Task *task;
-  uint current_chunk;
-  Clone_Snapshot *snapshot;
-  uint max_chunks;
-  uint percent_done;
-  ulint disp_time;
-
+int Clone_Handle::copy(THD *thd, uint task_id, Ha_clone_cbk *callback) {
   ut_ad(m_clone_handle_type == CLONE_HDL_COPY);
 
-  /* Get a free task from task manager. */
-  err = m_clone_task_manager.get_task(task);
+  /* Get task from task manager. */
+  auto task = m_clone_task_manager.get_task_by_index(task_id);
 
-  if (err != DB_SUCCESS) {
+  auto err = m_clone_task_manager.alloc_buffer(task);
+  if (err != 0) {
     return (err);
   }
+
+  /* Allow restart only after copy is started. */
+  m_allow_restart = true;
 
   /* Send the task metadata. */
   err = send_task_metadata(task, callback);
 
-  if (err != DB_SUCCESS) {
+  if (err != 0) {
     return (err);
   }
 
+  auto send_matadata = m_clone_task_manager.is_restart_metadata(task);
+
+  /* Send state metadata to remote during restart */
+  if (send_matadata) {
+    ut_ad(task->m_is_master);
+    ut_ad(m_clone_task_manager.is_restarted());
+
+    err = send_state_metadata(task, callback, true);
+
+    /* Send all file metadata during restart */
+  } else if (task->m_is_master &&
+             m_clone_task_manager.get_state() == CLONE_SNAPSHOT_FILE_COPY &&
+             !m_clone_task_manager.is_file_metadata_transferred()) {
+    ut_ad(m_clone_task_manager.is_restarted());
+    err = send_all_file_metadata(task, callback);
+  }
+
+  if (err != 0) {
+    return (err);
+  }
   /* Adjust block size based on client buffer size. */
-  snapshot = m_clone_task_manager.get_snapshot();
+  auto snapshot = m_clone_task_manager.get_snapshot();
   snapshot->update_block_size(callback->get_client_buffer_size());
 
-  max_chunks = snapshot->get_num_chunks();
+  auto max_chunks = snapshot->get_num_chunks();
 
   /* Set time values for tracking stage progress. */
-  percent_done = 0;
-  disp_time = ut_time_ms();
+
+  auto disp_time = ut_time_monotonic_ms();
 
   /* Loop and process data until snapshot is moved to DONE state. */
+  uint32_t percent_done = 0;
+
   while (m_clone_task_manager.get_state() != CLONE_SNAPSHOT_DONE) {
     /* Reserve next chunk for current state from snapshot. */
-    current_chunk = m_clone_task_manager.reserve_next_chunk();
+    uint32_t current_chunk = 0;
+    uint32_t current_block = 0;
+
+    err = m_clone_task_manager.reserve_next_chunk(task, current_chunk,
+                                                  current_block);
+
+    if (err != 0) {
+      break;
+    }
 
     if (current_chunk != 0) {
       /* Send blocks from the reserved chunk. */
-      err = process_chunk(task, current_chunk, callback);
+      err = process_chunk(task, current_chunk, current_block, callback);
 
       /* Display stage progress based on % completion. */
-      uint current_percent;
-      ulint current_time;
-
-      current_time = ut_time_ms();
-      current_percent = (current_chunk * 100) / max_chunks;
-
-      if (current_percent >= percent_done + 20 ||
-          (current_time - disp_time > 5000 && current_percent > percent_done)) {
-        percent_done = current_percent;
-        disp_time = current_time;
-
-        ib::info(ER_IB_MSG_154)
-            << "Stage progress: " << percent_done << "% completed.";
+      if (task->m_is_master) {
+        display_progress(current_chunk, max_chunks, percent_done, disp_time);
       }
 
     } else {
@@ -897,114 +1145,98 @@ dberr_t Clone_Handle::copy(Ha_clone_cbk *callback) {
       /* Close the last open file before proceeding to next state */
       err = close_file(task);
 
-      if (err != DB_SUCCESS) {
+      if (err != 0) {
+        break;
+      }
+
+      /* Inform that the data transfer for current state
+      is over before moving to next state. The remote
+      needs to send back state transfer ACK for the state
+      transfer to complete. */
+      err = send_state_metadata(task, callback, false);
+
+      if (err != 0) {
         break;
       }
 
       /* Next state is decided by snapshot for Copy. */
-      err = move_to_next_state(task, CLONE_SNAPSHOT_NONE);
+      err = move_to_next_state(task, callback, nullptr);
 
-      if (err != DB_SUCCESS) {
+      ut_d(task->m_ignore_sync = false);
+
+      if (err != 0) {
         break;
       }
 
       max_chunks = snapshot->get_num_chunks();
       percent_done = 0;
-      disp_time = ut_time_ms();
+      disp_time = ut_time_monotonic_ms();
 
       /* Send state metadata before processing chunks. */
-      err = send_state_metadata(task, callback);
+      err = send_state_metadata(task, callback, true);
     }
 
-    if (err != DB_SUCCESS) {
+    if (err != 0) {
       break;
     }
+  }
+
+  /* Close the last open file after error. */
+  if (err != 0) {
+    close_file(task);
   }
 
   return (err);
 }
 
-#ifdef UNIV_DEBUG
-/** Wait during clone operation
-@param[in]	snapshot	task that is sending the information
-@param[in]	chunk_num	chunk number to process */
-static void debug_wait(Clone_Snapshot *snapshot, uint chunk_num) {
-  Snapshot_State state;
-  uint nchunks;
-
-  state = snapshot->get_state();
-  nchunks = snapshot->get_num_chunks();
-
-  /* Stop somewhere in the middle of current stage */
-  if (chunk_num != (nchunks / 2 + 1)) {
-    return;
-  }
-
-  if (state == CLONE_SNAPSHOT_FILE_COPY) {
-    DEBUG_SYNC_C("clone_file_copy");
-
-  } else if (state == CLONE_SNAPSHOT_PAGE_COPY) {
-    DEBUG_SYNC_C("clone_page_copy");
-
-  } else if (state == CLONE_SNAPSHOT_REDO_COPY) {
-    DEBUG_SYNC_C("clone_redo_copy");
-  }
-}
-#endif /* UNIV_DEBUG */
-
-/** Process a data chunk and send data blocks via callback
-@param[in]	task		task that is sending the information
-@param[in]	chunk_num	chunk number to process
-@param[in]	callback	callback interface
-@return error code */
-dberr_t Clone_Handle::process_chunk(Clone_Task *task, uint chunk_num,
-                                    Ha_clone_cbk *callback) {
-  dberr_t err = DB_SUCCESS;
-  uint block_num = 0;
-
-  byte *data_buf;
-  uint data_size;
-  ib_uint64_t data_offset;
-
-  Clone_Snapshot *snapshot;
-  Clone_File_Meta file_meta;
-
+int Clone_Handle::process_chunk(Clone_Task *task, uint32_t chunk_num,
+                                uint32_t block_num, Ha_clone_cbk *callback) {
   ut_ad(m_clone_handle_type == CLONE_HDL_COPY);
 
-  file_meta.m_file_index = task->m_current_file_index;
+  Clone_File_Meta file_meta;
 
-  snapshot = m_clone_task_manager.get_snapshot();
+  auto &task_meta = task->m_task_meta;
 
-#ifdef UNIV_DEBUG
-  debug_wait(snapshot, chunk_num);
-#endif /* UNIV_DEBUG */
+  file_meta.m_file_index = 0;
+
+  /* If chunks are in increasing order, optimize file
+  search by index */
+  if (task_meta.m_chunk_num <= chunk_num) {
+    file_meta.m_file_index = task->m_current_file_index;
+  }
+
+  auto snapshot = m_clone_task_manager.get_snapshot();
+  auto state = m_clone_task_manager.get_state();
 
   /* Loop over all the blocks of current chunk and send data. */
-  while (err == DB_SUCCESS) {
-    data_buf = task->m_current_buffer;
-    data_size = task->m_buffer_alloc_len;
+  int err = 0;
+
+  while (err == 0) {
+    auto data_buf = task->m_current_buffer;
+    auto data_size = task->m_buffer_alloc_len;
 
     /* Get next block from snapshot */
+    ib_uint64_t data_offset;
+
     err = snapshot->get_next_block(chunk_num, block_num, &file_meta,
                                    data_offset, data_buf, data_size);
 
     /* '0' block number indicates no more blocks. */
-    if (err != DB_SUCCESS || block_num == 0) {
+    if (err != 0 || block_num == 0) {
       break;
     }
 
-    /* Need to exit if DDL has marked for abort. */
-    if (Clone_Sys::s_clone_sys_state == CLONE_SYS_ABORT) {
-      my_error(ER_DDL_IN_PROGRESS, MYF(0));
+    /* Check for error from other tasks and DDL */
+    err = m_clone_task_manager.handle_error_other_task(task->m_has_thd);
 
-      err = DB_ERROR;
+    if (err != 0) {
       break;
     }
 
     task->m_task_meta.m_block_num = block_num;
     task->m_task_meta.m_chunk_num = chunk_num;
 
-    if (data_buf == nullptr &&
+    if (state != CLONE_SNAPSHOT_PAGE_COPY &&
         (task->m_current_file_des.m_file == OS_FILE_CLOSED ||
          task->m_current_file_index != file_meta.m_file_index)) {
       /* We are moving to next file. Close the current file and
@@ -1012,13 +1244,17 @@ dberr_t Clone_Handle::process_chunk(Clone_Task *task, uint chunk_num,
 
       err = close_file(task);
 
-      if (err != DB_SUCCESS) {
+      if (err != 0) {
         break;
       }
 
-      err = send_file_metadata(task, &file_meta, callback);
+      /* During redo copy, worker could be ahead of master and needs to
+      send the metadata */
+      if (state == CLONE_SNAPSHOT_REDO_COPY) {
+        err = send_file_metadata(task, &file_meta, callback);
+      }
 
-      if (err != DB_SUCCESS) {
+      if (err != 0) {
         break;
       }
     }
@@ -1031,5 +1267,78 @@ dberr_t Clone_Handle::process_chunk(Clone_Task *task, uint chunk_num,
         send_data(task, &file_meta, data_offset, data_buf, data_size, callback);
   }
 
+  /* Save current error and file name. */
+  if (err != 0) {
+    m_clone_task_manager.set_error(err, file_meta.m_file_name);
+  }
+
   return (err);
+}
+
+int Clone_Handle::restart_copy(THD *thd, const byte *loc, uint loc_len) {
+  ut_ad(mutex_own(clone_sys->get_mutex()));
+
+  if (is_abort()) {
+    my_error(ER_INTERNAL_ERROR, MYF(0),
+             "Innodb Clone Restart failed, existing clone aborted");
+    return (ER_INTERNAL_ERROR);
+  }
+
+  /* Wait for the Idle state */
+  if (!is_idle()) {
+    /* Sleep for 1 second */
+    Clone_Msec sleep_time(Clone_Sec(1));
+    /* Generate alert message every 5 seconds. */
+    Clone_Sec alert_time(5);
+    /* Wait for 30 seconds for server to reach idle state. */
+    Clone_Sec time_out(30);
+
+    bool is_timeout = false;
+    auto err = Clone_Sys::wait(
+        sleep_time, time_out, alert_time,
+        [&](bool alert, bool &result) {
+          ut_ad(mutex_own(clone_sys->get_mutex()));
+          result = !is_idle();
+
+          if (thd_killed(thd)) {
+            my_error(ER_QUERY_INTERRUPTED, MYF(0));
+            return (ER_QUERY_INTERRUPTED);
+
+          } else if (is_abort()) {
+            my_error(ER_INTERNAL_ERROR, MYF(0),
+                     "Innodb Clone Restart failed, existing clone aborted");
+            return (ER_INTERNAL_ERROR);
+
+          } else if (Clone_Sys::s_clone_sys_state == CLONE_SYS_ABORT) {
+            my_error(ER_CLONE_DDL_IN_PROGRESS, MYF(0));
+            return (ER_CLONE_DDL_IN_PROGRESS);
+          }
+
+          if (result && alert) {
+            ib::info(ER_IB_CLONE_TIMEOUT) << "Clone Master Restart "
+                                             "wait for idle state";
+          }
+          return (0);
+        },
+        clone_sys->get_mutex(), is_timeout);
+
+    if (err != 0) {
+      return (err);
+
+    } else if (is_timeout) {
+      ib::info(ER_IB_CLONE_TIMEOUT)
+          << "Clone Master restart wait for idle timed out";
+
+      my_error(ER_INTERNAL_ERROR, MYF(0),
+               "Clone restart wait for idle state timed out");
+      return (ER_INTERNAL_ERROR);
+    }
+  }
+
+  ut_ad(is_idle());
+  m_clone_task_manager.reinit_copy_state(loc, loc_len);
+
+  set_state(CLONE_STATE_ACTIVE);
+
+  return (0);
 }

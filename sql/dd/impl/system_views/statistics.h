@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -56,12 +56,13 @@ class Statistics_base
     FIELD_INDEX_COMMENT,
     FIELD_IS_VISIBLE,
     FIELD_INDEX_ORDINAL_POSITION,
-    FIELD_COLUMN_ORDINAL_POSITION
+    FIELD_COLUMN_ORDINAL_POSITION,
+    FIELD_EXPRESSION
   };
 
   Statistics_base();
 
-  virtual const String_type &name() const = 0;
+  const String_type &name() const override = 0;
 };
 
 /*
@@ -78,7 +79,7 @@ class Statistics : public Statistics_base {
     return s_view_name;
   }
 
-  virtual const String_type &name() const { return Statistics::view_name(); }
+  const String_type &name() const override { return Statistics::view_name(); }
 };
 
 /*
@@ -95,12 +96,12 @@ class Show_statistics : public Statistics {
     return s_view_name;
   }
 
-  virtual const String_type &name() const {
+  const String_type &name() const override {
     return Show_statistics::view_name();
   }
 
   // This view definition is hidden from user.
-  virtual bool hidden() const { return true; }
+  bool hidden() const override { return true; }
 };
 
 }  // namespace system_views

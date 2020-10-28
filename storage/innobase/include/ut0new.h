@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2014, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2014, 2020, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -134,6 +134,7 @@ InnoDB:
 #include <limits>
 #include <map>
 #include <type_traits> /* std::is_trivially_default_constructible */
+#include <unordered_set>
 
 #include "my_basename.h"
 #include "mysql/psi/mysql_memory.h"
@@ -143,8 +144,8 @@ InnoDB:
 #include "os0proc.h"
 #include "os0thread.h"
 #include "univ.i"
-#include "ut0byte.h"    /* ut_align */
-#include "ut0counter.h" /* INNOBASE_CACHE_LINE_SIZE */
+#include "ut0byte.h" /* ut_align */
+#include "ut0cpu_cache.h"
 #include "ut0ut.h"
 
 #define OUT_OF_MEMORY_MSG                                             \
@@ -158,8 +159,7 @@ extern const size_t alloc_max_retries;
 /** Keys for registering allocations with performance schema.
 Pointers to these variables are supplied to PFS code via the pfs_info[]
 array and the PFS code initializes them via PSI_MEMORY_CALL(register_memory)().
-mem_key_other and mem_key_std are special in the following way (see also
-ut_allocator::get_mem_key()):
+mem_key_other and mem_key_std are special in the following way.
 * If the caller has not provided a key and the file name of the caller is
   unknown, then mem_key_std will be used. This happens only when called from
   within std::* containers.
@@ -177,6 +177,7 @@ extern PSI_memory_key mem_key_clone;
 extern PSI_memory_key mem_key_dict_stats_bg_recalc_pool_t;
 extern PSI_memory_key mem_key_dict_stats_index_map_t;
 extern PSI_memory_key mem_key_dict_stats_n_diff_on_level;
+extern PSI_memory_key mem_key_redo_log_archive_queue_element;
 extern PSI_memory_key mem_key_other;
 extern PSI_memory_key mem_key_partitioning;
 extern PSI_memory_key mem_key_row_log_buf;
@@ -232,6 +233,7 @@ static constexpr const char *auto_event_names[] = {
     "dict",
     "dict0boot",
     "dict0crea",
+    "dict0dd",
     "dict0dict",
     "dict0load",
     "dict0mem",
@@ -350,6 +352,7 @@ static constexpr const char *auto_event_names[] = {
     "srv0mon",
     "srv0srv",
     "srv0start",
+    "srv0tmp",
     "sync0arr",
     "sync0debug",
     "sync0policy",
@@ -396,9 +399,10 @@ static constexpr size_t n_auto = UT_ARR_SIZE(auto_event_names);
 extern PSI_memory_key auto_event_keys[n_auto];
 extern PSI_memory_info pfs_info_auto[n_auto];
 
+/** gcc 5 fails to evalutate costexprs at compile time. */
+#if defined(__GNUG__) && (__GNUG__ == 5)
+
 /** Compute whether a string begins with a given prefix, compile-time.
-Has to work recursively due to C++11 constexpr constraints (C++14 is
-more flexible).
 @param[in]	a	first string, taken to be zero-terminated
 @param[in]	b	second string (prefix to search for)
 @param[in]	b_len	length in bytes of second string
@@ -411,8 +415,6 @@ constexpr bool ut_string_begins_with(const char *a, const char *b, size_t b_len,
 }
 
 /** Find the length of the filename without its file extension.
-Has to work recursively due to C++11 constexpr constraints (C++14 is
-more flexible).
 @param[in]	file	filename, with extension but without directory
 @param[in]	index	character index to start scanning for extension
                         separator at
@@ -425,8 +427,6 @@ constexpr size_t ut_len_without_extension(const char *file, size_t index = 0) {
 
 /** Retrieve a memory key (registered with PFS), given the file name of the
 caller.
-Has to work recursively due to C++11 constexpr constraints (C++14 is
-more flexible).
 @param[in]	file	portion of the filename - basename, with extension
 @param[in]	len	length of the filename to check for
 @param[in]	index	index of first PSI key to check
@@ -451,6 +451,74 @@ constexpr PSI_memory_key ut_new_get_key_by_file(const char *file) {
 
 #define UT_NEW_THIS_FILE_PSI_KEY ut_new_get_key_by_file(MY_BASENAME)
 
+#else /* __GNUG__ == 5 */
+
+/** Compute whether a string begins with a given prefix, compile-time.
+@param[in]	a	first string, taken to be zero-terminated
+@param[in]	b	second string (prefix to search for)
+@param[in]	b_len	length in bytes of second string
+@return whether b is a prefix of a */
+constexpr bool ut_string_begins_with(const char *a, const char *b,
+                                     size_t b_len) {
+  for (size_t i = 0; i < b_len; ++i) {
+    if (a[i] != b[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Find the length of the filename without its file extension.
+@param[in]	file	filename, with extension but without directory
+@return length, in bytes */
+constexpr size_t ut_len_without_extension(const char *file) {
+  for (size_t i = 0;; ++i) {
+    if (file[i] == '\0' || file[i] == '.') {
+      return i;
+    }
+  }
+}
+
+/** Retrieve a memory key (registered with PFS), given the file name of the
+caller.
+@param[in]	file	portion of the filename - basename, with extension
+@param[in]	len	length of the filename to check for
+@return index to registered memory key or -1 if not found */
+constexpr int ut_new_get_key_by_base_file(const char *file, size_t len) {
+  for (size_t i = 0; i < n_auto; ++i) {
+    if (ut_string_begins_with(auto_event_names[i], file, len)) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+/** Retrieve a memory key (registered with PFS), given the file name of
+the caller.
+@param[in]	file	portion of the filename - basename, with extension
+@return index to memory key or -1 if not found */
+constexpr int ut_new_get_key_by_file(const char *file) {
+  return ut_new_get_key_by_base_file(file, ut_len_without_extension(file));
+}
+
+// Sending an expression through a template variable forces the compiler to
+// evaluate the expression at compile time (constexpr in itself has no such
+// guarantee, only that the compiler is allowed).
+template <int Value>
+struct force_constexpr {
+  static constexpr int value = Value;
+};
+
+#define UT_NEW_THIS_FILE_PSI_INDEX \
+  (force_constexpr<ut_new_get_key_by_file(MY_BASENAME)>::value)
+
+#define UT_NEW_THIS_FILE_PSI_KEY    \
+  (UT_NEW_THIS_FILE_PSI_INDEX == -1 \
+       ? PSI_NOT_INSTRUMENTED       \
+       : auto_event_keys[UT_NEW_THIS_FILE_PSI_INDEX])
+
+#endif /* __GNUG__ == 5 */
+
 #endif /* UNIV_PFS_MEMORY */
 
 /** A structure that holds the necessary data for performance schema
@@ -458,8 +526,17 @@ accounting. An object of this type is put in front of each allocated block
 of memory when allocation is done by ut_allocator::allocate(). This is
 because the data is needed even when freeing the memory. Users of
 ut_allocator::allocate_large() are responsible for maintaining this
-themselves. */
-struct ut_new_pfx_t {
+themselves.
+ To maintain proper alignment of the pointers ut_allocator returns to the
+calling code, this struct is declared with alignas(std::max_align_t). This tells
+the compiler to insert enough padding to the struct to satisfy the strictest
+fundamental alignment requirement. The size of this object then becomes a
+multiple of the alignment requirement, this is implied by the fact that arrays
+are contiguous in memory. This means that when we increment a pointer to
+ut_new_pfx_t the resulting pointer must be aligned to the alignment requirement
+of std::max_align_t. Ref. C++ standard: 6.6.5 [basic.align], 11.3.4 [dcl.array]
+*/
+struct alignas(std::max_align_t) ut_new_pfx_t {
 #ifdef UNIV_PFS_MEMORY
 
   /** Performance schema key. Assigned to a name at startup via
@@ -488,11 +565,6 @@ struct ut_new_pfx_t {
   allocated block and its users are responsible for maintaining it
   and passing it later to ut_allocator::deallocate_large(). */
   size_t m_size;
-#if SIZEOF_VOIDP == 4
-  /** Pad the header size to a multiple of 64 bits on 32-bit systems,
-  so that the payload will be aligned to 64 bits. */
-  size_t pad;
-#endif
 };
 
 /** Allocator class for allocating memory from inside std::* containers. */
@@ -507,7 +579,11 @@ class ut_allocator {
   typedef size_t size_type;
   typedef ptrdiff_t difference_type;
 
-  /** Default constructor. */
+  static_assert(alignof(T) <= alignof(std::max_align_t),
+                "ut_allocator does not support over-aligned types. Use "
+                "aligned_memory or another similar allocator for this type.");
+  /** Default constructor.
+  @param[in] key  performance schema key. */
   explicit ut_allocator(PSI_memory_key key = PSI_NOT_INSTRUMENTED)
       :
 #ifdef UNIV_PFS_MEMORY
@@ -516,15 +592,15 @@ class ut_allocator {
         m_oom_fatal(true) {
   }
 
-  /** Constructor from allocator of another type. */
+  /** Constructor from allocator of another type.
+  @param[in] other  the allocator to copy. */
   template <class U>
   ut_allocator(const ut_allocator<U> &other)
-      : m_oom_fatal(other.is_oom_fatal()) {
+      :
 #ifdef UNIV_PFS_MEMORY
-    const PSI_memory_key other_key = other.get_mem_key();
-
-    m_key = (other_key != mem_key_std) ? other_key : PSI_NOT_INSTRUMENTED;
+        m_key(other.get_mem_key()),
 #endif /* UNIV_PFS_MEMORY */
+        m_oom_fatal(other.is_oom_fatal()) {
   }
 
   /** When out of memory (OOM) happens, report error and do not
@@ -538,6 +614,15 @@ class ut_allocator {
   /** Check if allocation failure is a fatal error.
   @return true if allocation failure is fatal, false otherwise. */
   bool is_oom_fatal() const { return (m_oom_fatal); }
+
+#ifdef UNIV_PFS_MEMORY
+  /** Get the performance schema key to use for tracing allocations.
+  @return performance schema key */
+  PSI_memory_key get_mem_key() const {
+    /* note: keep this as simple getter as is used by copy constructor */
+    return (m_key);
+  }
+#endif /* UNIV_PFS_MEMORY */
 
   /** Return the maximum number of objects that can be allocated by
   this allocator. */
@@ -556,28 +641,29 @@ class ut_allocator {
   If the allocation fails this method may throw an exception. This
   is mandated by the standard and if it returns NULL instead, then
   STL containers that use it (e.g. std::vector) may get confused.
-  After successfull allocation the returned pointer must be passed
+  After successful allocation the returned pointer must be passed
   to ut_allocator::deallocate() when no longer needed.
-  @param[in]	n_elements	number of elements
-  @param[in]	hint		pointer to a nearby memory location,
-                                  unused by this implementation
-  @param[in]	key		Performance schema key
-  @param[in]	set_to_zero	if true, then the returned memory is
-                                  initialized with 0x0 bytes.
-  @param[in]	throw_on_error	error
+  @param[in]  n_elements      number of elements
+  @param[in]  hint            pointer to a nearby memory location,
+                              unused by this implementation
+  @param[in]  key             performance schema key
+  @param[in]  set_to_zero     if true, then the returned memory is
+                              initialized with 0x0 bytes.
+  @param[in]  throw_on_error  if true, then exception is throw on
+                              allocation failure
   @return pointer to the allocated memory */
-  pointer allocate(size_type n_elements, const_pointer hint = NULL,
+  pointer allocate(size_type n_elements, const_pointer hint = nullptr,
                    PSI_memory_key key = PSI_NOT_INSTRUMENTED,
                    bool set_to_zero = false, bool throw_on_error = true) {
     if (n_elements == 0) {
-      return (NULL);
+      return (nullptr);
     }
 
     if (n_elements > max_size()) {
       if (throw_on_error) {
         throw(std::bad_alloc());
       } else {
-        return (NULL);
+        return (nullptr);
       }
     }
 
@@ -585,10 +671,6 @@ class ut_allocator {
     size_t total_bytes = n_elements * sizeof(T);
 
 #ifdef UNIV_PFS_MEMORY
-    /* The header size must not ruin the 64-bit alignment
-    on 32-bit systems. Some allocated structures use
-    64-bit fields. */
-    ut_ad((sizeof(ut_new_pfx_t) & 7) == 0);
     total_bytes += sizeof(ut_new_pfx_t);
 #endif /* UNIV_PFS_MEMORY */
 
@@ -599,14 +681,14 @@ class ut_allocator {
         ptr = malloc(total_bytes);
       }
 
-      if (ptr != NULL || retries >= alloc_max_retries) {
+      if (ptr != nullptr || retries >= alloc_max_retries) {
         break;
       }
 
       os_thread_sleep(1000000 /* 1 second */);
     }
 
-    if (ptr == NULL) {
+    if (ptr == nullptr) {
       ib::fatal_or_error(m_oom_fatal)
           << "Cannot allocate " << total_bytes << " bytes of memory after "
           << alloc_max_retries << " retries over " << alloc_max_retries
@@ -615,15 +697,13 @@ class ut_allocator {
       if (throw_on_error) {
         throw(std::bad_alloc());
       } else {
-        return (NULL);
+        return (nullptr);
       }
     }
 
 #ifdef UNIV_PFS_MEMORY
     ut_new_pfx_t *pfx = static_cast<ut_new_pfx_t *>(ptr);
-
     allocate_trace(total_bytes, key, pfx);
-
     return (reinterpret_cast<pointer>(pfx + 1));
 #else
     return (reinterpret_cast<pointer>(ptr));
@@ -634,7 +714,7 @@ class ut_allocator {
   @param[in,out]	ptr		pointer to memory to free
   @param[in]	n_elements	number of elements allocated (unused) */
   void deallocate(pointer ptr, size_type n_elements = 0) {
-    if (ptr == NULL) {
+    if (ptr == nullptr) {
       return;
     }
 
@@ -682,15 +762,15 @@ class ut_allocator {
   pointer reallocate(void *ptr, size_type n_elements, PSI_memory_key key) {
     if (n_elements == 0) {
       deallocate(static_cast<pointer>(ptr));
-      return (NULL);
+      return (nullptr);
     }
 
-    if (ptr == NULL) {
-      return (allocate(n_elements, NULL, key, false, false));
+    if (ptr == nullptr) {
+      return (allocate(n_elements, nullptr, key, false, false));
     }
 
     if (n_elements > max_size()) {
-      return (NULL);
+      return (nullptr);
     }
 
     ut_new_pfx_t *pfx_old;
@@ -704,21 +784,21 @@ class ut_allocator {
     for (size_t retries = 1;; retries++) {
       pfx_new = static_cast<ut_new_pfx_t *>(realloc(pfx_old, total_bytes));
 
-      if (pfx_new != NULL || retries >= alloc_max_retries) {
+      if (pfx_new != nullptr || retries >= alloc_max_retries) {
         break;
       }
 
       os_thread_sleep(1000000 /* 1 second */);
     }
 
-    if (pfx_new == NULL) {
+    if (pfx_new == nullptr) {
       ib::fatal_or_error(m_oom_fatal)
           << "Cannot reallocate " << total_bytes << " bytes of memory after "
           << alloc_max_retries << " retries over " << alloc_max_retries
           << " seconds. OS error: " << strerror(errno) << " (" << errno << "). "
           << OUT_OF_MEMORY_MSG;
       /* not reached */
-      return (NULL);
+      return (nullptr);
     }
 
     /* pfx_new still contains the description of the old block
@@ -743,10 +823,10 @@ class ut_allocator {
     static_assert(std::is_default_constructible<T>::value,
                   "Array element type must be default-constructible");
 
-    T *p = allocate(n_elements, NULL, key, false, false);
+    T *p = allocate(n_elements, nullptr, key, false, false);
 
-    if (p == NULL) {
-      return (NULL);
+    if (p == nullptr) {
+      return (nullptr);
     }
 
     T *first = p;
@@ -775,7 +855,7 @@ class ut_allocator {
   by new_array().
   @param[in,out]	ptr	pointer to the first object in the array */
   void delete_array(T *ptr) {
-    if (ptr == NULL) {
+    if (ptr == nullptr) {
       return;
     }
 
@@ -803,7 +883,7 @@ class ut_allocator {
   @return pointer to the allocated memory or NULL */
   pointer allocate_large(size_type n_elements, ut_new_pfx_t *pfx) {
     if (n_elements == 0 || n_elements > max_size()) {
-      return (NULL);
+      return (nullptr);
     }
 
     ulint n_bytes = n_elements * sizeof(T);
@@ -811,7 +891,7 @@ class ut_allocator {
     pointer ptr = reinterpret_cast<pointer>(os_mem_alloc_large(&n_bytes));
 
 #ifdef UNIV_PFS_MEMORY
-    if (ptr != NULL) {
+    if (ptr != nullptr) {
       allocate_trace(n_bytes, PSI_NOT_INSTRUMENTED, pfx);
     }
 #else
@@ -834,13 +914,9 @@ class ut_allocator {
     os_mem_free_large(ptr, pfx->m_size);
   }
 
+ private:
 #ifdef UNIV_PFS_MEMORY
 
-  /** Get the performance schema key to use for tracing allocations.
-  @return performance schema key */
-  PSI_memory_key get_mem_key() const { return (m_key); }
-
- private:
   /** Retrieve the size of a memory block allocated by new_array().
   @param[in]	ptr	pointer returned by new_array().
   @return size of memory block */
@@ -860,6 +936,10 @@ class ut_allocator {
   @param[out]	pfx	placeholder to store the info which will be
                           needed when freeing the memory */
   void allocate_trace(size_t size, PSI_memory_key key, ut_new_pfx_t *pfx) {
+    if (m_key != PSI_NOT_INSTRUMENTED) {
+      key = m_key;
+    }
+
     pfx->m_key = PSI_MEMORY_CALL(memory_alloc)(key, size, &pfx->m_owner);
 
     pfx->m_size = size;
@@ -870,16 +950,16 @@ class ut_allocator {
   void deallocate_trace(const ut_new_pfx_t *pfx) {
     PSI_MEMORY_CALL(memory_free)(pfx->m_key, pfx->m_size, pfx->m_owner);
   }
-
-  /** Performance schema key. */
-  PSI_memory_key m_key;
-
 #endif /* UNIV_PFS_MEMORY */
 
- private:
-  /** Assignment operator, not used, thus disabled (private). */
+  /* Assignment operator, not used, thus disabled (private. */
   template <class U>
   void operator=(const ut_allocator<U> &);
+
+#ifdef UNIV_PFS_MEMORY
+  /** Performance schema key. */
+  PSI_memory_key m_key;
+#endif /* UNIV_PFS_MEMORY */
 
   /** A flag to indicate whether out of memory (OOM) error is considered
   fatal.  If true, it is fatal. */
@@ -918,8 +998,8 @@ pointer must be passed to UT_DELETE() when no longer needed.
   /* Placement new will return NULL and not attempt to construct an      \
   object if the passed in pointer is NULL, e.g. if allocate() has        \
   failed to allocate memory and has returned NULL. */                    \
-  ::new (ut_allocator<byte>(key).allocate(sizeof expr, NULL, key, false, \
-                                          false)) expr
+  ::new (ut_allocator<decltype(expr)>(key).allocate(1, NULL, key, false, \
+                                                    false)) expr
 
 /** Allocate, trace the allocation and construct an object.
 Use this macro instead of 'new' within InnoDB and instead of UT_NEW()
@@ -945,7 +1025,7 @@ we redirect this to a template function. */
 @param[in,out]	ptr	pointer to the object */
 template <typename T>
 inline void ut_delete(T *ptr) {
-  if (ptr == NULL) {
+  if (ptr == nullptr) {
     return;
   }
 
@@ -988,6 +1068,29 @@ inline void ut_delete_array(T *ptr) {
   ut_allocator<T>().delete_array(ptr);
 }
 
+/**
+Do not use ut_malloc, ut_zalloc, ut_malloc_nokey, ut_zalloc_nokey,
+ut_zalloc_nokey_nofatal and ut_realloc when allocating memory for
+over-aligned types. We have to use aligned_pointer instead, analogously to how
+we have to use aligned_alloc when working with the standard library to handle
+dynamic allocation for over-aligned types. These macros use ut_allocator to
+allocate raw memory (no type information is passed). This is why ut_allocator
+needs to be instantiated with the byte type. This has implications on the max
+alignment of the objects that are allocated using this API. ut_allocator returns
+memory aligned to alignof(std::max_align_t), similarly to library allocation
+functions. This value is 16 bytes on most x64 machines. A static_assert enforces
+this when using UT_NEW, however, since the ut_allocator template is instantiated
+with byte here the assert will not be hit if using alignment >=
+alignof(std::max_align_t). Not meeting the alignment requirements for a type
+causes undefined behaviour.
+One should avoid using the macros below when writing new code in general,
+and try to remove them when refactoring existing code (in favor of using the
+UT_NEW). The reason behind this lies both in the undefined behaviour problem
+described above, and in the fact that standard C-like malloc use is discouraged
+in c++ (see CppCoreGuidelines - R.10: Avoid malloc() and free()). Using
+ut_malloc has the same problems as the standard library malloc.
+*/
+
 #define ut_malloc(n_bytes, key)                         \
   static_cast<void *>(ut_allocator<byte>(key).allocate( \
       n_bytes, NULL, UT_NEW_THIS_FILE_PSI_KEY, false, false))
@@ -1022,7 +1125,7 @@ inline void ut_delete_array(T *ptr) {
 
 #else /* UNIV_PFS_MEMORY */
 
-  /* Fallbacks when memory tracing is disabled at compile time. */
+/* Fallbacks when memory tracing is disabled at compile time. */
 
 #define UT_NEW(expr, key) ::new (std::nothrow) expr
 #define UT_NEW_NOKEY(expr) ::new (std::nothrow) expr
@@ -1126,10 +1229,10 @@ class aligned_memory {
 /** Manages an object that is aligned to specified number of bytes.
 @tparam	T_Type		type of the object that is going to be managed
 @tparam T_Align_to	number of bytes to align to */
-template <typename T_Type, size_t T_Align_to = INNOBASE_CACHE_LINE_SIZE>
+template <typename T_Type, size_t T_Align_to = ut::INNODB_CACHE_LINE_SIZE>
 class aligned_pointer : public aligned_memory<T_Type, T_Align_to> {
  public:
-  ~aligned_pointer() {
+  ~aligned_pointer() override {
     if (!this->is_object_empty()) {
       this->destroy();
     }
@@ -1143,7 +1246,7 @@ class aligned_pointer : public aligned_memory<T_Type, T_Align_to> {
   }
 
   /** Destroys the managed object and releases its memory. */
-  void destroy() {
+  void destroy() override {
     (*this)->~T_Type();
     this->free_memory();
   }
@@ -1153,7 +1256,7 @@ class aligned_pointer : public aligned_memory<T_Type, T_Align_to> {
 number of bytes.
 @tparam	T_Type		type of the object that is going to be managed
 @tparam T_Align_to	number of bytes to align to */
-template <typename T_Type, size_t T_Align_to = INNOBASE_CACHE_LINE_SIZE>
+template <typename T_Type, size_t T_Align_to = ut::INNODB_CACHE_LINE_SIZE>
 class aligned_array_pointer : public aligned_memory<T_Type, T_Align_to> {
  public:
   /** Allocates aligned memory for new objects. Objects must be trivially
@@ -1170,7 +1273,7 @@ class aligned_array_pointer : public aligned_memory<T_Type, T_Align_to> {
   }
 
   /** Deallocates memory of array created earlier. */
-  void destroy() {
+  void destroy() override {
     static_assert(std::is_trivially_destructible<T_Type>::value,
                   "Aligned array element type must be "
                   "trivially destructible");
@@ -1189,4 +1292,22 @@ class aligned_array_pointer : public aligned_memory<T_Type, T_Align_to> {
   size_t m_size;
 };
 
+namespace ut {
+
+/** Specialization of basic_ostringstream which uses ut_allocator. Please note
+that it's .str() method returns std::basic_string which is not std::string, so
+it has similar API (in particular .c_str()), but you can't assign it to regular,
+std::string. */
+using ostringstream =
+    std::basic_ostringstream<char, std::char_traits<char>, ut_allocator<char>>;
+
+/** Specialization of vector which uses ut_allocator. */
+template <typename T>
+using vector = std::vector<T, ut_allocator<T>>;
+
+template <typename Key>
+using unordered_set = std::unordered_set<Key, std::hash<Key>,
+                                         std::equal_to<Key>, ut_allocator<Key>>;
+
+}  // namespace ut
 #endif /* ut0new_h */

@@ -1,6 +1,6 @@
 --echo # Test of SQL window functions.
 --echo # ----------------------------------------------------------------------
-
+--source include/have_innodb_16k.inc
 SET NAMES utf8;
 
 --echo
@@ -8,22 +8,7 @@ SET NAMES utf8;
 --echo
 
 --error ER_NOT_SUPPORTED_YET
-select json_objectagg('a','3') over ();
-
---error ER_NOT_SUPPORTED_YET
-select json_arrayagg('3') over ();
-
---error ER_NOT_SUPPORTED_YET
 select group_concat('3') over ();
-
---error ER_NOT_SUPPORTED_YET
-select bit_or(3) over ();
-
---error ER_NOT_SUPPORTED_YET
-select bit_and(3) over ();
-
---error ER_NOT_SUPPORTED_YET
-select bit_xor(3) over ();
 
 --echo Single window function (plus ORDER BY).
 CREATE TABLE t(i INT, j INT);
@@ -155,11 +140,6 @@ INSERT INTO t1 VALUES (11, NULL);
 CREATE TABLE ss(c CHAR(1));
 INSERT INTO ss VALUES ('M');
 
---error ER_WINDOW_NO_GROUP_ORDER
-SELECT sex, AVG(id), ROW_NUMBER() OVER w FROM t1
-    GROUP BY sex ASC
-    WINDOW w AS () ORDER BY sex DESC;
-
 --echo This is grouped aggregate in conjunction with a streaming wfs
 SELECT sex, AVG(id), ROW_NUMBER() OVER w FROM t1
     GROUP BY sex
@@ -238,8 +218,7 @@ SELECT k, MIN(i), SUM(j), SUM(k) OVER (ROWS UNBOUNDED PRECEDING) wf FROM t
   GROUP BY (k) WITH ROLLUP;
 SELECT    MIN(i), SUM(j), SUM(k) OVER (ROWS UNBOUNDED PRECEDING) wf FROM t
   GROUP BY (k) WITH ROLLUP;
-
---error ER_WRONG_USAGE
+--sorted_result
 SELECT k, MIN(i), SUM(j), SUM(k) OVER (ROWS UNBOUNDED PRECEDING) wf FROM t
 GROUP BY (k) WITH ROLLUP ORDER BY wf DESC;
 
@@ -260,8 +239,9 @@ GROUP BY sex WITH ROLLUP HAVING sex='M' OR sex IS NULL
 WINDOW w AS ();
 
 SELECT sex, AVG(id) FROM t1
-   GROUP BY sex ASC WITH ROLLUP
-   HAVING (sex='M' OR sex IS NULL) AND AVG(id)=3.0;
+   GROUP BY sex WITH ROLLUP
+   HAVING (sex='M' OR sex IS NULL) AND AVG(id)=3.0
+   ORDER BY GROUPING(sex), sex;
 
 SELECT sex, AVG(id), ROW_NUMBER() OVER w FROM t1
    GROUP BY sex WITH ROLLUP
@@ -359,6 +339,13 @@ DROP PREPARE p;
 
 PREPARE p FROM "SELECT sex, COUNT(id) OVER (ORDER BY id ROWS ? PRECEDING) FROM t1";
 SET @p1= -1;
+--error ER_WINDOW_FRAME_ILLEGAL
+EXECUTE p USING @p1;
+DROP PREPARE p;
+
+--echo Negative floating-point bounds not ok
+PREPARE p FROM "SELECT sex, COUNT(id) OVER (ORDER BY id RANGE ? PRECEDING) FROM t1";
+SET @p1= -0.1;
 --error ER_WINDOW_FRAME_ILLEGAL
 EXECUTE p USING @p1;
 DROP PREPARE p;
@@ -667,6 +654,7 @@ DROP TABLE t3;
 --echo ----------------------------------------------------------------------
 SELECT user_id, ROW_NUMBER() OVER (PARTITION BY user_id) FROM t2 t1;
 
+--sorted_result
 SELECT * FROM t1,t2 WHERE t1.id=t2.user_id;
 
 SELECT sex, id, date, ROW_NUMBER() OVER w AS row_no, RANK() OVER w AS `rank` FROM t1,t2
@@ -980,7 +968,18 @@ DROP TABLE td;
 
 --error ER_WRONG_ARGUMENTS
 SELECT id, NTILE(0) OVER w FROM t1 WINDOW w AS ();
+
+# Neither NULL literal, nor NULL value of argument is allowed
+--error ER_PARSE_ERROR
 SELECT id, NTILE(NULL) OVER w FROM t1 WINDOW w AS (ORDER BY id);
+PREPARE s FROM
+  'SELECT id, NTILE(?) OVER w FROM t1 WINDOW w AS (ORDER BY id)';
+SET @a=NULL;
+
+--error ER_WRONG_ARGUMENTS
+EXECUTE s USING @a;
+--error ER_WRONG_ARGUMENTS
+SELECT id, NTILE(@s) OVER w FROM t1 WINDOW w AS (ORDER BY id);
 SELECT id, NTILE(1) OVER w FROM t1 WINDOW w AS ();
 SELECT id, NTILE(5) OVER w FROM t1 WINDOW w AS ();
 SELECT id, NTILE(1) OVER w FROM t1 WINDOW w AS (ORDER BY id);
@@ -1002,6 +1001,7 @@ SET @p1= '1';
 --error ER_WRONG_ARGUMENTS
 EXECUTE p USING @p1;
 SET @p1= NULL;
+--error ER_WRONG_ARGUMENTS
 EXECUTE p USING @p1;
 DROP PREPARE p;
 
@@ -1244,7 +1244,6 @@ SELECT p, t, FIRST_VALUE(t) OVER w FROM t_time2 WINDOW w AS (PARTITION by p ORDE
 SELECT p, t, FIRST_VALUE(t) OVER w FROM t_time2 WINDOW w AS (PARTITION by p ORDER BY t RANGE BETWEEN INTERVAL 2 HOUR FOLLOWING AND INTERVAL 3 HOUR FOLLOWING);
 
 DROP TABLE t_time, t_time2;
-
 
 --echo ----------------------------------------------------------------------
 --echo -    Aggregates with RANGE frame specification
@@ -1536,6 +1535,32 @@ SELECT id, count(id) over w, count(*) over w, FIRST_VALUE(id) OVER w FROM t1
 
 
 DROP TABLE t1, t11, t2, t22, t3, t4, t5, t6, tj;
+DROP TABLE t;
+
+--echo ----------------------------------------------------------------------
+--echo -    Test NULL handling with RANGE
+--echo ----------------------------------------------------------------------
+CREATE TABLE t(i INT);
+INSERT INTO t VALUES (NULL), (NULL), (1), (2), (3), (4), (5);
+#V...
+SELECT COUNT(*) OVER (ORDER BY i RANGE BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) FROM t;
+SELECT COUNT(*) OVER (ORDER BY i RANGE BETWEEN 1 FOLLOWING AND 2 FOLLOWING) FROM t;
+SELECT COUNT(*) OVER (ORDER BY i RANGE BETWEEN 1 PRECEDING AND 2 FOLLOWING) FROM t;
+SELECT COUNT(*) OVER (ORDER BY i RANGE BETWEEN 1 PRECEDING AND UNBOUNDED FOLLOWING) FROM  t;
+SELECT COUNT(*) OVER (ORDER BY i RANGE BETWEEN 2 PRECEDING AND 1 PRECEDING) FROM  t;
+SELECT COUNT(*) OVER (ORDER BY i RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) FROM  t;
+SELECT COUNT(*) OVER (ORDER BY i RANGE BETWEEN UNBOUNDED PRECEDING AND 2 PRECEDING) FROM  t;
+SELECT COUNT(*) OVER (ORDER BY i RANGE BETWEEN UNBOUNDED PRECEDING AND 2 FOLLOWING) FROM  t;
+
+SELECT COUNT(*) OVER (ORDER BY i DESC RANGE BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING) FROM t;
+SELECT COUNT(*) OVER (ORDER BY i DESC RANGE BETWEEN 1 FOLLOWING AND 2 FOLLOWING) FROM t;
+SELECT COUNT(*) OVER (ORDER BY i DESC RANGE BETWEEN 1 PRECEDING AND 2 FOLLOWING) FROM t;
+SELECT COUNT(*) OVER (ORDER BY i DESC RANGE BETWEEN 1 PRECEDING AND UNBOUNDED FOLLOWING) FROM  t;
+SELECT COUNT(*) OVER (ORDER BY i DESC RANGE BETWEEN 2 PRECEDING AND 1 PRECEDING) FROM  t;
+SELECT COUNT(*) OVER (ORDER BY i DESC RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) FROM  t;
+SELECT COUNT(*) OVER (ORDER BY i DESC RANGE BETWEEN UNBOUNDED PRECEDING AND 2 PRECEDING) FROM  t;
+SELECT COUNT(*) OVER (ORDER BY i DESC RANGE BETWEEN UNBOUNDED PRECEDING AND 2 FOLLOWING) FROM  t;
+#...V
 DROP TABLE t;
 
 --echo ----------------------------------------------------------------------
@@ -2276,20 +2301,6 @@ SELECT AVG(a), SUM(a) OVER () FROM t;
 
 DROP TABLE t;
 
-#Bug#25420638 : PROBLEM WHEN USING MYISAM FOR INTERNAL TEMP TABLE
-
-set @old_internal_tmp_disk_storage_engine= @@internal_tmp_disk_storage_engine;
-set global internal_tmp_disk_storage_engine='myisam';
-set @old_big_tables= @@big_tables;
-set big_tables= on;
-
-CREATE TABLE t(a int, b int);
-INSERT INTO t VALUES (1,1),(2,1),(3,2),(4,2),(5,3),(6,3);
-SELECT a,b,NTILE(2) OVER (ORDER BY b) FROM t;
-DROP TABLE t;
-
-set @@global.internal_tmp_disk_storage_engine= @old_internal_tmp_disk_storage_engine;
-set big_tables= @old_big_tables;
 
 --echo
 --echo Bug#25643783 EXPRESSION INVOLVING WF WITH GROUPED AGGREGATE ARG GIVES WRONG VALUE
@@ -2431,13 +2442,15 @@ CREATE TABLE t (
 
 INSERT INTO t VALUES ('2017-01-10'), ('2017-01-18');
 
+--sorted_result
 SELECT
-   FIRST_VALUE(alias1.col_date) OVER () FV,
+   MIN(alias1.col_date) OVER () FV,
    DENSE_RANK() OVER (ORDER BY alias2.col_date
                       RANGE UNBOUNDED PRECEDING) DR,
    RANK() OVER (ORDER BY alias1.col_date
                 RANGE BETWEEN INTERVAL 1 WEEK PRECEDING AND CURRENT ROW) R
    FROM (t AS alias1, t AS alias2);
+
 DROP TABLE t;
 
 --echo
@@ -2549,32 +2562,6 @@ EXPLAIN FORMAT=JSON SELECT ROW_NUMBER() OVER (ORDER BY AVG(a)) AS rn FROM t ORDE
 EXPLAIN FORMAT=JSON SELECT ROW_NUMBER() OVER (ORDER BY AVG(a)) AS rn, SUM(AVG(a)) OVER (),
                            CUME_DIST() OVER (ORDER BY AVG(a)) FROM t ORDER BY rn;
 DROP TABLE t;
-
---echo
---echo Bug with constant table: MYISAM makes ot a constant table when it has one row
---echo
-CREATE TABLE ot (i int) ENGINE=MYISAM;
-CREATE FUNCTION f(a INTEGER) RETURNS INTEGER DETERMINISTIC RETURN a*a;
-
---echo Empty table did work before
-SELECT ROW_NUMBER() OVER () , BIT_AND(i) FROM ot WHERE f(2)<2;
-SELECT ROW_NUMBER() OVER () AS RN, BIT_AND(i) AS x FROM ot WHERE f(2) < 2 HAVING x < 2;
-SELECT SUM(BIT_AND(i)) OVER (ORDER BY BIT_AND(i)) , BIT_AND(i) FROM ot WHERE f(2)<2;
-INSERT INTO ot VALUES (1);
-
---echo One row in table: used to be wrong before fix:
-SELECT ROW_NUMBER() OVER () , BIT_AND(i) FROM ot WHERE f(2)<2;
-SELECT ROW_NUMBER() OVER () AS RN, BIT_AND(i) AS x FROM ot WHERE f(2) < 2 HAVING x < 2;
-SELECT SUM(BIT_AND(i)) OVER (ORDER BY BIT_AND(i)) , BIT_AND(i) FROM ot WHERE f(2)<2;
-INSERT INTO ot VALUES (1);
-
---echo Two rows in table did work before
-SELECT ROW_NUMBER() OVER () , BIT_AND(i) FROM ot WHERE f(2)<2;
-SELECT ROW_NUMBER() OVER () AS RN, BIT_AND(i) AS x FROM ot WHERE f(2) < 2 HAVING x < 2;
-SELECT SUM(BIT_AND(i)) OVER (ORDER BY BIT_AND(i)) , BIT_AND(i) FROM ot WHERE f(2)<2;
-
-DROP TABLE ot;
-DROP FUNCTION f;
 
 --echo Test for circular dependency in graph of windows
 CREATE TABLE t1 (a INT PRIMARY KEY);
@@ -2888,6 +2875,11 @@ INSERT INTO a VALUES (6, 's');
 
 CREATE TABLE b (pk int PRIMARY KEY,  c varchar(255));
 INSERT INTO b VALUES (9,'s');
+
+EXPLAIN FORMAT=tree SELECT ROW_NUMBER() OVER (ORDER BY a.c)
+FROM  a LEFT JOIN b
+      ON a.c = b.c
+      WHERE (b.pk IS NULL AND a.pk IN (6));
 
 SELECT ROW_NUMBER() OVER (ORDER BY a.c)
 FROM  a LEFT JOIN b
@@ -3848,13 +3840,16 @@ SELECT w, SUM(w) OVER (ROWS BETWEEN 3 PRECEDING AND 3.4 FOLLOWING) FROM t;
 --error ER_WINDOW_FRAME_ILLEGAL
 SELECT w, SUM(w) OVER (ROWS BETWEEN CURRENT ROW AND 3.4 FOLLOWING) FROM t;
 
---error ER_WINDOW_FRAME_ILLEGAL
+# 3.14 is invalid, but this is checked only at execution, in case the value
+# is a dynamic parameter
 PREPARE stmt FROM "SELECT w, SUM(w) OVER (ROWS 3.14 PRECEDING) FROM t";
+--error ER_WINDOW_FRAME_ILLEGAL
+EXECUTE stmt;
 PREPARE stmt FROM "SELECT w, SUM(w) OVER (ROWS ? PRECEDING) FROM t";
 SET @p1= 2;
 EXECUTE stmt USING @p1;
 SET @p1= 2.3;
---error ER_WINDOW_FRAME_ILLEGAL
+--error ER_WRONG_ARGUMENTS
 EXECUTE stmt USING @p1;
 DROP PREPARE stmt;
 
@@ -4152,6 +4147,54 @@ RESPECT NULLS OVER(), UUID_SHORT());
 
 --echo # End of test for Bug#26975848, Bug#27062796, Bug#27062694
 
+--echo # Bug#31361428: Assertion `rowno != 0' failed. in bring_back_frame_row
+
+CREATE TABLE t(a INTEGER);
+INSERT INTO t VALUES(1),(2),(3),(4);
+SELECT PERCENT_RANK() OVER(),
+       LAG(1,35,1) OVER w2
+FROM t
+WINDOW w1 AS (ROWS UNBOUNDED PRECEDING),
+       w2 AS (ROWS BETWEEN 18446744073709551615 FOLLOWING AND 1 FOLLOWING);
+SELECT PERCENT_RANK() OVER(),
+       LAG(1,35,1) OVER w2
+FROM t
+WINDOW w1 AS (ROWS UNBOUNDED PRECEDING),
+       w2 AS (ROWS BETWEEN 1 FOLLOWING AND 18446744073709551615 FOLLOWING);
+
+--echo # Prove that 18446744073709551615 is not seen as -1:
+SELECT a, SUM(a) OVER (ROWS BETWEEN
+                       18446744073709551615 FOLLOWING AND 1 FOLLOWING)
+FROM t;
+SELECT a, SUM(a) OVER (ROWS BETWEEN
+                       1 FOLLOWING AND 18446744073709551615 FOLLOWING)
+FROM t;
+
+DROP TABLE t;
+
+--echo #
+--echo # Bug#31361748 ASSERTION `W->FRAME_BUFFER()->S->DB_TYPE()->DB_TYPE..
+--echo #
+
+--echo # Minimal repro
+CREATE TABLE t(a INT);
+INSERT INTO t VALUES (3), (10), (100), (103);
+SELECT a, COUNT(a) OVER (ORDER BY a RANGE
+                         BETWEEN 4 FOLLOWING AND 6 FOLLOWING)
+FROM t;
+DROP TABLE t;
+
+--echo # Original repro
+CREATE TABLE t (a INT,b INT);
+INSERT INTO t(a) VALUES(2147483647),(0),(-2),(-1),(0);
+INSERT INTO t(a) VALUES(5430600),(0),(-91),(2147483647),(0);
+INSERT INTO t(a) VALUES(-1),(0),(-26164),(37583),(-1),(79);
+SELECT LAST_VALUE(b) RESPECT NULLS
+          OVER (PARTITION BY b ORDER BY a
+                RANGE BETWEEN 253 FOLLOWING AND 118 FOLLOWING)
+FROM t;
+DROP TABLE t;
+
 # Local Variables:
 # mode: sql
 # sql-product: mysql
@@ -4159,3 +4202,104 @@ RESPECT NULLS OVER(), UUID_SHORT());
 # comment-start: "# "
 # fill-column: 80
 # End:
+
+--echo #
+--echo # Bug#31393719: SIGFPE, ARITHMETIC EXCEPTION IN ITEM_NTILE::VAL_INT
+--echo #
+
+--error ER_PARSE_ERROR
+DO NTILE(MAX(NOT 1)) OVER();
+
+# Positive coverage for unlikely-tested corner cases:
+
+DO LAG(1, 9223372036854775807) OVER();
+DO LEAD(1, 9223372036854775807) OVER();
+DO NTILE(9223372036854775807) OVER();
+
+# Negative coverage tests for 2^64-1 literals:
+
+--error ER_WRONG_ARGUMENTS
+DO LAG(1, 18446744073709551615) OVER();
+--error ER_WRONG_ARGUMENTS
+DO LEAD(1, 18446744073709551615) OVER();
+--error ER_WRONG_ARGUMENTS
+DO NTILE(18446744073709551615) OVER();
+
+# Negative coverage tests for some non-literal arguments:
+
+CREATE PROCEDURE p1(n INT) DO NTILE(n) OVER();
+--error ER_WRONG_ARGUMENTS
+CALL p1(NULL);
+DROP PROCEDURE p1;
+
+SET @v = NULL;
+
+PREPARE stmt FROM 'DO NTILE(?) OVER()';
+--error ER_WRONG_ARGUMENTS
+EXECUTE stmt USING @v;
+--error ER_WRONG_ARGUMENTS
+EXECUTE stmt USING @undefined;
+
+--error ER_WRONG_ARGUMENTS
+DO NTILE(@v) OVER();
+--error ER_WRONG_ARGUMENTS
+DO NTILE(@undefined) OVER();
+
+CREATE PROCEDURE p2(n INT) DO LEAD(1, n) OVER();
+--error ER_WRONG_ARGUMENTS
+CALL p2(NULL);
+DROP PROCEDURE p2;
+
+CREATE PROCEDURE p3(n INT) DO LAG(1, n) OVER();
+--error ER_WRONG_ARGUMENTS
+CALL p3(NULL);
+DROP PROCEDURE p3;
+
+PREPARE stmt FROM 'DO LAG(1, ?) OVER()';
+--error ER_WRONG_ARGUMENTS
+EXECUTE stmt USING @v;
+
+PREPARE stmt FROM 'DO LEAD(1, ?) OVER()';
+--error ER_WRONG_ARGUMENTS
+EXECUTE stmt USING @v;
+
+--error ER_WRONG_ARGUMENTS
+DO LAG(1, @v) OVER();
+--error ER_WRONG_ARGUMENTS
+DO LEAD(1, @v) OVER();
+
+SET @v = '1';
+
+--error ER_WRONG_ARGUMENTS
+DO LAG(1, @v) OVER();
+--error ER_WRONG_ARGUMENTS
+DO LEAD(1, @v) OVER();
+--error ER_WRONG_ARGUMENTS
+DO NTILE(@v) OVER();
+
+SET @v = 1.2;
+
+--error ER_WRONG_ARGUMENTS
+DO LAG(1, @v) OVER();
+--error ER_WRONG_ARGUMENTS
+DO LEAD(1, @v) OVER();
+--error ER_WRONG_ARGUMENTS
+DO NTILE(@v) OVER();
+
+# Negative coverage tests for mutable references to user-defined variables:
+
+SET @v = 10;
+
+DO LAG(1, @v) OVER();
+--error ER_WRONG_ARGUMENTS
+DO LAG(1, @v) OVER(), @v:=20;
+
+DO LEAD(1, @v) OVER();
+--error ER_WRONG_ARGUMENTS
+DO LEAD(1, @v) OVER(), @v:=20;
+
+DO NTILE(@v) OVER();
+--error ER_WRONG_ARGUMENTS
+DO NTILE(@v) OVER(), @v:=20;
+
+--echo # End of test for Bug#31393719

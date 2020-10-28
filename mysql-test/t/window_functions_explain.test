@@ -386,7 +386,9 @@ DROP TABLE td;
 --echo -    Currently suboptimal in that it causes N*N reads of tmp buffer
 --echo ----------------------------------------------------------------------
 
+--error ER_PARSE_ERROR
 EXPLAIN FORMAT=JSON SELECT id, NTILE(NULL) OVER w FROM t1 WINDOW w AS (ORDER BY id);
+
 EXPLAIN FORMAT=JSON SELECT id, NTILE(1) OVER w FROM t1 WINDOW w AS (ORDER BY id);
 EXPLAIN FORMAT=JSON SELECT id, NTILE(2) OVER w FROM t1 WINDOW w AS (ORDER BY id);
 EXPLAIN FORMAT=JSON SELECT id, NTILE(5) OVER w FROM t1 WINDOW w AS (ORDER BY id);
@@ -1118,8 +1120,7 @@ ANALYZE TABLE t;
 EXPLAIN FORMAT=JSON SELECT * FROM t;
 EXPLAIN FORMAT=JSON SELECT * FROM t ORDER BY i;
 EXPLAIN FORMAT=JSON SELECT * FROM t GROUP BY i;
-EXPLAIN FORMAT=JSON SELECT * FROM t GROUP BY i ASC;
-EXPLAIN FORMAT=JSON SELECT * FROM t GROUP BY i ASC ORDER BY i DESC;
+EXPLAIN FORMAT=JSON SELECT * FROM t GROUP BY i ORDER BY i DESC;
 EXPLAIN FORMAT=JSON SELECT ROW_NUMBER() OVER () FROM t;
 EXPLAIN FORMAT=JSON SELECT DISTINCT i FROM t;
 EXPLAIN FORMAT=JSON SELECT DISTINCT ROW_NUMBER() OVER () FROM t;
@@ -1135,8 +1136,7 @@ EXPLAIN FORMAT=JSON SELECT ROW_NUMBER() OVER (PARTITION BY i), SUM(i) OVER () FR
 EXPLAIN FORMAT=JSON SELECT ROW_NUMBER() OVER (PARTITION BY i), SUM(i) OVER (ORDER BY i) FROM t;
 EXPLAIN FORMAT=JSON SELECT ROW_NUMBER() OVER (PARTITION BY i), SUM(i) OVER (ORDER BY i DESC) FROM t;
 EXPLAIN FORMAT=JSON SELECT ROW_NUMBER() OVER (PARTITION BY i), SUM(i) OVER (ORDER BY i DESC) FROM t GROUP BY i;
---error ER_WINDOW_NO_GROUP_ORDER
-EXPLAIN FORMAT=JSON SELECT ROW_NUMBER() OVER (PARTITION BY i), SUM(i) OVER (ORDER BY i DESC) FROM t GROUP BY i ASC;
+EXPLAIN FORMAT=JSON SELECT ROW_NUMBER() OVER (PARTITION BY i), SUM(i) OVER (ORDER BY i DESC) FROM t GROUP BY i;
 --echo Could be optimized further to drop final ordering
 EXPLAIN FORMAT=JSON SELECT ROW_NUMBER() OVER (PARTITION BY i), SUM(i) OVER (ORDER BY i DESC) FROM t GROUP BY i ORDER BY i DESC;
 --echo Reordering of windows could have made it possible to eliminate final ORDER BY
@@ -1150,7 +1150,13 @@ EXPLAIN FORMAT=JSON SELECT ROW_NUMBER() OVER (PARTITION BY i) FROM t;
 --echo Test optimizer trace with window costs
 SET optimizer_trace="enabled=on";
 SELECT ROW_NUMBER() OVER (PARTITION BY i), SUM(i) OVER (ORDER BY i DESC) FROM t GROUP BY i ORDER BY i;
-SELECT * FROM INFORMATION_SCHEMA.OPTIMIZER_TRACE;
+# Display optimization and execution parts
+# (preparation part exists only in non-ps mode).
+# Note: JSON_PRETTY(JSON_EXTRACT()) is also a possibility but it shuffles keys
+# which makes the trace have non-chronological order.
+# Eliminate numbers which may vary:
+--replace_regex /("peak_memory_used":) [0-9]+/\1 "NNN"/ /("key_size":) [0-9]+/\1 "XXX"/ /("row_size":) [0-9]+/\1 "XXX"/ /("max_rows_per_buffer":) [0-9]+/\1 "NNN"/
+SELECT REGEXP_SUBSTR(TRACE, 'join_optimization.*', 1, 1, 'n') FROM INFORMATION_SCHEMA.OPTIMIZER_TRACE;
 SET optimizer_trace="enabled=off";
 
 DROP TABLE t;

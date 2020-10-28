@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -43,7 +43,7 @@ class Collection;
 
 namespace tables {
 class Table_partitions;
-};
+}
 
 ///////////////////////////////////////////////////////////////////////////
 
@@ -55,7 +55,7 @@ class Partition : virtual public Entity_object {
   typedef tables::Table_partitions DD_table;
 
  public:
-  virtual ~Partition(){};
+  ~Partition() override {}
 
   /////////////////////////////////////////////////////////////////////////
   // Table.
@@ -107,7 +107,8 @@ class Partition : virtual public Entity_object {
   virtual const Properties &options() const = 0;
 
   virtual Properties &options() = 0;
-  virtual bool set_options_raw(const String_type &options_raw) = 0;
+  virtual bool set_options(const Properties &options) = 0;
+  virtual bool set_options(const String_type &options_raw) = 0;
 
   /////////////////////////////////////////////////////////////////////////
   // se_private_data.
@@ -117,10 +118,9 @@ class Partition : virtual public Entity_object {
 
   virtual Properties &se_private_data() = 0;
 
-  virtual bool set_se_private_data_raw(
-      const String_type &se_private_data_raw) = 0;
+  virtual bool set_se_private_data(const String_type &se_private_data_raw) = 0;
 
-  virtual void set_se_private_data(const Properties &se_private_data) = 0;
+  virtual bool set_se_private_data(const Properties &se_private_data) = 0;
 
   /////////////////////////////////////////////////////////////////////////
   // se_private_id.
@@ -159,13 +159,13 @@ class Partition : virtual public Entity_object {
   /////////////////////////////////////////////////////////////////////////
 
   /// Add a subpartition to a parent partition.
-  virtual Partition *add_sub_partition() = 0;
+  virtual Partition *add_subpartition() = 0;
 
   /// Return reference to const collection of sub partitions.
-  virtual const Table::Partition_collection &sub_partitions() const = 0;
+  virtual const Table::Partition_collection &subpartitions() const = 0;
 
   /// Return non-const point to collection of sub partitions.
-  virtual Table::Partition_collection *sub_partitions() = 0;
+  virtual Table::Partition_collection *subpartitions() = 0;
 
   /////////////////////////////////////////////////////////////////////////
   // Parent partition for subpartitions (NULL otherwise).

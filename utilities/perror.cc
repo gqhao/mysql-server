@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2000, 2018, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -33,12 +33,6 @@
 #include "my_getopt.h"
 #include "my_sys.h"
 #include "mysys_err.h"
-#ifdef WITH_NDBCLUSTER_STORAGE_ENGINE
-#define PERROR_VERSION "2.11"
-#include "storage/ndb/include/mgmapi/mgmapi_error.h"
-#include "storage/ndb/src/kernel/error/ndbd_exit_codes.cpp"
-#include "storage/ndb/src/ndbapi/ndberror.cpp"
-#endif
 #include "print_version.h"
 #include "welcome_copyright_notice.h" /* ORACLE_WELCOME_COPYRIGHT_NOTICE */
 
@@ -48,38 +42,19 @@ static bool verbose;
 #include "my_compiler.h"
 #include "mysys/my_handler_errors.h"
 
-#ifdef WITH_NDBCLUSTER_STORAGE_ENGINE
-static bool ndb_code;
-static char ndb_string[1024];
-int mgmapi_error_string(int err_no, char *str, int size) {
-  int i;
-  for (i = 0; i < ndb_mgm_noOfErrorMsgs; i++) {
-    if ((int)ndb_mgm_error_msgs[i].code == err_no) {
-      snprintf(str, size - 1, "%s", ndb_mgm_error_msgs[i].msg);
-      str[size - 1] = '\0';
-      return 0;
-    }
-  }
-  return -1;
-}
-#endif
-
 static struct my_option my_long_options[] = {
-    {"help", '?', "Displays this help and exits.", 0, 0, 0, GET_NO_ARG, NO_ARG,
-     0, 0, 0, 0, 0, 0},
-    {"info", 'I', "Synonym for --help.", 0, 0, 0, GET_NO_ARG, NO_ARG, 0, 0, 0,
-     0, 0, 0},
-#ifdef WITH_NDBCLUSTER_STORAGE_ENGINE
-    {"ndb", 257, "Ndbcluster storage engine specific error codes.", &ndb_code,
-     &ndb_code, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
-#endif
-    {"silent", 's', "Only print the error message.", 0, 0, 0, GET_NO_ARG,
-     NO_ARG, 0, 0, 0, 0, 0, 0},
+    {"help", '?', "Displays this help and exits.", nullptr, nullptr, nullptr,
+     GET_NO_ARG, NO_ARG, 0, 0, 0, nullptr, 0, nullptr},
+    {"info", 'I', "Synonym for --help.", nullptr, nullptr, nullptr, GET_NO_ARG,
+     NO_ARG, 0, 0, 0, nullptr, 0, nullptr},
+    {"silent", 's', "Only print the error message.", nullptr, nullptr, nullptr,
+     GET_NO_ARG, NO_ARG, 0, 0, 0, nullptr, 0, nullptr},
     {"verbose", 'v', "Print error code and message (default).", &verbose,
-     &verbose, 0, GET_BOOL, NO_ARG, 1, 0, 0, 0, 0, 0},
-    {"version", 'V', "Displays version information and exits.", 0, 0, 0,
-     GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0},
-    {0, 0, 0, 0, 0, 0, GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0}};
+     &verbose, nullptr, GET_BOOL, NO_ARG, 1, 0, 0, nullptr, 0, nullptr},
+    {"version", 'V', "Displays version information and exits.", nullptr,
+     nullptr, nullptr, GET_NO_ARG, NO_ARG, 0, 0, 0, nullptr, 0, nullptr},
+    {nullptr, 0, nullptr, nullptr, nullptr, nullptr, GET_NO_ARG, NO_ARG, 0, 0,
+     0, nullptr, 0, nullptr}};
 
 static void usage(void) {
   print_version();
@@ -100,7 +75,7 @@ static bool get_one_option(int optid,
                            char *argument MY_ATTRIBUTE((unused))) {
   switch (optid) {
     case 's':
-      verbose = 0;
+      verbose = false;
       break;
     case 'V':
       print_version();
@@ -110,7 +85,7 @@ static bool get_one_option(int optid,
       usage();
       exit(0);
   }
-  return 0;
+  return false;
 }
 
 static int get_options(int *argc, char ***argv) {
@@ -154,7 +129,7 @@ typedef struct {
 static st_error global_error_names[] = {
 #include <mysqld_ername.h>
 
-    {0, 0, 0, 0, 0, 0}};
+    {nullptr, 0, nullptr, nullptr, nullptr, 0}};
 
 /**
   Lookup an error by code in the global_error_names array.
@@ -169,14 +144,14 @@ int get_ER_error_msg_by_code(uint code, const char **name_ptr,
 
   /* handle "global errors" */
   if ((code >= EE_ERROR_FIRST) && (code <= EE_ERROR_LAST)) {
-    *name_ptr = NULL;
+    *name_ptr = nullptr;
     *msg_ptr = globerrs[code - EE_ERROR_FIRST];
     return 1;
   }
 
   tmp_error = &global_error_names[0];
 
-  while (tmp_error->name != NULL) {
+  while (tmp_error->name != nullptr) {
     if (tmp_error->code == code) {
       *name_ptr = tmp_error->name;
       *msg_ptr = tmp_error->text;
@@ -196,7 +171,7 @@ int get_ER_error_msg_by_code(uint code, const char **name_ptr,
 int get_ER_error_msg_by_symbol(const char *symbol) {
   st_error *tmp_error = &global_error_names[0];
 
-  while (tmp_error->name != NULL) {
+  while (tmp_error->name != nullptr) {
     if (0 == strcmp(tmp_error->name, symbol)) return tmp_error->code;
     tmp_error++;
   }
@@ -254,7 +229,7 @@ int main(int argc, char *argv[]) {
   int error, code, found;
   const char *msg;
   const char *name;
-  char *unknown_error = 0;
+  char *unknown_error = nullptr;
 #if defined(_WIN32)
   bool skip_win_message = 0;
 #endif
@@ -273,7 +248,7 @@ int main(int argc, char *argv[]) {
 
       On Solaris 2.8 it might return NULL
     */
-    if ((msg = strerror(10000)) == NULL) msg = "Unknown Error";
+    if ((msg = strerror(10000)) == nullptr) msg = "Unknown Error";
 
     /*
       Allocate a buffer for unknown_error since strerror always returns
@@ -294,34 +269,7 @@ int main(int argc, char *argv[]) {
           code = get_ER_error_msg_by_symbol((char *)*argv);
       }
 
-#ifdef WITH_NDBCLUSTER_STORAGE_ENGINE
-      if (ndb_code) {
-        if ((ndb_error_string(code, ndb_string, sizeof(ndb_string)) < 0) &&
-            (ndbd_exit_string(code, ndb_string, sizeof(ndb_string)) < 0) &&
-            (mgmapi_error_string(code, ndb_string, sizeof(ndb_string)) < 0)) {
-          msg = 0;
-        } else
-          msg = ndb_string;
-
-        fprintf(stderr,
-                "Warning: using '--ndb' with 'perror' is deprecated and this "
-                "functionality may not be available in the future versions, "
-                "please use 'ndb_perror' instead\n");
-
-        if (msg) {
-          if (verbose)
-            printf("NDB error code %3d: %s\n", code, msg);
-          else
-            puts(msg);
-        } else {
-          fprintf(stderr, "Illegal ndb error code: %d\n", code);
-          error = 1;
-        }
-        found = 1;
-        msg = 0;
-      } else
-#endif
-        msg = strerror(code);
+      msg = strerror(code);
 
       /*
         We don't print the OS error message if it is the same as the

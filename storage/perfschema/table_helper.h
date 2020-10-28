@@ -1,4 +1,4 @@
-/* Copyright (c) 2008, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2008, 2020, Oracle and/or its affiliates.
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License, version 2.0,
@@ -35,7 +35,6 @@
 #include "lex_string.h"
 #include "my_dbug.h"
 #include "my_inttypes.h"
-#include "sql/json_dom.h"
 #include "storage/perfschema/digest.h"
 #include "storage/perfschema/pfs_column_types.h"
 #include "storage/perfschema/pfs_digest.h"
@@ -60,6 +59,7 @@ struct PFS_prepared_stmt;
 struct PFS_metadata_lock;
 struct PFS_setup_actor;
 struct PFS_setup_object;
+class Json_wrapper;
 
 /**
   @file storage/perfschema/table_helper.h
@@ -92,6 +92,8 @@ void set_field_utiny(Field *f, ulong value);
 */
 long get_field_tiny(Field *f);
 
+ulong get_field_utiny(Field *f);
+
 /**
   Helper, assign a value to a @c short field.
   @param f the field to set
@@ -112,6 +114,8 @@ void set_field_ushort(Field *f, ulong value);
   @return the field value
 */
 long get_field_short(Field *f);
+
+ulong get_field_ushort(Field *f);
 
 /**
   Helper, assign a value to a @c medium field.
@@ -134,6 +138,8 @@ void set_field_umedium(Field *f, ulong value);
 */
 long get_field_medium(Field *f);
 
+ulong get_field_umedium(Field *f);
+
 /**
   Helper, assign a value to a @c long field.
   @param f the field to set
@@ -155,6 +161,8 @@ void set_field_ulong(Field *f, ulong value);
 */
 long get_field_long(Field *f);
 
+ulong get_field_ulong(Field *f);
+
 /**
   Helper, assign a value to a @c longlong field.
   @param f the field to set
@@ -168,6 +176,8 @@ void set_field_longlong(Field *f, longlong value);
   @param value the value to assign
 */
 void set_field_ulonglong(Field *f, ulonglong value);
+
+longlong get_field_longlong(Field *f);
 
 /**
   Helper, read a value from an @c ulonglong field.
@@ -266,7 +276,7 @@ void set_field_varchar_utf8(Field *f, const char *str);
   @param str the string to assign
   @param len the length of the string to assign
 */
-void set_field_varchar_utf8(Field *f, const char *str, uint len);
+void set_field_varchar_utf8(Field *f, const char *str, size_t len);
 
 /**
   Helper, read a value from a @code varchar utf8 @endcode field.
@@ -463,6 +473,19 @@ void format_sqltext(const char *source_sqltext, size_t source_length,
                     const CHARSET_INFO *source_cs, bool truncated,
                     String &sqltext);
 
+/**
+  Create a SOURCE column from source file and line.
+
+  @param source_file     source file name pointer from __FILE__
+  @param source_line     line number
+  @param row_buffer      target string buffer
+  @param row_buffer_size size of target buffer
+  @param row_length      string length of combined source file and line
+*/
+void make_source_column(const char *source_file, size_t source_line,
+                        char row_buffer[], size_t row_buffer_size,
+                        uint &row_length);
+
 /** Name space, internal views used within table setup_instruments. */
 struct PFS_instrument_view_constants {
   static const uint FIRST_INSTRUMENT = 1;
@@ -590,11 +613,11 @@ struct PFS_object_row {
   /** Column SCHEMA_NAME. */
   char m_schema_name[NAME_LEN];
   /** Length in bytes of @c m_schema_name. */
-  uint m_schema_name_length;
+  size_t m_schema_name_length;
   /** Column OBJECT_NAME. */
   char m_object_name[NAME_LEN];
   /** Length in bytes of @c m_object_name. */
-  uint m_object_name_length;
+  size_t m_object_name_length;
 
   /** Build a row from a memory buffer. */
   int make_row(PFS_table_share *pfs);
@@ -612,15 +635,15 @@ struct PFS_column_row {
   /** Column SCHEMA_NAME. */
   char m_schema_name[NAME_LEN];
   /** Length in bytes of @c m_schema_name. */
-  uint m_schema_name_length;
+  size_t m_schema_name_length;
   /** Column OBJECT_NAME. */
   char m_object_name[NAME_LEN];
   /** Length in bytes of @c m_object_name. */
-  uint m_object_name_length;
+  size_t m_object_name_length;
   /** Column OBJECT_NAME. */
   char m_column_name[NAME_LEN];
   /** Length in bytes of @c m_column_name. */
-  uint m_column_name_length;
+  size_t m_column_name_length;
 
   /** Build a row from a memory buffer. */
   int make_row(const MDL_key *pfs);
@@ -635,7 +658,7 @@ struct PFS_index_row {
   /** Column INDEX_NAME. */
   char m_index_name[NAME_LEN];
   /** Length in bytes of @c m_index_name. */
-  uint m_index_name_length;
+  size_t m_index_name_length;
 
   /** Build a row from a memory buffer. */
   int make_index_name(PFS_table_share_index *pfs_index, uint table_index);
@@ -1097,7 +1120,7 @@ struct PFS_variable_value_row {
 
 struct PFS_user_variable_value_row {
  public:
-  PFS_user_variable_value_row() : m_value(NULL), m_value_length(0) {}
+  PFS_user_variable_value_row() : m_value(nullptr), m_value_length(0) {}
 
   PFS_user_variable_value_row(const PFS_user_variable_value_row &rhs) {
     make_row(rhs.m_value, rhs.m_value_length);
@@ -1122,7 +1145,7 @@ class PFS_key_long : public PFS_engine_key {
  public:
   PFS_key_long(const char *name) : PFS_engine_key(name), m_key_value(0) {}
 
-  virtual ~PFS_key_long() {}
+  ~PFS_key_long() override {}
 
   static enum ha_rkey_function stateless_read(PFS_key_reader &reader,
                                               enum ha_rkey_function find_flag,
@@ -1130,7 +1153,7 @@ class PFS_key_long : public PFS_engine_key {
     return reader.read_long(find_flag, is_null, key_value);
   }
 
-  virtual void read(PFS_key_reader &reader, enum ha_rkey_function find_flag) {
+  void read(PFS_key_reader &reader, enum ha_rkey_function find_flag) override {
     m_find_flag = stateless_read(reader, find_flag, m_is_null, &m_key_value);
   }
 
@@ -1152,11 +1175,21 @@ class PFS_key_ulong : public PFS_engine_key {
  public:
   PFS_key_ulong(const char *name) : PFS_engine_key(name), m_key_value(0) {}
 
-  virtual ~PFS_key_ulong() {}
+  ~PFS_key_ulong() override {}
 
-  virtual void read(PFS_key_reader &reader, enum ha_rkey_function find_flag) {
+  static enum ha_rkey_function stateless_read(PFS_key_reader &reader,
+                                              enum ha_rkey_function find_flag,
+                                              bool &is_null, ulong *key_value) {
+    return reader.read_ulong(find_flag, is_null, key_value);
+  }
+
+  void read(PFS_key_reader &reader, enum ha_rkey_function find_flag) override {
     m_find_flag = reader.read_ulong(find_flag, m_is_null, &m_key_value);
   }
+
+  static bool stateless_match(bool record_null, ulong record_value,
+                              bool m_is_null, ulong m_key_value,
+                              enum ha_rkey_function find_flag);
 
  protected:
   bool do_match(bool record_null, ulong record_value);
@@ -1165,15 +1198,43 @@ class PFS_key_ulong : public PFS_engine_key {
   ulong m_key_value;
 };
 
+class PFS_key_longlong : public PFS_engine_key {
+ public:
+  PFS_key_longlong(const char *name) : PFS_engine_key(name), m_key_value(0) {}
+
+  ~PFS_key_longlong() override {}
+
+  void read(PFS_key_reader &reader, enum ha_rkey_function find_flag) override {
+    m_find_flag = reader.read_longlong(find_flag, m_is_null, &m_key_value);
+  }
+
+  static bool stateless_match(bool record_null, longlong record_value,
+                              bool m_is_null, longlong m_key_value,
+                              enum ha_rkey_function find_flag);
+
+ protected:
+  bool do_match(bool record_null, longlong record_value) {
+    return stateless_match(record_null, record_value, m_is_null, m_key_value,
+                           m_find_flag);
+  }
+
+ private:
+  longlong m_key_value;
+};
+
 class PFS_key_ulonglong : public PFS_engine_key {
  public:
   PFS_key_ulonglong(const char *name) : PFS_engine_key(name), m_key_value(0) {}
 
-  virtual ~PFS_key_ulonglong() {}
+  ~PFS_key_ulonglong() override {}
 
-  virtual void read(PFS_key_reader &reader, enum ha_rkey_function find_flag) {
+  void read(PFS_key_reader &reader, enum ha_rkey_function find_flag) override {
     m_find_flag = reader.read_ulonglong(find_flag, m_is_null, &m_key_value);
   }
+
+  static bool stateless_match(bool record_null, ulonglong record_value,
+                              bool m_is_null, ulonglong m_key_value,
+                              enum ha_rkey_function find_flag);
 
  protected:
   bool do_match(bool record_null, ulonglong record_value);
@@ -1186,7 +1247,7 @@ class PFS_key_thread_id : public PFS_key_ulonglong {
  public:
   PFS_key_thread_id(const char *name) : PFS_key_ulonglong(name) {}
 
-  ~PFS_key_thread_id() {}
+  ~PFS_key_thread_id() override {}
 
   bool match(ulonglong thread_id);
   bool match(const PFS_thread *pfs);
@@ -1202,7 +1263,7 @@ class PFS_key_event_id : public PFS_key_ulonglong {
  public:
   PFS_key_event_id(const char *name) : PFS_key_ulonglong(name) {}
 
-  ~PFS_key_event_id() {}
+  ~PFS_key_event_id() override {}
 
   bool match(ulonglong event_id);
   bool match(const PFS_events *pfs);
@@ -1216,7 +1277,7 @@ class PFS_key_processlist_id : public PFS_key_ulonglong {
  public:
   PFS_key_processlist_id(const char *name) : PFS_key_ulonglong(name) {}
 
-  ~PFS_key_processlist_id() {}
+  ~PFS_key_processlist_id() override {}
 
   bool match(const PFS_thread *pfs);
 };
@@ -1225,7 +1286,7 @@ class PFS_key_engine_transaction_id : public PFS_key_ulonglong {
  public:
   PFS_key_engine_transaction_id(const char *name) : PFS_key_ulonglong(name) {}
 
-  ~PFS_key_engine_transaction_id() {}
+  ~PFS_key_engine_transaction_id() override {}
 
   bool match(ulonglong engine_transaction_id);
 };
@@ -1234,7 +1295,7 @@ class PFS_key_thread_os_id : public PFS_key_ulonglong {
  public:
   PFS_key_thread_os_id(const char *name) : PFS_key_ulonglong(name) {}
 
-  ~PFS_key_thread_os_id() {}
+  ~PFS_key_thread_os_id() override {}
 
   bool match(const PFS_thread *pfs);
 };
@@ -1243,7 +1304,7 @@ class PFS_key_statement_id : public PFS_key_ulonglong {
  public:
   PFS_key_statement_id(const char *name) : PFS_key_ulonglong(name) {}
 
-  ~PFS_key_statement_id() {}
+  ~PFS_key_statement_id() override {}
 
   bool match(const PFS_prepared_stmt *pfs);
 };
@@ -1252,7 +1313,7 @@ class PFS_key_worker_id : public PFS_key_ulonglong {
  public:
   PFS_key_worker_id(const char *name) : PFS_key_ulonglong(name) {}
 
-  ~PFS_key_worker_id() {}
+  ~PFS_key_worker_id() override {}
 
   bool match_not_null(ulonglong worker_id);
 };
@@ -1261,7 +1322,7 @@ class PFS_key_socket_id : public PFS_key_long {
  public:
   PFS_key_socket_id(const char *name) : PFS_key_long(name) {}
 
-  ~PFS_key_socket_id() {}
+  ~PFS_key_socket_id() override {}
 
   bool match(const PFS_socket *pfs);
 };
@@ -1270,16 +1331,23 @@ class PFS_key_port : public PFS_key_long {
  public:
   PFS_key_port(const char *name) : PFS_key_long(name) {}
 
-  ~PFS_key_port() {}
+  ~PFS_key_port() override {}
 
   bool match(const PFS_socket *pfs);
+
+  /**
+    match port number
+
+    @param port   port number to match
+  */
+  bool match(uint port);
 };
 
 class PFS_key_error_number : public PFS_key_long {
  public:
   PFS_key_error_number(const char *name) : PFS_key_long(name) {}
 
-  ~PFS_key_error_number() {}
+  ~PFS_key_error_number() override {}
 
   bool match_error_index(uint error_index);
 };
@@ -1288,7 +1356,7 @@ class PFS_key_pstring : public PFS_engine_key {
  public:
   PFS_key_pstring(const char *name) : PFS_engine_key(name) {}
 
-  virtual ~PFS_key_pstring() {}
+  ~PFS_key_pstring() override {}
 
   static enum ha_rkey_function stateless_read(PFS_key_reader &reader,
                                               enum ha_rkey_function find_flag,
@@ -1323,9 +1391,9 @@ class PFS_key_string : public PFS_key_pstring {
   PFS_key_string(const char *name)
       : PFS_key_pstring(name), m_key_value_length(0) {}
 
-  virtual ~PFS_key_string() {}
+  ~PFS_key_string() override {}
 
-  virtual void read(PFS_key_reader &reader, enum ha_rkey_function find_flag) {
+  void read(PFS_key_reader &reader, enum ha_rkey_function find_flag) override {
     m_find_flag = stateless_read(reader, find_flag, m_is_null, m_key_value,
                                  &m_key_value_length, sizeof(m_key_value));
   }
@@ -1351,7 +1419,7 @@ class PFS_key_thread_name : public PFS_key_string<PFS_MAX_INFO_NAME_LENGTH> {
  public:
   PFS_key_thread_name(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_thread_name() {}
+  ~PFS_key_thread_name() override {}
 
   bool match(const PFS_thread *pfs);
   bool match(const PFS_thread_class *klass);
@@ -1361,7 +1429,7 @@ class PFS_key_event_name : public PFS_key_string<PFS_MAX_INFO_NAME_LENGTH> {
  public:
   PFS_key_event_name(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_event_name() {}
+  ~PFS_key_event_name() override {}
 
   bool match(const PFS_instr_class *klass);
   bool match(const PFS_mutex *pfs);
@@ -1376,7 +1444,7 @@ class PFS_key_user : public PFS_key_string<USERNAME_LENGTH> {
  public:
   PFS_key_user(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_user() {}
+  ~PFS_key_user() override {}
 
   bool match(const PFS_thread *pfs);
   bool match(const PFS_user *pfs);
@@ -1388,7 +1456,7 @@ class PFS_key_host : public PFS_key_string<HOSTNAME_LENGTH> {
  public:
   PFS_key_host(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_host() {}
+  ~PFS_key_host() override {}
 
   bool match(const PFS_thread *pfs);
   bool match(const PFS_host *pfs);
@@ -1401,7 +1469,7 @@ class PFS_key_role : public PFS_key_string<ROLENAME_LENGTH> {
  public:
   PFS_key_role(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_role() {}
+  ~PFS_key_role() override {}
 
   bool match(const PFS_setup_actor *pfs);
 };
@@ -1410,7 +1478,7 @@ class PFS_key_schema : public PFS_key_string<NAME_CHAR_LEN> {
  public:
   PFS_key_schema(const char *schema) : PFS_key_string(schema) {}
 
-  ~PFS_key_schema() {}
+  ~PFS_key_schema() override {}
 
   bool match(const PFS_statements_digest_stat *pfs);
 };
@@ -1419,7 +1487,7 @@ class PFS_key_digest : public PFS_key_string<MAX_KEY_LENGTH> {
  public:
   PFS_key_digest(const char *digest) : PFS_key_string(digest) {}
 
-  ~PFS_key_digest() {}
+  ~PFS_key_digest() override {}
 
   bool match(PFS_statements_digest_stat *pfs);
 };
@@ -1428,7 +1496,7 @@ class PFS_key_bucket_number : public PFS_key_ulong {
  public:
   PFS_key_bucket_number(const char *name) : PFS_key_ulong(name) {}
 
-  ~PFS_key_bucket_number() {}
+  ~PFS_key_bucket_number() override {}
 
   bool match(ulong value);
 };
@@ -1438,9 +1506,9 @@ class PFS_key_name : public PFS_key_string<NAME_CHAR_LEN> {
  public:
   PFS_key_name(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_name() {}
+  ~PFS_key_name() override {}
 
-  bool match(const LEX_STRING *name);
+  bool match(const LEX_CSTRING *name);
   bool match(const char *name, size_t name_length);
   bool match_not_null(const LEX_STRING *name);
   bool match_not_null(const char *name, size_t name_length);
@@ -1450,7 +1518,7 @@ class PFS_key_group_name : public PFS_key_string<NAME_CHAR_LEN> {
  public:
   PFS_key_group_name(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_group_name() {}
+  ~PFS_key_group_name() override {}
 
   bool match(const LEX_STRING *name);
   bool match(const char *name, size_t name_length);
@@ -1461,7 +1529,7 @@ class PFS_key_variable_name : public PFS_key_string<NAME_CHAR_LEN> {
  public:
   PFS_key_variable_name(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_variable_name() {}
+  ~PFS_key_variable_name() override {}
 
   bool match(const System_variable *pfs);
   bool match(const Status_variable *pfs);
@@ -1473,7 +1541,7 @@ class PFS_key_engine_name : public PFS_key_string<32> {
  public:
   PFS_key_engine_name(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_engine_name() {}
+  ~PFS_key_engine_name() override {}
 
   bool match(const char *engine_name, size_t length);
 };
@@ -1483,7 +1551,7 @@ class PFS_key_engine_lock_id : public PFS_key_string<128> {
  public:
   PFS_key_engine_lock_id(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_engine_lock_id() {}
+  ~PFS_key_engine_lock_id() override {}
 
   bool match(const char *engine_lock_id, size_t length);
 };
@@ -1495,7 +1563,7 @@ class PFS_key_ip : public PFS_key_string<PFS_MAX_INFO_NAME_LENGTH>  // FIXME
  public:
   PFS_key_ip(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_ip() {}
+  ~PFS_key_ip() override {}
 
   bool match(const PFS_socket *pfs);
   bool match(const char *ip, size_t ip_length);
@@ -1505,7 +1573,7 @@ class PFS_key_statement_name : public PFS_key_string<PFS_MAX_INFO_NAME_LENGTH> {
  public:
   PFS_key_statement_name(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_statement_name() {}
+  ~PFS_key_statement_name() override {}
 
   bool match(const PFS_prepared_stmt *pfs);
 };
@@ -1516,7 +1584,7 @@ class PFS_key_file_name
  public:
   PFS_key_file_name(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_file_name() {}
+  ~PFS_key_file_name() override {}
 
   bool match(const PFS_file *pfs);
 };
@@ -1525,7 +1593,7 @@ class PFS_key_object_schema : public PFS_key_string<NAME_CHAR_LEN> {
  public:
   PFS_key_object_schema(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_object_schema() {}
+  ~PFS_key_object_schema() override {}
 
   bool match(const PFS_table_share *pfs);
   bool match(const PFS_program *pfs);
@@ -1540,7 +1608,7 @@ class PFS_key_object_name : public PFS_key_string<NAME_CHAR_LEN> {
  public:
   PFS_key_object_name(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_object_name() {}
+  ~PFS_key_object_name() override {}
 
   bool match(const PFS_table_share *pfs);
   bool match(const PFS_program *pfs);
@@ -1556,7 +1624,7 @@ class PFS_key_column_name : public PFS_key_string<NAME_CHAR_LEN> {
  public:
   PFS_key_column_name(const char *name) : PFS_key_string(name) {}
 
-  ~PFS_key_column_name() {}
+  ~PFS_key_column_name() override {}
 
   bool match(const PFS_column_row *pfs);
 };
@@ -1566,9 +1634,9 @@ class PFS_key_object_type : public PFS_engine_key {
   PFS_key_object_type(const char *name)
       : PFS_engine_key(name), m_object_type(NO_OBJECT_TYPE) {}
 
-  virtual ~PFS_key_object_type() {}
+  ~PFS_key_object_type() override {}
 
-  virtual void read(PFS_key_reader &reader, enum ha_rkey_function find_flag);
+  void read(PFS_key_reader &reader, enum ha_rkey_function find_flag) override;
 
   bool match(enum_object_type object_type);
   bool match(const PFS_object_row *pfs);
@@ -1585,9 +1653,9 @@ class PFS_key_object_type_enum : public PFS_engine_key {
   PFS_key_object_type_enum(const char *name)
       : PFS_engine_key(name), m_object_type(NO_OBJECT_TYPE) {}
 
-  virtual ~PFS_key_object_type_enum() {}
+  ~PFS_key_object_type_enum() override {}
 
-  virtual void read(PFS_key_reader &reader, enum ha_rkey_function find_flag);
+  void read(PFS_key_reader &reader, enum ha_rkey_function find_flag) override;
 
   bool match(enum_object_type object_type);
   bool match(const PFS_prepared_stmt *pfs);
@@ -1602,12 +1670,12 @@ class PFS_key_object_type_enum : public PFS_engine_key {
 class PFS_key_object_instance : public PFS_engine_key {
  public:
   PFS_key_object_instance(const char *name)
-      : PFS_engine_key(name), m_identity(NULL) {}
+      : PFS_engine_key(name), m_identity(nullptr) {}
 
-  virtual ~PFS_key_object_instance() {}
+  ~PFS_key_object_instance() override {}
 
-  virtual void read(PFS_key_reader &reader, enum ha_rkey_function find_flag) {
-    ulonglong object_instance_begin;
+  void read(PFS_key_reader &reader, enum ha_rkey_function find_flag) override {
+    ulonglong object_instance_begin{0};
     m_find_flag =
         reader.read_ulonglong(find_flag, m_is_null, &object_instance_begin);
     m_identity = (void *)object_instance_begin;

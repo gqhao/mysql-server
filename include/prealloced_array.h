@@ -1,4 +1,4 @@
-/* Copyright (c) 2013, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2013, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -78,7 +78,7 @@ class Prealloced_array {
     CTORs/DTORs invoked by the C++ runtime.
   */
   Element_type *cast_rawbuff() {
-    return static_cast<Element_type *>(static_cast<void *>(&m_buff.data[0]));
+    return static_cast<Element_type *>(static_cast<void *>(m_buff));
   }
 
  public:
@@ -139,6 +139,14 @@ class Prealloced_array {
       this->push_back(*p);
   }
 
+  Prealloced_array(Prealloced_array &&that)
+      : m_size(0),
+        m_capacity(Prealloc),
+        m_array_ptr(cast_rawbuff()),
+        m_psi_key(that.m_psi_key) {
+    *this = std::move(that);
+  }
+
   /**
     Range constructor.
 
@@ -156,6 +164,9 @@ class Prealloced_array {
     for (; first != last; ++first) push_back(*first);
   }
 
+  Prealloced_array(std::initializer_list<Element_type> elems)
+      : Prealloced_array(PSI_NOT_INSTRUMENTED, elems.begin(), elems.end()) {}
+
   /**
     Copies all the elements from 'that' into this container.
     Any objects in this container are destroyed first.
@@ -165,6 +176,27 @@ class Prealloced_array {
     if (this->reserve(that.capacity())) return *this;
     for (const Element_type *p = that.begin(); p != that.end(); ++p)
       this->push_back(*p);
+    return *this;
+  }
+
+  Prealloced_array &operator=(Prealloced_array &&that) {
+    this->clear();
+    if (that.m_array_ptr != that.cast_rawbuff()) {
+      if (m_array_ptr != cast_rawbuff()) my_free(m_array_ptr);
+      // The array is on the heap, so we can just grab it.
+      m_array_ptr = that.m_array_ptr;
+      m_capacity = that.m_capacity;
+      m_size = that.m_size;
+      that.m_size = 0;
+      that.m_array_ptr = that.cast_rawbuff();
+      that.m_capacity = Prealloc;
+    } else {
+      // Move over each element.
+      if (this->reserve(that.capacity())) return *this;
+      for (Element_type *p = that.begin(); p != that.end(); ++p)
+        this->push_back(std::move(*p));
+      that.clear();
+    }
     return *this;
   }
 
@@ -563,8 +595,7 @@ class Prealloced_array {
   size_t m_size;
   size_t m_capacity;
   // This buffer must be properly aligned.
-  my_aligned_storage<Prealloc * sizeof(Element_type), MY_ALIGNOF(double)>
-      m_buff;
+  alignas(Element_type) char m_buff[Prealloc * sizeof(Element_type)];
   Element_type *m_array_ptr;
   PSI_memory_key m_psi_key;
 };

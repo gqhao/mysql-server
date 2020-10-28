@@ -1,6 +1,6 @@
 #ifndef SQL_PREPARE_H
 #define SQL_PREPARE_H
-/* Copyright (c) 2009, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2009, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -34,15 +34,14 @@
 #include "my_psi_config.h"
 #include "mysql/components/services/psi_statement_bits.h"
 #include "mysql_com.h"
-#include "sql/protocol_classic.h"
-#include "sql/query_result.h"  // Query_result_send
-#include "sql/sql_class.h"     // Query_arena
+#include "sql/sql_class.h"  // Query_arena
 #include "sql/sql_error.h"
 #include "sql/sql_list.h"
 
 class Item;
 class Item_param;
 class Prepared_statement;
+class Query_result_send;
 class String;
 struct LEX;
 struct PS_PARAM;
@@ -93,6 +92,7 @@ class Reprepare_observer final {
   bool m_invalidated;
 };
 
+bool ask_to_reprepare(THD *thd);
 bool mysql_stmt_precheck(THD *thd, const COM_DATA *com_data,
                          enum enum_server_command cmd,
                          Prepared_statement **stmt);
@@ -108,10 +108,8 @@ void mysqld_stmt_fetch(THD *thd, Prepared_statement *stmt, ulong num_rows);
 void mysqld_stmt_reset(THD *thd, Prepared_statement *stmt);
 void mysql_stmt_get_longdata(THD *thd, Prepared_statement *stmt,
                              uint param_number, uchar *longdata, ulong length);
-bool reinit_stmt_before_use(THD *thd, LEX *lex);
 bool select_like_stmt_cmd_test(THD *thd, class Sql_cmd_dml *cmd,
                                ulong setup_tables_done_option);
-bool mysql_test_show(Prepared_statement *stmt, TABLE_LIST *tables);
 
 /**
   Execute a fragment of server code in an isolated context, so that
@@ -144,8 +142,9 @@ class Ed_result_set final {
  public:
   operator List<Ed_row> &() { return *m_rows; }
   unsigned int size() const { return m_rows->elements; }
+  Ed_row *get_fields() { return m_fields; }
 
-  Ed_result_set(List<Ed_row> *rows_arg, size_t column_count,
+  Ed_result_set(List<Ed_row> *rows_arg, Ed_row *fields, size_t column_count,
                 MEM_ROOT *mem_root_arg);
 
   /** We don't call member destructors, they all are POD types. */
@@ -153,9 +152,12 @@ class Ed_result_set final {
 
   size_t get_field_count() const { return m_column_count; }
 
-  static void operator delete(void *ptr, size_t size) throw();
+  static void operator delete(void *, size_t) noexcept {
+    // Does nothing because m_mem_root is deallocated in the destructor
+  }
+
   static void operator delete(
-      void *, MEM_ROOT *, const std::nothrow_t &)throw() { /* never called */
+      void *, MEM_ROOT *, const std::nothrow_t &) noexcept { /* never called */
   }
 
  private:
@@ -165,6 +167,7 @@ class Ed_result_set final {
   MEM_ROOT m_mem_root;
   size_t m_column_count;
   List<Ed_row> *m_rows;
+  Ed_row *m_fields;
   Ed_result_set *m_next_rset;
   friend class Ed_connection;
 };
@@ -254,6 +257,8 @@ class Ed_connection final {
     return m_diagnostics_area.mysql_errno();
   }
 
+  Ed_result_set *get_result_sets() { return m_rsets; }
+
   ~Ed_connection() { free_old_result(); }
 
  private:
@@ -306,34 +311,22 @@ class Ed_row final {
   size_t m_column_count; /* TODO: change to point to metadata */
 };
 
-/**
-  A result class used to send cursor rows using the binary protocol.
-*/
-
-class Query_fetch_protocol_binary final : public Query_result_send {
-  Protocol_binary protocol;
-
- public:
-  Query_fetch_protocol_binary(THD *thd)
-      : Query_result_send(thd), protocol(thd) {}
-  bool send_result_set_metadata(List<Item> &list, uint flags) override;
-  bool send_data(List<Item> &items) override;
-  bool send_eof() override;
-};
-
 class Server_side_cursor;
 
 /**
   Prepared_statement: a statement that can contain placeholders.
 */
 
-class Prepared_statement final : public Query_arena {
+class Prepared_statement final {
   enum flag_values { IS_IN_USE = 1, IS_SQL_PREPARE = 2 };
 
  public:
+  Query_arena m_arena;
   THD *thd;
   Item_param **param_array;
   Server_side_cursor *cursor;
+  /// Used to check that the protocol is stable during execution
+  const Protocol *m_active_protocol{nullptr};
   uint param_count;
   uint last_errno;
   char last_error[MYSQL_ERRMSG_SIZE];
@@ -383,14 +376,15 @@ class Prepared_statement final : public Query_arena {
  public:
   Prepared_statement(THD *thd_arg);
   virtual ~Prepared_statement();
-  virtual void cleanup_stmt();
   bool set_name(const LEX_CSTRING &name);
   const LEX_CSTRING &name() const { return m_name; }
   void close_cursor();
   bool is_in_use() const { return flags & (uint)IS_IN_USE; }
   bool is_sql_prepare() const { return flags & (uint)IS_SQL_PREPARE; }
   void set_sql_prepare() { flags |= (uint)IS_SQL_PREPARE; }
-  bool prepare(const char *packet, size_t packet_length);
+  bool prepare(const char *packet, size_t packet_length,
+               Item_param **orig_param_array);
+  bool prepare_query();
   bool execute_loop(String *expanded_query, bool open_cursor);
   bool execute_server_runnable(Server_runnable *server_runnable);
 #ifdef HAVE_PSI_PS_INTERFACE
@@ -401,9 +395,13 @@ class Prepared_statement final : public Query_arena {
   bool set_parameters(String *expanded_query, bool has_new_types,
                       PS_PARAM *parameters);
   bool set_parameters(String *expanded_query);
+  void trace_parameter_types();
 
  private:
+  void cleanup_stmt();
   void setup_set_params();
+  bool check_parameter_types();
+  void copy_parameter_types(Item_param **from_param_array);
   bool set_db(const LEX_CSTRING &db_length);
 
   bool execute(String *expanded_query, bool open_cursor);

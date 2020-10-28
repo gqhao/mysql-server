@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -23,11 +23,9 @@
 #ifndef XCOM_CFG_H
 #define XCOM_CFG_H
 
+#include <stdint.h>
 #include <stdlib.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "xdr_gen/xcom_vp.h"
 
 typedef struct cfg_app_xcom {
   /*
@@ -39,7 +37,12 @@ typedef struct cfg_app_xcom {
   /*
    cache size limit and interval
   */
-  size_t cache_limit;
+  uint64_t m_cache_limit;
+
+  /*
+   The (address, incarnation) pair that uniquely identifies this XCom instance.
+  */
+  node_address *identity;
 } cfg_app_xcom_st;
 
 /*
@@ -51,8 +54,13 @@ extern cfg_app_xcom_st *the_app_xcom_cfg;
 void init_cfg_app_xcom();
 void deinit_cfg_app_xcom();
 
-#ifdef __cplusplus
-}
-#endif
+node_address *cfg_app_xcom_get_identity();
+
+/*
+ Takes ownership of @c identity.
+
+ @param identity The unique identity of this XCom instance. Must not be null.
+*/
+void cfg_app_xcom_set_identity(node_address *identity);
 
 #endif

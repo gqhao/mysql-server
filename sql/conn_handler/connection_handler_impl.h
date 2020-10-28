@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2013, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2013, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -66,6 +66,7 @@ class Per_thread_connection_handler : public Connection_handler {
   // Status variables related to Per_thread_connection_handler
   static ulong blocked_pthread_count;  // Protected by LOCK_thread_cache.
   static ulong slow_launch_threads;
+  static bool shrink_cache;  // Protected by LOCK_thread_cache
   // System variable
   static ulong max_blocked_pthreads;
 
@@ -82,13 +83,20 @@ class Per_thread_connection_handler : public Connection_handler {
   */
   static Channel_info *block_until_new_connection();
 
+  /**
+    Modify the thread cache size.
+
+    @param thread_cache_size size of thread cache.
+  */
+  static void modify_thread_cache_size(const ulong thread_cache_size);
+
   Per_thread_connection_handler() {}
-  virtual ~Per_thread_connection_handler() {}
+  ~Per_thread_connection_handler() override {}
 
  protected:
-  virtual bool add_connection(Channel_info *channel_info);
+  bool add_connection(Channel_info *channel_info) override;
 
-  virtual uint get_max_threads() const;
+  uint get_max_threads() const override;
 };
 
 /**
@@ -102,12 +110,12 @@ class One_thread_connection_handler : public Connection_handler {
 
  public:
   One_thread_connection_handler() {}
-  virtual ~One_thread_connection_handler() {}
+  ~One_thread_connection_handler() override {}
 
  protected:
-  virtual bool add_connection(Channel_info *channel_info);
+  bool add_connection(Channel_info *channel_info) override;
 
-  virtual uint get_max_threads() const { return 1; }
+  uint get_max_threads() const override { return 1; }
 };
 
 #endif  // CONNECTION_HANDLER_IMPL_INCLUDED

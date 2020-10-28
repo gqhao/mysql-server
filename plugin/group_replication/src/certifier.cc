@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -34,11 +34,13 @@
 #include "plugin/group_replication/include/sql_service/sql_service_command.h"
 
 const std::string Certifier::GTID_EXTRACTED_NAME = "gtid_extracted";
+const std::string Certifier::CERTIFICATION_INFO_ERROR_NAME =
+    "certification_info_error";
 
 static void *launch_broadcast_thread(void *arg) {
   Certifier_broadcast_thread *handler = (Certifier_broadcast_thread *)arg;
   handler->dispatcher();
-  return 0;
+  return nullptr;
 }
 
 Certifier_broadcast_thread::Certifier_broadcast_thread()
@@ -66,12 +68,12 @@ Certifier_broadcast_thread::~Certifier_broadcast_thread() {
 }
 
 int Certifier_broadcast_thread::initialize() {
-  DBUG_ENTER("Certifier_broadcast_thread::initialize");
+  DBUG_TRACE;
 
   mysql_mutex_lock(&broadcast_run_lock);
   if (broadcast_thd_state.is_thread_alive()) {
     mysql_mutex_unlock(&broadcast_run_lock); /* purecov: inspected */
-    DBUG_RETURN(0);                          /* purecov: inspected */
+    return 0;                                /* purecov: inspected */
   }
 
   aborted = false;
@@ -80,7 +82,7 @@ int Certifier_broadcast_thread::initialize() {
                            get_connection_attrib(), launch_broadcast_thread,
                            (void *)this))) {
     mysql_mutex_unlock(&broadcast_run_lock); /* purecov: inspected */
-    DBUG_RETURN(1);                          /* purecov: inspected */
+    return 1;                                /* purecov: inspected */
   }
   broadcast_thd_state.set_created();
 
@@ -90,16 +92,16 @@ int Certifier_broadcast_thread::initialize() {
   }
   mysql_mutex_unlock(&broadcast_run_lock);
 
-  DBUG_RETURN(0);
+  return 0;
 }
 
 int Certifier_broadcast_thread::terminate() {
-  DBUG_ENTER("Certifier_broadcast_thread::terminate");
+  DBUG_TRACE;
 
   mysql_mutex_lock(&broadcast_run_lock);
   if (broadcast_thd_state.is_thread_dead()) {
     mysql_mutex_unlock(&broadcast_run_lock);
-    DBUG_RETURN(0);
+    return 0;
   }
 
   aborted = true;
@@ -118,11 +120,11 @@ int Certifier_broadcast_thread::terminate() {
   }
   mysql_mutex_unlock(&broadcast_run_lock);
 
-  DBUG_RETURN(0);
+  return 0;
 }
 
 void Certifier_broadcast_thread::dispatcher() {
-  DBUG_ENTER("Certifier_broadcast_thread::dispatcher");
+  DBUG_TRACE;
 
   // Thread context operations
   THD *thd = new THD;
@@ -138,7 +140,6 @@ void Certifier_broadcast_thread::dispatcher() {
   mysql_cond_broadcast(&broadcast_run_cond);
   mysql_mutex_unlock(&broadcast_run_lock);
 
-  struct timespec abstime;
   while (!aborted) {
     // Broadcast Transaction identifiers every 30 seconds
     if (broadcast_counter % 30 == 0) {
@@ -156,17 +157,11 @@ void Certifier_broadcast_thread::dispatcher() {
       mysql_mutex_unlock(&broadcast_dispatcher_lock); /* purecov: inspected */
       break;                                          /* purecov: inspected */
     }
+    struct timespec abstime;
     set_timespec(&abstime, 1);
     mysql_cond_timedwait(&broadcast_dispatcher_cond, &broadcast_dispatcher_lock,
                          &abstime);
     mysql_mutex_unlock(&broadcast_dispatcher_lock);
-
-    /*
-      Clear server sessions open caches on transactions observer.
-      TODO: move this to a global scheduler.
-    */
-    if (broadcast_counter % 300 == 0)
-      observer_trans_clear_io_cache_unused_list(); /* purecov: inspected */
 
     broadcast_counter++;
   }
@@ -184,28 +179,26 @@ void Certifier_broadcast_thread::dispatcher() {
   mysql_mutex_unlock(&broadcast_run_lock);
 
   my_thread_end();
-  my_thread_exit(0);
-
-  DBUG_VOID_RETURN;
+  my_thread_exit(nullptr);
 }
 
 int Certifier_broadcast_thread::broadcast_gtid_executed() {
-  DBUG_ENTER("Certifier_broadcast_thread::broadcast_gtid_executed");
+  DBUG_TRACE;
 
   /*
     Member may be still joining group so we need to check if:
       1) communication interfaces are ready to be used;
       2) member is ONLINE, that is, distributed recovery is complete.
   */
-  if (local_member_info == NULL) DBUG_RETURN(0); /* purecov: inspected */
+  if (local_member_info == nullptr) return 0; /* purecov: inspected */
   Group_member_info::Group_member_status member_status =
       local_member_info->get_recovery_status();
   if (member_status != Group_member_info::MEMBER_ONLINE &&
       member_status != Group_member_info::MEMBER_IN_RECOVERY)
-    DBUG_RETURN(0);
+    return 0;
 
   int error = 0;
-  uchar *encoded_gtid_executed = NULL;
+  uchar *encoded_gtid_executed = nullptr;
   size_t length;
   get_server_encoded_gtid_executed(&encoded_gtid_executed, &length);
 
@@ -236,7 +229,7 @@ int Certifier_broadcast_thread::broadcast_gtid_executed() {
 #endif
 
   my_free(encoded_gtid_executed);
-  DBUG_RETURN(error);
+  return error;
 }
 
 Certifier::Certifier()
@@ -268,7 +261,7 @@ Certifier::Certifier()
                   same_member_message_discarded = true;);
 #endif
 
-  certification_info_sid_map = new Sid_map(NULL);
+  certification_info_sid_map = new Sid_map(nullptr);
   incoming = new Synchronized_queue<Data_packet *>();
 
   stable_gtid_set_lock = new Checkable_rwlock(
@@ -280,9 +273,9 @@ Certifier::Certifier()
   stable_gtid_set = new Gtid_set(stable_sid_map, stable_gtid_set_lock);
   broadcast_thread = new Certifier_broadcast_thread();
 
-  group_gtid_sid_map = new Sid_map(NULL);
-  group_gtid_executed = new Gtid_set(group_gtid_sid_map, NULL);
-  group_gtid_extracted = new Gtid_set(group_gtid_sid_map, NULL);
+  group_gtid_sid_map = new Sid_map(nullptr);
+  group_gtid_executed = new Gtid_set(group_gtid_sid_map, nullptr);
+  group_gtid_extracted = new Gtid_set(group_gtid_sid_map, nullptr);
 
   last_local_gtid.clear();
 
@@ -312,16 +305,16 @@ Certifier::~Certifier() {
 }
 
 int Certifier::initialize_server_gtid_set(bool get_server_gtid_retrieved) {
-  DBUG_ENTER("initialize_server_gtid_set");
+  DBUG_TRACE;
   mysql_mutex_assert_owner(&LOCK_certification_info);
   int error = 0;
-  Sql_service_command_interface *sql_command_interface = NULL;
+  Sql_service_command_interface *sql_command_interface = nullptr;
   std::string gtid_executed;
   std::string applier_retrieved_gtids;
 
   rpl_sid group_sid;
-  if (group_sid.parse(group_name_var, strlen(group_name_var)) !=
-      RETURN_STATUS_OK) {
+  const char *group_name = get_group_name_var();
+  if (group_sid.parse(group_name, strlen(group_name)) != RETURN_STATUS_OK) {
     LogPluginErr(ERROR_LEVEL,
                  ER_GRP_RPL_GROUP_NAME_PARSE_ERROR); /* purecov: inspected */
     error = 1;                                       /* purecov: inspected */
@@ -405,11 +398,11 @@ int Certifier::initialize_server_gtid_set(bool get_server_gtid_retrieved) {
 end:
   delete sql_command_interface;
 
-  DBUG_RETURN(error);
+  return error;
 }
 
 void Certifier::compute_group_available_gtid_intervals() {
-  DBUG_ENTER("Certifier::compute_group_available_gtid_intervals");
+  DBUG_TRACE;
   mysql_mutex_assert_owner(&LOCK_certification_info);
 
   gtids_assigned_in_blocks_counter = 1;
@@ -431,42 +424,40 @@ void Certifier::compute_group_available_gtid_intervals() {
         ("Generating group transaction intervals from group_gtid_extracted"));
 #endif
 
-  const Gtid_set::Interval *iv = NULL, *iv_next = NULL;
+  const Gtid_set::Interval *iv = nullptr, *iv_next = nullptr;
 
   // The fist interval: UUID:100 -> we have the interval 1-99
-  if ((iv = ivit.get()) != NULL) {
+  if ((iv = ivit.get()) != nullptr) {
     if (iv->start > 1) {
-      Gtid_set::Interval interval = {1, iv->start - 1, NULL};
+      Gtid_set::Interval interval = {1, iv->start - 1, nullptr};
       group_available_gtid_intervals.push_back(interval);
     }
   }
 
   // For each used interval find the upper bound and from there
   // add the free GTIDs up to the next interval or MAX_GNO.
-  while ((iv = ivit.get()) != NULL) {
+  while ((iv = ivit.get()) != nullptr) {
     ivit.next();
     iv_next = ivit.get();
 
     rpl_gno start = iv->end;
     rpl_gno end = MAX_GNO;
-    if (iv_next != NULL) end = iv_next->start - 1;
+    if (iv_next != nullptr) end = iv_next->start - 1;
 
     DBUG_ASSERT(start <= end);
-    Gtid_set::Interval interval = {start, end, NULL};
+    Gtid_set::Interval interval = {start, end, nullptr};
     group_available_gtid_intervals.push_back(interval);
   }
 
   // No GTIDs used, so the available interval is the complete set.
   if (group_available_gtid_intervals.size() == 0) {
-    Gtid_set::Interval interval = {1, MAX_GNO, NULL};
+    Gtid_set::Interval interval = {1, MAX_GNO, nullptr};
     group_available_gtid_intervals.push_back(interval);
   }
-
-  DBUG_VOID_RETURN;
 }
 
 Gtid_set::Interval Certifier::reserve_gtid_block(longlong block_size) {
-  DBUG_ENTER("Certifier::reserve_gtid_block");
+  DBUG_TRACE;
   DBUG_ASSERT(block_size > 1);
   mysql_mutex_assert_owner(&LOCK_certification_info);
 
@@ -496,12 +487,12 @@ Gtid_set::Interval Certifier::reserve_gtid_block(longlong block_size) {
     DBUG_ASSERT(result.start < it->start);
   }
 
-  DBUG_RETURN(result);
+  return result;
 }
 
 void Certifier::add_to_group_gtid_executed_internal(rpl_sidno sidno,
                                                     rpl_gno gno, bool local) {
-  DBUG_ENTER("Certifier::add_to_group_gtid_executed_internal");
+  DBUG_TRACE;
   mysql_mutex_assert_owner(&LOCK_certification_info);
   group_gtid_executed->_add_gtid(sidno, gno);
   if (local) {
@@ -518,8 +509,6 @@ void Certifier::add_to_group_gtid_executed_internal(rpl_sidno sidno,
   if (certifying_already_applied_transactions &&
       sidno == group_gtid_sid_map_group_sidno)
     group_gtid_extracted->_add_gtid(sidno, gno);
-
-  DBUG_VOID_RETURN;
 }
 
 void Certifier::clear_certification_info() {
@@ -533,25 +522,23 @@ void Certifier::clear_certification_info() {
 }
 
 void Certifier::clear_incoming() {
-  DBUG_ENTER("Certifier::clear_incoming");
+  DBUG_TRACE;
   while (!this->incoming->empty()) {
-    Data_packet *packet = NULL;
+    Data_packet *packet = nullptr;
     this->incoming->pop(&packet);
     delete packet;
   }
-  DBUG_VOID_RETURN;
 }
 
 void Certifier::clear_members() {
-  DBUG_ENTER("Certifier::clear_members");
+  DBUG_TRACE;
   mysql_mutex_lock(&LOCK_members);
   members.clear();
   mysql_mutex_unlock(&LOCK_members);
-  DBUG_VOID_RETURN;
 }
 
 int Certifier::initialize(ulonglong gtid_assignment_block_size) {
-  DBUG_ENTER("Certifier::initialize");
+  DBUG_TRACE;
   int error = 0;
   mysql_mutex_lock(&LOCK_certification_info);
 
@@ -580,21 +567,21 @@ int Certifier::initialize(ulonglong gtid_assignment_block_size) {
 
 end:
   mysql_mutex_unlock(&LOCK_certification_info);
-  DBUG_RETURN(error);
+  return error;
 }
 
 int Certifier::terminate() {
-  DBUG_ENTER("Certifier::terminate");
+  DBUG_TRACE;
   int error = 0;
 
   if (is_initialized()) error = broadcast_thread->terminate();
 
-  DBUG_RETURN(error);
+  return error;
 }
 
 void Certifier::increment_parallel_applier_sequence_number(
     bool update_parallel_applier_last_committed_global) {
-  DBUG_ENTER("Certifier::increment_parallel_applier_sequence_number");
+  DBUG_TRACE;
   mysql_mutex_assert_owner(&LOCK_certification_info);
 
   DBUG_ASSERT(parallel_applier_last_committed_global <
@@ -603,19 +590,17 @@ void Certifier::increment_parallel_applier_sequence_number(
     parallel_applier_last_committed_global = parallel_applier_sequence_number;
 
   parallel_applier_sequence_number++;
-
-  DBUG_VOID_RETURN;
 }
 
 rpl_gno Certifier::certify(Gtid_set *snapshot_version,
                            std::list<const char *> *write_set,
                            bool generate_group_id, const char *member_uuid,
                            Gtid_log_event *gle, bool local_transaction) {
-  DBUG_ENTER("Certifier::certify");
+  DBUG_TRACE;
   rpl_gno result = 0;
   const bool has_write_set = !write_set->empty();
 
-  if (!is_initialized()) DBUG_RETURN(-1); /* purecov: inspected */
+  if (!is_initialized()) return -1; /* purecov: inspected */
 
   mysql_mutex_lock(&LOCK_certification_info);
   int64 transaction_last_committed = parallel_applier_last_committed_global;
@@ -638,7 +623,7 @@ rpl_gno Certifier::certify(Gtid_set *snapshot_version,
         negatively certified. Otherwise, this transaction is marked
         certified and goes into applier.
       */
-      if (certified_write_set_snapshot_version != NULL &&
+      if (certified_write_set_snapshot_version != nullptr &&
           !certified_write_set_snapshot_version->is_subset(snapshot_version))
         goto end;
     }
@@ -649,8 +634,8 @@ rpl_gno Certifier::certify(Gtid_set *snapshot_version,
     certifying_already_applied_transactions = false;
 
 #ifndef DBUG_OFF
-    char *group_gtid_executed_string = NULL;
-    char *group_gtid_extracted_string = NULL;
+    char *group_gtid_executed_string = nullptr;
+    char *group_gtid_extracted_string = nullptr;
     group_gtid_executed->to_string(&group_gtid_executed_string, true);
     group_gtid_extracted->to_string(&group_gtid_extracted_string, true);
     DBUG_PRINT(
@@ -688,7 +673,7 @@ rpl_gno Certifier::certify(Gtid_set *snapshot_version,
              snapshot_version->_add_gtid(group_sidno, result);
            would fail because of that.
     */
-    if (snapshot_version->ensure_sidno(group_sidno) != RETURN_STATUS_OK) {
+    if (snapshot_version->ensure_sidno(get_group_sidno()) != RETURN_STATUS_OK) {
       LogPluginErr(
           ERROR_LEVEL,
           ER_GRP_RPL_UPDATE_TRANS_SNAPSHOT_VER_ERROR); /* purecov: inspected */
@@ -701,7 +686,7 @@ rpl_gno Certifier::certify(Gtid_set *snapshot_version,
     /*
       Add generated transaction GTID to transaction snapshot version.
     */
-    snapshot_version->_add_gtid(group_sidno, result);
+    snapshot_version->_add_gtid(get_group_sidno(), result);
 
     /*
       Store last conflict free transaction identification.
@@ -815,7 +800,19 @@ rpl_gno Certifier::certify(Gtid_set *snapshot_version,
     Update parallel applier indexes.
   */
   if (!local_transaction) {
-    if (!has_write_set) {
+    /*
+      'CREATE TABLE ... AS SELECT' is considered a DML, though in reality it
+      is DDL + DML, which write-sets do not capture all dependencies.
+      It is flagged through gle->last_committed and gle->sequence_number so
+      that it is only executed on parallel applier after all precedent
+      transactions like any other DDL.
+    */
+    bool update_parallel_applier_last_committed_global = false;
+    if (0 == gle->last_committed && 0 == gle->sequence_number) {
+      update_parallel_applier_last_committed_global = true;
+    }
+
+    if (!has_write_set || update_parallel_applier_last_committed_global) {
       /*
         DDL does not have write-set, so we need to ensure that it
         is applied without any other transaction in parallel.
@@ -829,7 +826,8 @@ rpl_gno Certifier::certify(Gtid_set *snapshot_version,
     DBUG_ASSERT(gle->sequence_number > 0);
     DBUG_ASSERT(gle->last_committed < gle->sequence_number);
 
-    increment_parallel_applier_sequence_number(!has_write_set);
+    increment_parallel_applier_sequence_number(
+        !has_write_set || update_parallel_applier_last_committed_global);
   }
 
 end:
@@ -838,12 +836,12 @@ end:
   mysql_mutex_unlock(&LOCK_certification_info);
   DBUG_PRINT("info", ("Group replication Certifier: certification result: %llu",
                       result));
-  DBUG_RETURN(result);
+  return result;
 }
 
 int Certifier::add_specified_gtid_to_group_gtid_executed(Gtid_log_event *gle,
                                                          bool local) {
-  DBUG_ENTER("Certifier::add_specified_gtid_to_group_gtid_executed");
+  DBUG_TRACE;
 
   mysql_mutex_lock(&LOCK_certification_info);
   rpl_sidno sidno = gle->get_sidno(group_gtid_sid_map);
@@ -852,29 +850,29 @@ int Certifier::add_specified_gtid_to_group_gtid_executed(Gtid_log_event *gle,
     LogPluginErr(ERROR_LEVEL,
                  ER_GRP_RPL_FETCH_TRANS_SIDNO_ERROR); /* purecov: inspected */
     mysql_mutex_unlock(&LOCK_certification_info);     /* purecov: inspected */
-    DBUG_RETURN(1);                                   /* purecov: inspected */
+    return 1;                                         /* purecov: inspected */
   }
 
   if (group_gtid_executed->ensure_sidno(sidno) != RETURN_STATUS_OK) {
     LogPluginErr(ERROR_LEVEL,
                  ER_GRP_RPL_ERROR_VERIFYING_SIDNO); /* purecov: inspected */
     mysql_mutex_unlock(&LOCK_certification_info);   /* purecov: inspected */
-    DBUG_RETURN(1);                                 /* purecov: inspected */
+    return 1;                                       /* purecov: inspected */
   }
 
   add_to_group_gtid_executed_internal(sidno, gle->get_gno(), local);
 
   mysql_mutex_unlock(&LOCK_certification_info);
-  DBUG_RETURN(0);
+  return 0;
 }
 
 int Certifier::add_group_gtid_to_group_gtid_executed(rpl_gno gno, bool local) {
-  DBUG_ENTER("Certifier::add_group_gtid_to_group_gtid_executed");
+  DBUG_TRACE;
   mysql_mutex_lock(&LOCK_certification_info);
   add_to_group_gtid_executed_internal(group_gtid_sid_map_group_sidno, gno,
                                       local);
   mysql_mutex_unlock(&LOCK_certification_info);
-  DBUG_RETURN(0);
+  return 0;
 }
 
 /*
@@ -904,15 +902,15 @@ int Certifier::add_group_gtid_to_group_gtid_executed(rpl_gno gno, bool local) {
      from the available GNOs set.
 */
 rpl_gno Certifier::get_group_next_available_gtid(const char *member_uuid) {
-  DBUG_ENTER("Certifier::get_group_next_available_gtid");
+  DBUG_TRACE;
   mysql_mutex_assert_owner(&LOCK_certification_info);
   rpl_gno result = 0;
 
-  if (member_uuid == NULL || gtid_assignment_block_size <= 1) {
+  if (member_uuid == nullptr || gtid_assignment_block_size <= 1) {
     result = get_group_next_available_gtid_candidate(1, MAX_GNO);
     if (result < 0) {
       DBUG_ASSERT(result == -1);
-      DBUG_RETURN(result);
+      return result;
     }
 
     /*
@@ -920,7 +918,7 @@ rpl_gno Certifier::get_group_next_available_gtid(const char *member_uuid) {
       intervals, so that all members start from the same
       intervals.
     */
-    if (member_uuid == NULL && gtid_assignment_block_size > 1)
+    if (member_uuid == nullptr && gtid_assignment_block_size > 1)
       compute_group_available_gtid_intervals();
   } else {
     /*
@@ -959,19 +957,19 @@ rpl_gno Certifier::get_group_next_available_gtid(const char *member_uuid) {
       result = get_group_next_available_gtid_candidate(it->second.start,
                                                        it->second.end);
     }
-    if (result < 0) DBUG_RETURN(result);
+    if (result < 0) return result;
 
     it->second.start = result;
     gtids_assigned_in_blocks_counter++;
   }
 
   DBUG_ASSERT(result > 0);
-  DBUG_RETURN(result);
+  return result;
 }
 
 rpl_gno Certifier::get_group_next_available_gtid_candidate(rpl_gno start,
                                                            rpl_gno end) const {
-  DBUG_ENTER("Certifier::get_group_next_available_gtid_candidate");
+  DBUG_TRACE;
   DBUG_ASSERT(start > 0);
   DBUG_ASSERT(start <= end);
   mysql_mutex_assert_owner(&LOCK_certification_info);
@@ -994,19 +992,19 @@ rpl_gno Certifier::get_group_next_available_gtid_candidate(rpl_gno start,
   while (true) {
     DBUG_ASSERT(candidate >= start);
     const Gtid_set::Interval *iv = ivit.get();
-    rpl_gno next_interval_start = iv != NULL ? iv->start : MAX_GNO;
+    rpl_gno next_interval_start = iv != nullptr ? iv->start : MAX_GNO;
 
     // Correct interval.
     if (candidate < next_interval_start) {
       if (candidate <= end)
-        DBUG_RETURN(candidate);
+        return candidate;
       else
-        DBUG_RETURN(-2);
+        return -2;
     }
 
-    if (iv == NULL) {
+    if (iv == nullptr) {
       LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_CANT_GENERATE_GTID);
-      DBUG_RETURN(-1);
+      return -1;
     }
 
     candidate = std::max(candidate, iv->end);
@@ -1016,7 +1014,7 @@ rpl_gno Certifier::get_group_next_available_gtid_candidate(rpl_gno start,
 
 bool Certifier::add_item(const char *item, Gtid_set_ref *snapshot_version,
                          int64 *item_previous_sequence_number) {
-  DBUG_ENTER("Certifier::add_item");
+  DBUG_TRACE;
   mysql_mutex_assert_owner(&LOCK_certification_info);
   bool error = true;
   std::string key(item);
@@ -1038,15 +1036,15 @@ bool Certifier::add_item(const char *item, Gtid_set_ref *snapshot_version,
     error = false;
   }
 
-  DBUG_RETURN(error);
+  return error;
 }
 
 Gtid_set *Certifier::get_certified_write_set_snapshot_version(
     const char *item) {
-  DBUG_ENTER("Certifier::get_certified_write_set_snapshot_version");
+  DBUG_TRACE;
   mysql_mutex_assert_owner(&LOCK_certification_info);
 
-  if (!is_initialized()) DBUG_RETURN(NULL); /* purecov: inspected */
+  if (!is_initialized()) return nullptr; /* purecov: inspected */
 
   Certification_info::iterator it;
   std::string item_str(item);
@@ -1054,17 +1052,27 @@ Gtid_set *Certifier::get_certified_write_set_snapshot_version(
   it = certification_info.find(item_str);
 
   if (it == certification_info.end())
-    DBUG_RETURN(NULL);
+    return nullptr;
   else
-    DBUG_RETURN(it->second);
+    return it->second;
 }
 
 int Certifier::get_group_stable_transactions_set_string(char **buffer,
                                                         size_t *length) {
-  DBUG_ENTER("Certifier::get_group_stable_transactions_set_string");
+  DBUG_TRACE;
   int error = 1;
 
-  char *m_buffer = NULL;
+  /*
+    Stable transactions set may not be accurate during recovery,
+    thence we do not externalize it on
+    performance_schema.replication_group_member_stats table.
+  */
+  if (local_member_info->get_recovery_status() ==
+      Group_member_info::MEMBER_IN_RECOVERY) {
+    return 0;
+  }
+
+  char *m_buffer = nullptr;
   int m_length = stable_gtid_set->to_string(&m_buffer, true);
   if (m_length >= 0) {
     *buffer = m_buffer;
@@ -1073,18 +1081,18 @@ int Certifier::get_group_stable_transactions_set_string(char **buffer,
   } else
     my_free(m_buffer); /* purecov: inspected */
 
-  DBUG_RETURN(error);
+  return error;
 }
 
 bool Certifier::set_group_stable_transactions_set(Gtid_set *executed_gtid_set) {
-  DBUG_ENTER("Certifier::set_group_stable_transactions_set");
+  DBUG_TRACE;
 
-  if (!is_initialized()) DBUG_RETURN(true); /* purecov: inspected */
+  if (!is_initialized()) return true; /* purecov: inspected */
 
-  if (executed_gtid_set == NULL) {
+  if (executed_gtid_set == nullptr) {
     LogPluginErr(ERROR_LEVEL,
                  ER_GRP_RPL_INVALID_GTID_SET); /* purecov: inspected */
-    DBUG_RETURN(true);                         /* purecov: inspected */
+    return true;                               /* purecov: inspected */
   }
 
   stable_gtid_set_lock->wrlock();
@@ -1092,19 +1100,27 @@ bool Certifier::set_group_stable_transactions_set(Gtid_set *executed_gtid_set) {
     stable_gtid_set_lock->unlock(); /* purecov: inspected */
     LogPluginErr(ERROR_LEVEL,
                  ER_GRP_RPL_UPDATE_GTID_SET_ERROR); /* purecov: inspected */
-    DBUG_RETURN(true);                              /* purecov: inspected */
+    return true;                                    /* purecov: inspected */
   }
   stable_gtid_set_lock->unlock();
 
   garbage_collect();
 
-  DBUG_RETURN(false);
+  return false;
 }
 
 void Certifier::garbage_collect() {
-  DBUG_ENTER("Certifier::garbage_collect");
+  DBUG_TRACE;
+  /*
+    This debug option works together with
+    `group_replication_certifier_broadcast_thread_big_period`
+    by disabling the manual garbage collection that happens when
+    a View_log_change_event is logged.
+    Applier_module::apply_view_change_packet() does call
+    Certifier::set_group_stable_transactions_set().
+  */
   DBUG_EXECUTE_IF("group_replication_do_not_clear_certification_database",
-                  { DBUG_VOID_RETURN; };);
+                  { return; };);
 
   mysql_mutex_lock(&LOCK_certification_info);
 
@@ -1118,7 +1134,7 @@ void Certifier::garbage_collect() {
   Certification_info::iterator it = certification_info.begin();
   stable_gtid_set_lock->wrlock();
   while (it != certification_info.end()) {
-    if (it->second->is_subset(stable_gtid_set)) {
+    if (it->second->is_subset_not_equals(stable_gtid_set)) {
       if (it->second->unlink() == 0) delete it->second;
       certification_info.erase(it++);
     } else
@@ -1163,16 +1179,32 @@ void Certifier::garbage_collect() {
         WARNING_LEVEL,
         ER_GRP_RPL_RECEIVED_SET_MISSING_GTIDS); /* purecov: inspected */
   }
-
-  DBUG_VOID_RETURN;
 }
 
 int Certifier::handle_certifier_data(
     const uchar *data, ulong len, const Gcs_member_identifier &gcs_member_id) {
-  DBUG_ENTER("Certifier::handle_certifier_data");
+  DBUG_TRACE;
   bool member_message_received = false;
 
-  if (!is_initialized()) DBUG_RETURN(1); /* purecov: inspected */
+  if (!is_initialized()) return 1; /* purecov: inspected */
+
+  /*
+    On members recovering through clone the GTID_EXECUTED is only
+    updated after the server restart that finishes the procedure.
+    During that procedure they will periodically send the GTID_EXECUTED
+    that the server had once joined the group. This will restrain the
+    common set of transactions applied on all members, which in consequence
+    will render the certification garbage collection void.
+    As such, we only consider ONLINE members for the common set of
+    transactions applied on all members.
+    When recovering members change to ONLINE state, their certification
+    info will be updated with the one of the donor at the join, being
+    garbage collect on the future calls of this method.
+  */
+  if (group_member_mgr->get_group_member_status_by_member_id(gcs_member_id) !=
+      Group_member_info::MEMBER_ONLINE) {
+    return 0;
+  }
 
   mysql_mutex_lock(&LOCK_members);
   std::string member_id = gcs_member_id.get_member_id();
@@ -1186,7 +1218,9 @@ int Certifier::handle_certifier_data(
   }
 #endif
 
-  if (this->get_members_size() != plugin_get_group_members_number()) {
+  const size_t number_of_members_online =
+      group_member_mgr->get_number_of_members_online();
+  if (this->members.size() != number_of_members_online) {
     /*
       We check for the member_id of the current message if it is present in
       the member vector or not. If it is present, we will need to discard the
@@ -1211,18 +1245,18 @@ int Certifier::handle_certifier_data(
     mysql_mutex_unlock(&LOCK_members);
 
     /*
-      If the incoming message queue size is equal to the number of the
-      members in the group, we are sure that each member has sent their
-      gtid_executed. So we can go ahead with the stable set handling.
+      If the incoming message queue size is equal to the number of the ONLINE
+      members in the group, we are sure that each ONLINE member has sent
+      their gtid_executed. So we can go ahead with the stable set handling.
     */
-    if (plugin_get_group_members_number() == this->incoming->size()) {
+    if (this->incoming->size() == number_of_members_online) {
       int error = stable_set_handle();
       /*
         Clearing the members to proceed with the next round of garbage
         collection.
       */
       clear_members();
-      DBUG_RETURN(error);
+      return error;
     }
   } else {
     LogPluginErr(
@@ -1241,17 +1275,17 @@ int Certifier::handle_certifier_data(
   }
 #endif
 
-  DBUG_RETURN(0);
+  return 0;
 }
 
 int Certifier::stable_set_handle() {
-  DBUG_ENTER("Certifier:stable_set_handle");
+  DBUG_TRACE;
 
-  Data_packet *packet = NULL;
+  Data_packet *packet = nullptr;
   int error = 0;
 
-  Sid_map sid_map(NULL);
-  Gtid_set executed_set(&sid_map, NULL);
+  Sid_map sid_map(nullptr);
+  Gtid_set executed_set(&sid_map, nullptr);
 
   /*
     Compute intersection between all received sets.
@@ -1259,7 +1293,7 @@ int Certifier::stable_set_handle() {
   while (!error && !this->incoming->empty()) {
     this->incoming->pop(&packet);
 
-    if (packet == NULL) {
+    if (packet == nullptr) {
       LogPluginErr(ERROR_LEVEL,
                    ER_GRP_RPL_NULL_PACKET); /* purecov: inspected */
       error = 1;                            /* purecov: inspected */
@@ -1267,8 +1301,8 @@ int Certifier::stable_set_handle() {
     }
 
     uchar *payload = packet->payload;
-    Gtid_set member_set(&sid_map, NULL);
-    Gtid_set intersection_result(&sid_map, NULL);
+    Gtid_set member_set(&sid_map, nullptr);
+    Gtid_set intersection_result(&sid_map, nullptr);
 
     if (member_set.add_gtid_encoding(payload, packet->len) !=
         RETURN_STATUS_OK) {
@@ -1334,19 +1368,18 @@ int Certifier::stable_set_handle() {
   my_free(executed_set_string);
 #endif
 
-  DBUG_RETURN(error);
+  return error;
 }
 
 void Certifier::handle_view_change() {
-  DBUG_ENTER("Certifier::handle_view_change");
+  DBUG_TRACE;
   clear_incoming();
   clear_members();
-  DBUG_VOID_RETURN;
 }
 
 void Certifier::get_certification_info(
     std::map<std::string, std::string> *cert_info) {
-  DBUG_ENTER("Certifier::get_certification_info");
+  DBUG_TRACE;
   mysql_mutex_lock(&LOCK_certification_info);
 
   for (Certification_info::iterator it = certification_info.begin();
@@ -1373,14 +1406,13 @@ void Certifier::get_certification_info(
       .insert(std::pair<std::string, std::string>(GTID_EXTRACTED_NAME, value));
 
   mysql_mutex_unlock(&LOCK_certification_info);
-  DBUG_VOID_RETURN;
 }
 
 rpl_gno Certifier::generate_view_change_group_gno() {
-  DBUG_ENTER("Certifier::generate_view_change_group_gno");
+  DBUG_TRACE;
 
   mysql_mutex_lock(&LOCK_certification_info);
-  rpl_gno result = get_group_next_available_gtid(NULL);
+  rpl_gno result = get_group_next_available_gtid(nullptr);
 
   DBUG_EXECUTE_IF("certifier_assert_next_seqno_equal_5",
                   DBUG_ASSERT(result == 5););
@@ -1392,13 +1424,25 @@ rpl_gno Certifier::generate_view_change_group_gno() {
                                         false);
   mysql_mutex_unlock(&LOCK_certification_info);
 
-  DBUG_RETURN(result);
+  return result;
 }
 
 int Certifier::set_certification_info(
     std::map<std::string, std::string> *cert_info) {
-  DBUG_ENTER("Certifier::set_certification_info");
-  DBUG_ASSERT(cert_info != NULL);
+  DBUG_TRACE;
+  DBUG_ASSERT(cert_info != nullptr);
+
+  if (cert_info->size() == 1) {
+    std::map<std::string, std::string>::iterator it =
+        cert_info->find(CERTIFICATION_INFO_ERROR_NAME);
+    if (it != cert_info->end()) {
+      // The certification database could not be transmitted
+      LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_ERROR_ON_CERT_DB_INSTALL,
+                   it->second.c_str());
+      return 1;
+    }
+  }
+
   mysql_mutex_lock(&LOCK_certification_info);
 
   clear_certification_info();
@@ -1419,7 +1463,7 @@ int Certifier::set_certification_info(
             ERROR_LEVEL,
             ER_GRP_RPL_CANT_READ_GRP_GTID_EXTRACTED); /* purecov: inspected */
         mysql_mutex_unlock(&LOCK_certification_info); /* purecov: inspected */
-        DBUG_RETURN(1);                               /* purecov: inspected */
+        return 1;                                     /* purecov: inspected */
       }
       continue;
     }
@@ -1431,7 +1475,7 @@ int Certifier::set_certification_info(
       LogPluginErr(ERROR_LEVEL, ER_GRP_RPL_CANT_READ_WRITE_SET_ITEM,
                    key.c_str());                    /* purecov: inspected */
       mysql_mutex_unlock(&LOCK_certification_info); /* purecov: inspected */
-      DBUG_RETURN(1);                               /* purecov: inspected */
+      return 1;                                     /* purecov: inspected */
     }
     value->link();
     certification_info.insert(
@@ -1443,7 +1487,7 @@ int Certifier::set_certification_info(
         ERROR_LEVEL,
         ER_GRP_RPL_INIT_CERTIFICATION_INFO_FAILURE); /* purecov: inspected */
     mysql_mutex_unlock(&LOCK_certification_info);    /* purecov: inspected */
-    DBUG_RETURN(1);                                  /* purecov: inspected */
+    return 1;                                        /* purecov: inspected */
   }
 
   if (group_gtid_extracted->is_subset_not_equals(group_gtid_executed)) {
@@ -1451,8 +1495,8 @@ int Certifier::set_certification_info(
     compute_group_available_gtid_intervals();
 
 #ifndef DBUG_OFF
-    char *group_gtid_executed_string = NULL;
-    char *group_gtid_extracted_string = NULL;
+    char *group_gtid_executed_string = nullptr;
+    char *group_gtid_extracted_string = nullptr;
     group_gtid_executed->to_string(&group_gtid_executed_string, true);
     group_gtid_extracted->to_string(&group_gtid_extracted_string, true);
     DBUG_PRINT(
@@ -1466,7 +1510,7 @@ int Certifier::set_certification_info(
   }
 
   mysql_mutex_unlock(&LOCK_certification_info);
-  DBUG_RETURN(0);
+  return 0;
 }
 
 void Certifier::update_certified_transaction_count(bool result,
@@ -1476,8 +1520,9 @@ void Certifier::update_certified_transaction_count(bool result,
   else
     negative_cert++;
 
-  if (local_member_info->get_recovery_status() ==
-      Group_member_info::MEMBER_ONLINE) {
+  const Group_member_info::Group_member_status member_status =
+      local_member_info->get_recovery_status();
+  if (member_status == Group_member_info::MEMBER_ONLINE) {
     applier_module->get_pipeline_stats_member_collector()
         ->increment_transactions_certified();
 
@@ -1488,6 +1533,14 @@ void Certifier::update_certified_transaction_count(bool result,
     if (local_transaction && !result) {
       applier_module->get_pipeline_stats_member_collector()
           ->increment_transactions_local_rollback();
+    }
+  } else if (member_status == Group_member_info::MEMBER_IN_RECOVERY) {
+    applier_module->get_pipeline_stats_member_collector()
+        ->increment_transactions_certified_during_recovery();
+
+    if (!result) {
+      applier_module->get_pipeline_stats_member_collector()
+          ->increment_transactions_certified_negatively_during_recovery();
     }
   }
 }
@@ -1514,8 +1567,6 @@ end:
   mysql_mutex_unlock(&LOCK_certification_info);
 }
 
-size_t Certifier::get_members_size() { return members.size(); }
-
 size_t Certifier::get_local_certified_gtid(
     std::string &local_gtid_certified_string) {
   if (last_local_gtid.is_empty()) return 0;
@@ -1527,18 +1578,16 @@ size_t Certifier::get_local_certified_gtid(
 }
 
 void Certifier::enable_conflict_detection() {
-  DBUG_ENTER("Certifier::enable_conflict_detection");
-  DBUG_ASSERT(local_member_info->in_primary_mode());
+  DBUG_TRACE;
 
   mysql_mutex_lock(&LOCK_certification_info);
   conflict_detection_enable = true;
   local_member_info->enable_conflict_detection();
   mysql_mutex_unlock(&LOCK_certification_info);
-  DBUG_VOID_RETURN;
 }
 
 void Certifier::disable_conflict_detection() {
-  DBUG_ENTER("Certifier::disable_conflict_detection");
+  DBUG_TRACE;
   DBUG_ASSERT(local_member_info->in_primary_mode());
 
   mysql_mutex_lock(&LOCK_certification_info);
@@ -1547,18 +1596,16 @@ void Certifier::disable_conflict_detection() {
   mysql_mutex_unlock(&LOCK_certification_info);
 
   LogPluginErr(INFORMATION_LEVEL, ER_GRP_RPL_CONFLICT_DETECTION_DISABLED);
-
-  DBUG_VOID_RETURN;
 }
 
 bool Certifier::is_conflict_detection_enable() {
-  DBUG_ENTER("Certifier::is_conflict_detection_enable");
+  DBUG_TRACE;
 
   mysql_mutex_lock(&LOCK_certification_info);
   bool result = conflict_detection_enable;
   mysql_mutex_unlock(&LOCK_certification_info);
 
-  DBUG_RETURN(result);
+  return result;
 }
 
 /*
@@ -1576,17 +1623,15 @@ void Gtid_Executed_Message::append_gtid_executed(uchar *gtid_data, size_t len) {
 
 void Gtid_Executed_Message::encode_payload(
     std::vector<unsigned char> *buffer) const {
-  DBUG_ENTER("Gtid_Executed_Message::encode_payload");
+  DBUG_TRACE;
 
   encode_payload_item_type_and_length(buffer, PIT_GTID_EXECUTED, data.size());
   buffer->insert(buffer->end(), data.begin(), data.end());
-
-  DBUG_VOID_RETURN;
 }
 
 void Gtid_Executed_Message::decode_payload(const unsigned char *buffer,
                                            const unsigned char *) {
-  DBUG_ENTER("Gtid_Executed_Message::decode_payload");
+  DBUG_TRACE;
   const unsigned char *slider = buffer;
   uint16 payload_item_type = 0;
   unsigned long long payload_item_length = 0;
@@ -1595,6 +1640,4 @@ void Gtid_Executed_Message::decode_payload(const unsigned char *buffer,
                                       &payload_item_length);
   data.clear();
   data.insert(data.end(), slider, slider + payload_item_length);
-
-  DBUG_VOID_RETURN;
 }

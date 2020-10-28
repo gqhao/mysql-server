@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -23,6 +23,7 @@
 #include "sql/dd/impl/types/partition_impl.h"
 
 #include <stddef.h>
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -36,7 +37,6 @@
 #include "my_inttypes.h"
 #include "my_sys.h"
 #include "mysqld_error.h"                         // ER_*
-#include "sql/dd/impl/properties_impl.h"          // Properties_impl
 #include "sql/dd/impl/raw/raw_record.h"           // Raw_record
 #include "sql/dd/impl/sdi_impl.h"                 // sdi read/write functions
 #include "sql/dd/impl/tables/index_partitions.h"  // Index_partitions
@@ -46,8 +46,7 @@
 #include "sql/dd/impl/types/partition_index_impl.h"  // Partition_index_impl
 #include "sql/dd/impl/types/partition_value_impl.h"  // Partition_value_impl
 #include "sql/dd/impl/types/table_impl.h"            // Table_impl
-#include "sql/dd/properties.h"
-#include "sql/dd/string_type.h"  // dd::String_type
+#include "sql/dd/string_type.h"                      // dd::String_type
 #include "sql/dd/types/object_table.h"
 #include "sql/dd/types/partition_index.h"
 #include "sql/dd/types/partition_value.h"
@@ -63,6 +62,10 @@ class Index;
 class Sdi_rcontext;
 class Sdi_wcontext;
 
+static const std::set<String_type> default_valid_option_keys = {
+    "data_file_name", "explicit_tablespace", "index_file_name", "max_rows",
+    "min_rows",       "nodegroup_id",        "tablespace"};
+
 ///////////////////////////////////////////////////////////////////////////
 // Partition_impl implementation.
 ///////////////////////////////////////////////////////////////////////////
@@ -71,26 +74,26 @@ Partition_impl::Partition_impl()
     : m_parent_partition_id(INVALID_OBJECT_ID),
       m_number(-1),
       m_se_private_id(INVALID_OBJECT_ID),
-      m_options(new Properties_impl()),
-      m_se_private_data(new Properties_impl()),
-      m_table(NULL),
-      m_parent(NULL),
+      m_options(default_valid_option_keys),
+      m_se_private_data(),
+      m_table(nullptr),
+      m_parent(nullptr),
       m_values(),
       m_indexes(),
-      m_sub_partitions(),
+      m_subpartitions(),
       m_tablespace_id(INVALID_OBJECT_ID) {}
 
 Partition_impl::Partition_impl(Table_impl *table)
     : m_parent_partition_id(INVALID_OBJECT_ID),
       m_number(-1),
       m_se_private_id((ulonglong)-1),
-      m_options(new Properties_impl()),
-      m_se_private_data(new Properties_impl()),
+      m_options(default_valid_option_keys),
+      m_se_private_data(),
       m_table(table),
-      m_parent(NULL),
+      m_parent(nullptr),
       m_values(),
       m_indexes(),
-      m_sub_partitions(),
+      m_subpartitions(),
       m_tablespace_id(INVALID_OBJECT_ID) {
   if (m_table->subpartition_type() == Table::ST_NONE)
     m_table->add_leaf_partition(this);
@@ -100,13 +103,13 @@ Partition_impl::Partition_impl(Table_impl *table, Partition_impl *parent)
     : m_parent_partition_id(INVALID_OBJECT_ID),
       m_number(-1),
       m_se_private_id((ulonglong)-1),
-      m_options(new Properties_impl()),
-      m_se_private_data(new Properties_impl()),
+      m_options(default_valid_option_keys),
+      m_se_private_data(),
       m_table(table),
       m_parent(parent),
       m_values(),
       m_indexes(),
-      m_sub_partitions(),
+      m_subpartitions(),
       m_tablespace_id(INVALID_OBJECT_ID) {
   m_table->add_leaf_partition(this);
 }
@@ -118,38 +121,6 @@ Partition_impl::~Partition_impl() {}
 const Table &Partition_impl::table() const { return *m_table; }
 
 Table &Partition_impl::table() { return *m_table; }
-
-///////////////////////////////////////////////////////////////////////////
-
-bool Partition_impl::set_options_raw(const String_type &options_raw) {
-  Properties *properties = Properties_impl::parse_properties(options_raw);
-
-  if (!properties)
-    return true;  // Error status, current values has not changed.
-
-  m_options.reset(properties);
-  return false;
-}
-
-///////////////////////////////////////////////////////////////////////////
-
-bool Partition_impl::set_se_private_data_raw(
-    const String_type &se_private_data_raw) {
-  Properties *properties =
-      Properties_impl::parse_properties(se_private_data_raw);
-
-  if (!properties)
-    return true;  // Error status, current values has not changed.
-
-  m_se_private_data.reset(properties);
-  return false;
-}
-
-///////////////////////////////////////////////////////////////////////////
-
-void Partition_impl::set_se_private_data(const Properties &se_private_data) {
-  m_se_private_data->assign(se_private_data);
-}
 
 ///////////////////////////////////////////////////////////////////////////
 
@@ -198,7 +169,7 @@ bool Partition_impl::restore_children(Open_dictionary_tables_ctx *otx) {
              this, otx, otx->get_table<Partition_index>(),
              Index_partitions::create_key_by_partition_id(this->id()),
              Partition_index_order_comparator()) ||
-         m_sub_partitions.restore_items(
+         m_subpartitions.restore_items(
              this, otx, otx->get_table<Partition>(),
              Table_partitions::create_key_by_parent_partition_id(
                  this->table().id(), this->id()),
@@ -208,10 +179,10 @@ bool Partition_impl::restore_children(Open_dictionary_tables_ctx *otx) {
 ///////////////////////////////////////////////////////////////////////////
 
 bool Partition_impl::store_children(Open_dictionary_tables_ctx *otx) {
-  for (Partition *part : m_sub_partitions) part->set_parent_partition_id(id());
+  for (Partition *part : m_subpartitions) part->set_parent_partition_id(id());
 
   return m_values.store_items(otx) || m_indexes.store_items(otx) ||
-         m_sub_partitions.store_items(otx);
+         m_subpartitions.store_items(otx);
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -223,7 +194,7 @@ bool Partition_impl::drop_children(Open_dictionary_tables_ctx *otx) const {
          m_indexes.drop_items(
              otx, otx->get_table<Partition_index>(),
              Index_partitions::create_key_by_partition_id(this->id())) ||
-         m_sub_partitions.drop_items(
+         m_subpartitions.drop_items(
              otx, otx->get_table<Partition>(),
              Table_partitions::create_key_by_parent_partition_id(
                  this->table().id(), this->id()));
@@ -252,9 +223,8 @@ bool Partition_impl::restore_attributes(const Raw_record &r) {
 
   m_se_private_id = r.read_uint(Table_partitions::FIELD_SE_PRIVATE_ID, -1);
 
-  set_options_raw(r.read_str(Table_partitions::FIELD_OPTIONS, ""));
-  set_se_private_data_raw(
-      r.read_str(Table_partitions::FIELD_SE_PRIVATE_DATA, ""));
+  set_options(r.read_str(Table_partitions::FIELD_OPTIONS, ""));
+  set_se_private_data(r.read_str(Table_partitions::FIELD_SE_PRIVATE_DATA, ""));
 
   return false;
 }
@@ -273,9 +243,8 @@ bool Partition_impl::store_attributes(Raw_record *r) {
                   m_description_utf8.empty()) ||
          r->store(Table_partitions::FIELD_ENGINE, m_engine) ||
          r->store(Table_partitions::FIELD_COMMENT, m_comment) ||
-         r->store(Table_partitions::FIELD_OPTIONS, *m_options) ||
-         r->store(Table_partitions::FIELD_SE_PRIVATE_DATA,
-                  *m_se_private_data) ||
+         r->store(Table_partitions::FIELD_OPTIONS, m_options) ||
+         r->store(Table_partitions::FIELD_SE_PRIVATE_DATA, m_se_private_data) ||
          r->store(Table_partitions::FIELD_SE_PRIVATE_ID, m_se_private_id,
                   m_se_private_id == INVALID_OBJECT_ID) ||
          r->store_ref_id(Table_partitions::FIELD_TABLESPACE_ID,
@@ -283,9 +252,9 @@ bool Partition_impl::store_attributes(Raw_record *r) {
 }
 
 ///////////////////////////////////////////////////////////////////////////
-static_assert(
-    Table_partitions::FIELD_TABLESPACE_ID == 11,
-    "Table_partitions definition has changed. Review (de)ser memfuns!");
+static_assert(Table_partitions::NUMBER_OF_FIELDS == 12,
+              "Table_partitions definition has changed, check if serialize() "
+              "and deserialize() need to be updated!");
 void Partition_impl::serialize(Sdi_wcontext *wctx, Sdi_writer *w) const {
   w->StartObject();
   Entity_object_impl::serialize(wctx, w);
@@ -299,6 +268,7 @@ void Partition_impl::serialize(Sdi_wcontext *wctx, Sdi_writer *w) const {
   write_properties(w, m_se_private_data, STRING_WITH_LEN("se_private_data"));
   serialize_each(wctx, w, m_values, STRING_WITH_LEN("values"));
   serialize_each(wctx, w, m_indexes, STRING_WITH_LEN("indexes"));
+  serialize_each(wctx, w, m_subpartitions, STRING_WITH_LEN("subpartitions"));
   serialize_tablespace_ref(wctx, w, m_tablespace_id,
                            STRING_WITH_LEN("tablespace_ref"));
   w->EndObject();
@@ -316,9 +286,12 @@ bool Partition_impl::deserialize(Sdi_rcontext *rctx, const RJ_Value &val) {
   read(&m_comment, val, "comment");
   read_properties(&m_options, val, "options");
   read_properties(&m_se_private_data, val, "se_private_data");
-  deserialize_each(rctx, [this]() { return add_value(); }, val, "values");
-  deserialize_each(rctx, [this]() { return add_index(nullptr); }, val,
-                   "indexes");
+  deserialize_each(
+      rctx, [this]() { return add_value(); }, val, "values");
+  deserialize_each(
+      rctx, [this]() { return add_index(nullptr); }, val, "indexes");
+  deserialize_each(
+      rctx, [this]() { return add_subpartition(); }, val, "subpartitions");
 
   return deserialize_tablespace_ref(rctx, &m_tablespace_id, val,
                                     "tablespace_ref");
@@ -337,8 +310,8 @@ void Partition_impl::debug_print(String_type &outb) const {
      << "m_description_utf8: " << m_description_utf8 << "; "
      << "m_engine: " << m_engine << "; "
      << "m_comment: " << m_comment << "; "
-     << "m_options " << m_options->raw_string() << "; "
-     << "m_se_private_data " << m_se_private_data->raw_string() << "; "
+     << "m_options " << m_options.raw_string() << "; "
+     << "m_se_private_data " << m_se_private_data.raw_string() << "; "
      << "m_se_private_id: {OID: " << m_se_private_id << "}; "
      << "m_tablespace: {OID: " << m_tablespace_id << "}; "
      << "m_values: " << m_values.size() << " [ ";
@@ -363,10 +336,10 @@ void Partition_impl::debug_print(String_type &outb) const {
   }
   ss << "] ";
 
-  ss << "m_sub_partitions: " << m_sub_partitions.size() << " [ ";
+  ss << "m_subpartitions: " << m_subpartitions.size() << " [ ";
 
   {
-    for (const Partition *i : sub_partitions()) {
+    for (const Partition *i : subpartitions()) {
       String_type ob;
       i->debug_print(ob);
       ss << ob;
@@ -397,14 +370,14 @@ Partition_index *Partition_impl::add_index(Index *idx) {
 
 ///////////////////////////////////////////////////////////////////////////
 
-Partition *Partition_impl::add_sub_partition() {
+Partition *Partition_impl::add_subpartition() {
   /// Support just one level of sub partitions.
   DBUG_ASSERT(!parent());
 
   Partition_impl *p =
       new (std::nothrow) Partition_impl(&this->table_impl(), this);
   p->set_parent(this);
-  m_sub_partitions.push_back(p);
+  m_subpartitions.push_back(p);
   return p;
 }
 
@@ -419,19 +392,18 @@ Partition_impl::Partition_impl(const Partition_impl &src, Table_impl *parent)
       m_description_utf8(src.m_description_utf8),
       m_engine(src.m_engine),
       m_comment(src.m_comment),
-      m_options(Properties_impl::parse_properties(src.m_options->raw_string())),
-      m_se_private_data(Properties_impl::parse_properties(
-          src.m_se_private_data->raw_string())),
+      m_options(src.m_options),
+      m_se_private_data(src.m_se_private_data),
       m_table(parent),
       m_parent(src.parent() ? parent->get_partition(src.parent()->name())
-                            : NULL),
+                            : nullptr),
       m_values(),
       m_indexes(),
-      m_sub_partitions(),
+      m_subpartitions(),
       m_tablespace_id(src.m_tablespace_id) {
   m_values.deep_copy(src.m_values, this);
   m_indexes.deep_copy(src.m_indexes, this);
-  m_sub_partitions.deep_copy(src.m_sub_partitions, this);
+  m_subpartitions.deep_copy(src.m_subpartitions, this);
 
   if (m_table->subpartition_type() == Table::ST_NONE)
     m_table->add_leaf_partition(this);
@@ -448,14 +420,13 @@ Partition_impl::Partition_impl(const Partition_impl &src, Partition_impl *part)
       m_description_utf8(src.m_description_utf8),
       m_engine(src.m_engine),
       m_comment(src.m_comment),
-      m_options(Properties_impl::parse_properties(src.m_options->raw_string())),
-      m_se_private_data(Properties_impl::parse_properties(
-          src.m_se_private_data->raw_string())),
+      m_options(src.m_options),
+      m_se_private_data(src.m_se_private_data),
       m_table(&part->table_impl()),
       m_parent(part),
       m_values(),
       m_indexes(),
-      m_sub_partitions(),
+      m_subpartitions(),
       m_tablespace_id(src.m_tablespace_id) {
   m_values.deep_copy(src.m_values, this);
   m_indexes.deep_copy(src.m_indexes, this);

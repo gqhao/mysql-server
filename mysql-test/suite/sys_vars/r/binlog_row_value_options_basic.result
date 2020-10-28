@@ -145,6 +145,8 @@ SET @@binlog_row_value_options = 'PARTIAL_JSON';
 
 # warning for old format
 SET GLOBAL log_bin_use_v1_row_events = 1;
+Warnings:
+Warning	1287	'@@log_bin_use_v1_row_events' is deprecated and will be removed in a future release.
 SET @@session.binlog_row_value_options = '';
 SET @@session.binlog_row_value_options = 'PARTIAL_JSON';
 Warnings:
@@ -152,6 +154,8 @@ Warning	3646	When binlog_row_value_options=PARTIAL_JSON, the option log_bin_use_
 
 # no warning for new format
 SET GLOBAL log_bin_use_v1_row_events = 0;
+Warnings:
+Warning	1287	'@@log_bin_use_v1_row_events' is deprecated and will be removed in a future release.
 SET @@session.binlog_row_value_options = '';
 SET @@session.binlog_row_value_options = 'PARTIAL_JSON';
 
@@ -197,6 +201,7 @@ SET @@global.binlog_row_value_options = 'PARTIAL_JSON';
 # warning for old format
 SET GLOBAL log_bin_use_v1_row_events = 1;
 Warnings:
+Warning	1287	'@@log_bin_use_v1_row_events' is deprecated and will be removed in a future release.
 Warning	3646	When binlog_row_value_options=PARTIAL_JSON, the option log_bin_use_v1_row_events=1 will be ignored and row events will be written in new format to binary log.
 SET @@global.binlog_row_value_options = '';
 SET @@global.binlog_row_value_options = 'PARTIAL_JSON';
@@ -205,6 +210,8 @@ Warning	3646	When binlog_row_value_options=PARTIAL_JSON, the option log_bin_use_
 
 # no warning for new format
 SET GLOBAL log_bin_use_v1_row_events = 0;
+Warnings:
+Warning	1287	'@@log_bin_use_v1_row_events' is deprecated and will be removed in a future release.
 SET @@global.binlog_row_value_options = '';
 SET @@global.binlog_row_value_options = 'PARTIAL_JSON';
 
@@ -244,20 +251,6 @@ SET PERSIST binlog_row_image = NOBLOB;
 SET @@persist.binlog_row_value_options = '';
 SET @@persist.binlog_row_value_options = 'PARTIAL_JSON';
 SET PERSIST binlog_row_image = MINIMAL;
-SET @@persist.binlog_row_value_options = '';
-SET @@persist.binlog_row_value_options = 'PARTIAL_JSON';
-
-# warning for old format
-SET PERSIST log_bin_use_v1_row_events = 1;
-Warnings:
-Warning	3646	When binlog_row_value_options=PARTIAL_JSON, the option log_bin_use_v1_row_events=1 will be ignored and row events will be written in new format to binary log.
-SET @@persist.binlog_row_value_options = '';
-SET @@persist.binlog_row_value_options = 'PARTIAL_JSON';
-Warnings:
-Warning	3646	When binlog_row_value_options=PARTIAL_JSON, the option log_bin_use_v1_row_events=1 will be ignored and row events will be written in new format to binary log.
-
-# no warning for new format
-SET PERSIST log_bin_use_v1_row_events = 0;
 SET @@persist.binlog_row_value_options = '';
 SET @@persist.binlog_row_value_options = 'PARTIAL_JSON';
 
@@ -331,11 +324,11 @@ CREATE USER user@localhost;
 SET @@global.binlog_row_value_options = '';
 ERROR 42000: Access denied; you need (at least one of) the SUPER or SYSTEM_VARIABLES_ADMIN privilege(s) for this operation
 SET @@session.binlog_row_value_options = '';
-ERROR 42000: Access denied; you need (at least one of) the SUPER or SYSTEM_VARIABLES_ADMIN privilege(s) for this operation
+ERROR 42000: Access denied; you need (at least one of) the SUPER, SYSTEM_VARIABLES_ADMIN or SESSION_VARIABLES_ADMIN privilege(s) for this operation
 SET @@persist.binlog_row_value_options = '';
 ERROR 42000: Access denied; you need (at least one of) the SUPER or SYSTEM_VARIABLES_ADMIN privilege(s) for this operation
 SET @@binlog_row_value_options = '';
-ERROR 42000: Access denied; you need (at least one of) the SUPER or SYSTEM_VARIABLES_ADMIN privilege(s) for this operation
+ERROR 42000: Access denied; you need (at least one of) the SUPER, SYSTEM_VARIABLES_ADMIN or SESSION_VARIABLES_ADMIN privilege(s) for this operation
 
 #### Clean up ####
 

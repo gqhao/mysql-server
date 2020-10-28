@@ -1,5 +1,5 @@
 /*
- Copyright (c) 2013, 2016, Oracle and/or its affiliates. All rights reserved.
+ Copyright (c) 2013, 2020 Oracle and/or its affiliates.
  
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License, version 2.0,
@@ -25,13 +25,16 @@
 #include <NdbApi.hpp>
 #include <node.h>
 
-using namespace v8;
+using v8::Local;
+using v8::Value;
+using v8::Object;
+using v8::String;
 
 typedef Local<Value> EncoderReader(const NdbDictionary::Column *,
                                    char *, uint32_t);
 
 typedef Local<Value> EncoderWriter(const NdbDictionary::Column *,
-                                   Handle<Value>, char *, uint32_t);
+                                   Local<Value>, char *, uint32_t);
 
 typedef struct {
   EncoderReader * read;
@@ -41,5 +44,5 @@ typedef struct {
 
 const NdbTypeEncoder * getEncoderForColumn(const NdbDictionary::Column *);
 
-Local<Object> getBufferForText(const NdbDictionary::Column *, Handle<String>);
-Local<String> getTextFromBuffer(const NdbDictionary::Column *, Handle<Object>);
+Local<Object> getBufferForText(const NdbDictionary::Column *, Local<String>);
+Local<String> getTextFromBuffer(const NdbDictionary::Column *, Local<Object>);

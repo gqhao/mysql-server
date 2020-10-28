@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -24,14 +24,18 @@
 #ifndef WINDOWS_INCLUDED
 #define WINDOWS_INCLUDED
 
+#include <sys/types.h>
+#include <cstring>  // std::memcpy
+
 #include "my_dbug.h"
 #include "my_inttypes.h"
 #include "sql/enum_query_type.h"
 #include "sql/handler.h"
-#include "sql/item.h"
 #include "sql/mem_root_array.h"
 #include "sql/sql_lex.h"
+#include "sql/sql_list.h"
 #include "sql/table.h"
+
 /*
   Some Window-related symbols must be known to sql_lex.h which is a frequently
   included header.
@@ -39,22 +43,33 @@
   Server, those symbols go into this header:
 */
 #include "sql/window_lex.h"
-#include "sql_string.h"
 
-#include <sys/types.h>
-#include <cstring>  // std::memcpy
-
-#include "sql/sql_error.h"
-#include "sql/sql_list.h"
-
+class Cached_item;
+class Item;
 class Item_func;
+class Item_string;
 class Item_sum;
 class PT_border;
 class PT_frame;
 class PT_order_list;
 class PT_window;
+class String;
 class THD;
 class Temp_table_param;
+
+/**
+  Position hints for the frame buffer are saved for these kind of row
+  accesses, cf. #Window::m_frame_buffer_positions.
+*/
+enum class Window_retrieve_cached_row_reason {
+  WONT_UPDATE_HINT = -1,  // special value when using restore_special_record
+  FIRST_IN_PARTITION = 0,
+  CURRENT = 1,
+  FIRST_IN_FRAME = 2,
+  LAST_IN_FRAME = 3,
+  LAST_IN_PEERSET = 4,
+  MISC_POSITIONS = 5  // NTH_VALUE, LEAD/LAG have dynamic indexes 5..N
+};
 
 /**
   Represents the (explicit) window of a SQL 2003 section 7.11 \<window clause\>,
@@ -87,7 +102,6 @@ class Window {
   PT_order_list *const m_partition_by;  ///< \<window partition clause\>
   PT_order_list *const m_order_by;      ///< \<window order clause\>
   ORDER *m_sorting_order;               ///< merged partition/order by
-  bool m_sort_redundant;                ///< Can use sort from previous w
   PT_frame *const m_frame;              ///< \<window frame clause\>
   Item_string *m_name;                  ///< \<window name\>
   /**
@@ -114,6 +128,13 @@ class Window {
     evaluate the wf for the current row
   */
   bool m_needs_peerset;
+
+  /**
+    (At least) one window function (currently JSON_OBJECTAGG) needs the
+    last peer for the current row to evaluate the wf for the current row.
+    (This is used only during inversion/optimization)
+  */
+  bool m_needs_last_peer_in_frame;
 
   /**
     (At least) one window function needs the cardinality of the partition of
@@ -158,7 +179,7 @@ class Window {
 
   /**
     Can be true if first window after a join: we may need to restore the input
-    record after buffered window processing if join_read_key's caching logic
+    record after buffered window processing if EQRefIterator's caching logic
     presumes the record hasn't been modified (when last qep_tab uses JT_EQ_REF).
   */
   bool m_needs_restore_input_row;
@@ -173,7 +194,7 @@ class Window {
     int64 m_rowno;
     bool m_from_last;
     st_offset() : m_rowno(0), m_from_last(false) {}
-    /*
+    /**
       Used for sorting offsets in ascending order for faster traversal of
       frame buffer tmp file
     */
@@ -183,7 +204,7 @@ class Window {
   struct st_ll_offset {
     int64 m_rowno;  ///< negative values is LEAD
     st_ll_offset() : m_rowno(INT_MIN64 /* uninitialized marker*/) {}
-    /*
+    /**
       Used for sorting offsets in ascending order for faster traversal of
       frame buffer tmp file
     */
@@ -191,7 +212,8 @@ class Window {
   };
 
   struct st_nth {
-    Mem_root_array_YY<st_offset> m_offsets;  // sorted set of NTH_VALUE offsets
+    Mem_root_array_YY<st_offset>
+        m_offsets;  ///< sorted set of NTH_VALUE offsets
   };
 
   struct st_lead_lag {
@@ -220,24 +242,10 @@ class Window {
    *------------------------------------------------------------------------*/
  public:
   /**
-    Position hints for the frame buffer are saved for these kind of row
-    accesses, cf. #m_frame_buffer_positions.
-  */
-  enum retrieve_cached_row_reason {
-    REA_WONT_UPDATE_HINT =
-        -1,  // special value when using restore_special_record
-    REA_FIRST_IN_PARTITION = 0,
-    REA_CURRENT = 1,
-    REA_FIRST_IN_FRAME = 2,
-    REA_LAST_IN_FRAME = 3,
-    REA_LAST_IN_PEERSET = 4,
-    REA_MISC_POSITIONS = 5  // NTH_VALUE, LEAD/LAG have dynamic indexes 5..N
-  };
-
-  /**
     Cardinality of m_frame_buffer_positions if no NTH_VALUE, LEAD/LAG
   */
-  static constexpr int FRAME_BUFFER_POSITIONS_CARD = REA_MISC_POSITIONS;
+  static constexpr int FRAME_BUFFER_POSITIONS_CARD =
+      static_cast<int>(Window_retrieve_cached_row_reason::MISC_POSITIONS);
 
   /**
     Holds information about a position in the buffer frame as stored in a
@@ -255,7 +263,7 @@ class Window {
   };
 
   /**
-    Execution state: used iff m_needs_frame_buffering. Holds four pointers to
+    Execution state: used iff m_needs_frame_buffering. Holds pointers to
     positions in the file in m_frame_buffer. We use these saved positions to
     avoid having to position to the first row in the partition and then
     making many read calls to find the desired row. By repositioning to a
@@ -302,32 +310,36 @@ class Window {
   /**
     See #m_tmp_pos
   */
-  void save_pos(retrieve_cached_row_reason reason) {
-    m_tmp_pos.m_rowno = m_frame_buffer_positions[reason].m_rowno;
+  void save_pos(Window_retrieve_cached_row_reason reason) {
+    int reason_index = static_cast<int>(reason);
+    m_tmp_pos.m_rowno = m_frame_buffer_positions[reason_index].m_rowno;
     std::memcpy(m_tmp_pos.m_position,
-                m_frame_buffer_positions[reason].m_position,
+                m_frame_buffer_positions[reason_index].m_position,
                 frame_buffer()->file->ref_length);
   }
 
   /**
     See #m_tmp_pos
   */
-  void restore_pos(retrieve_cached_row_reason reason) {
-    m_frame_buffer_positions[reason].m_rowno = m_tmp_pos.m_rowno;
-    std::memcpy(m_frame_buffer_positions[reason].m_position,
+  void restore_pos(Window_retrieve_cached_row_reason reason) {
+    int reason_index = static_cast<int>(reason);
+    m_frame_buffer_positions[reason_index].m_rowno = m_tmp_pos.m_rowno;
+    std::memcpy(m_frame_buffer_positions[reason_index].m_position,
                 m_tmp_pos.m_position, frame_buffer()->file->ref_length);
   }
 
   /**
     Copy frame buffer position hint from one to another.
   */
-  void copy_pos(retrieve_cached_row_reason from_reason,
-                retrieve_cached_row_reason to_reason) {
-    m_frame_buffer_positions[to_reason].m_rowno =
-        m_frame_buffer_positions[from_reason].m_rowno;
+  void copy_pos(Window_retrieve_cached_row_reason from_reason,
+                Window_retrieve_cached_row_reason to_reason) {
+    int from_index = static_cast<int>(from_reason);
+    int to_index = static_cast<int>(to_reason);
+    m_frame_buffer_positions[to_index].m_rowno =
+        m_frame_buffer_positions[from_index].m_rowno;
 
-    std::memcpy(m_frame_buffer_positions[to_reason].m_position,
-                m_frame_buffer_positions[from_reason].m_position,
+    std::memcpy(m_frame_buffer_positions[to_index].m_position,
+                m_frame_buffer_positions[from_index].m_position,
                 frame_buffer()->file->ref_length);
   }
 
@@ -421,6 +433,12 @@ class Window {
   int64 m_last_rowno_in_peerset;
 
   /**
+    Execution state: used iff m_needs_last_peer_in_frame. True if a row
+    leaving the frame is the last row in the peer set withing the frame.
+  */
+  int64 m_is_last_row_in_peerset_within_frame;
+
+  /**
     Execution state: the current row number in the current partition.
     Set in check_partition_boundary. Used while reading input rows, in contrast
     to m_rowno_in_partition, which is used when processing buffered rows.
@@ -482,6 +500,12 @@ class Window {
     the end bound. Each item is Item_func_lt/gt.
   */
   Item_func *m_comparators[WBT_VALUE_FOLLOWING + 1][2];
+  /**
+    Each item has inverse operation of the corresponding
+    comparator in m_comparators. Determines if comparison
+    should continue with next field in order by list.
+  */
+  Item_func *m_inverse_comparators[WBT_VALUE_FOLLOWING + 1][2];
 
  protected:
   /**
@@ -573,7 +597,6 @@ class Window {
         m_partition_by(part),
         m_order_by(ord),
         m_sorting_order(nullptr),
-        m_sort_redundant(false),
         m_frame(frame),
         m_name(name),
         m_def_pos(0),
@@ -581,6 +604,7 @@ class Window {
         m_is_reference(is_reference),
         m_needs_frame_buffering(false),
         m_needs_peerset(false),
+        m_needs_last_peer_in_frame(false),
         m_needs_card(false),
         m_row_optimizable(true),
         m_range_optimizable(true),
@@ -600,6 +624,7 @@ class Window {
         m_special_rows_cache_max_length(0),
         m_last_rowno_in_cache(0),
         m_last_rowno_in_peerset(0),
+        m_is_last_row_in_peerset_within_frame(false),
         m_part_row_number(0),
         m_partition_border(true),
         m_last_row_output(0),
@@ -673,7 +698,7 @@ class Window {
 
   /**
     Get the ORDER BY, if any. That is, the first we find along
-    the ancestor chain. Uniqueness checked in #setup_windows
+    the ancestor chain. Uniqueness checked in #setup_windows1
     SQL 2011 7.11 GR 1.b.i.5.A-C
   */
   const PT_order_list *effective_order_by() const {
@@ -754,9 +779,15 @@ class Window {
 
   /**
     Check that the semantic requirements for window functions over this
-    window are fulfilled, and accumulate evaluation requirements
+    window are fulfilled, and accumulate evaluation requirements.
+    This is run at resolution.
   */
-  bool check_window_functions(THD *thd, SELECT_LEX *select);
+  bool check_window_functions1(THD *thd, SELECT_LEX *select);
+  /**
+    Like check_window_functions1() but contains checks which must wait until
+    the start of the execution phase.
+  */
+  bool check_window_functions2(THD *thd);
 
   /**
     For RANGE frames we need to do computations involving add/subtract and
@@ -795,9 +826,17 @@ class Window {
     The current row is in the same peer set if all ORDER BY columns
     have the same value as in the previous row.
 
+    For JSON_OBJECTAGG only the first order by column needs to be
+    compared to check if a row is in peer set.
+
+    @param compare_all_order_by_items If true, compare all the order by items
+                                      to determine if a row is in peer set.
+                                      Else, compare only the first order by
+                                      item to determine peer set.
+
     @return true if current row is in a new peer set
   */
-  bool in_new_order_by_peer_set();
+  bool in_new_order_by_peer_set(bool compare_all_order_by_items = true);
 
   /**
     While processing buffered rows in RANGE frame mode we, determine
@@ -830,7 +869,7 @@ class Window {
   static bool resolve_reference(THD *thd, Item_sum *wf, PT_window **m_window);
 
   /**
-    Semantic checking of windows.
+    Semantic checking of windows. Run at resolution.
 
     * Process any window inheritance, that is a window, that in its
     specification refer to another named window.
@@ -861,16 +900,27 @@ class Window {
     @param select           The select for which we are doing windowing
     @param ref_item_array   The base ref items
     @param tables           The list of tables involved
-    @param fields           The list of selected fields
-    @param all_fields       The list of all fields, including hidden ones
+    @param fields           The list of all fields, including hidden ones
     @param windows          The list of windows defined for this select
 
     @return false if success, true if error
   */
-  static bool setup_windows(THD *thd, SELECT_LEX *select,
-                            Ref_item_array ref_item_array, TABLE_LIST *tables,
-                            List<Item> &fields, List<Item> &all_fields,
-                            List<Window> &windows);
+  static bool setup_windows1(THD *thd, SELECT_LEX *select,
+                             Ref_item_array ref_item_array, TABLE_LIST *tables,
+                             mem_root_deque<Item *> *fields,
+                             List<Window> &windows);
+  /**
+    Like setup_windows1() but contains operations which must wait until
+    the start of the execution phase.
+
+    @param thd              The session's execution thread
+    @param select           The select for which we are doing windowing
+    @param windows          The list of windows defined for this select
+
+    @return false if success, true if error
+  */
+  static bool setup_windows2(THD *thd, SELECT_LEX *select,
+                             List<Window> &windows);
 
   /**
     Remove unused window definitions. Do this only after syntactic and
@@ -885,18 +935,17 @@ class Window {
     Resolve and set up the PARTITION BY or an ORDER BY list of a window.
 
     @param thd              The session's execution thread
-    @param ref_item_array
+    @param ref_item_array   The base ref items
     @param tables           The list of tables involved
-    @param fields           The list of selected fields
-    @param all_fields       The list of all fields, including hidden ones
+    @param fields           The list of all fields, including hidden ones
     @param o                A list of order by expressions
     @param partition_order  If true, o represent a windowing PARTITION BY,
            else it represents a windowing ORDER BY
     @returns false if success, true if error
   */
   bool resolve_window_ordering(THD *thd, Ref_item_array ref_item_array,
-                               TABLE_LIST *tables, List<Item> &fields,
-                               List<Item> &all_fields, ORDER *o,
+                               TABLE_LIST *tables,
+                               mem_root_deque<Item *> *fields, ORDER *o,
                                bool partition_order);
   /**
     Return true if this window's name is not unique in windows
@@ -926,8 +975,8 @@ class Window {
     @return true if we have such a clause, which means we need to sort the
             input table before evaluating the window functions, unless it has
             been made redundant by a previous windowing step, cf.
-            m_sort_redundant, or due to a single row result set, cf.
-            SELECT_LEX::is_implicitly_grouped().
+            reorder_and_eliminate_sorts, or due to a single row result set,
+            cf. SELECT_LEX::is_implicitly_grouped().
   */
   bool needs_sorting() const { return m_sorting_order != nullptr; }
 
@@ -944,6 +993,12 @@ class Window {
   */
   bool needs_peerset() const { return m_needs_peerset; }
 
+  /**
+    If we cannot compute one of window functions without looking at all
+    rows in the peerset of the current row in this frame, return true, else
+    false. E.g. JSON_OBJECTAGG.
+  */
+  bool needs_last_peer_in_frame() const { return m_needs_last_peer_in_frame; }
   /**
     If we need to read the entire partition before we can evaluate
     some window function(s) on this window,
@@ -1103,6 +1158,20 @@ class Window {
   void set_last_rowno_in_peerset(uint64 rno) { m_last_rowno_in_peerset = rno; }
 
   /**
+    See #m_is_last_row_in_peerset_within_frame
+  */
+  int64 is_last_row_in_peerset_within_frame() const {
+    return m_is_last_row_in_peerset_within_frame;
+  }
+
+  /**
+    See #m_is_last_row_in_peerset_within_frame
+  */
+  void set_is_last_row_in_peerset_within_frame(bool value) {
+    m_is_last_row_in_peerset_within_frame = value;
+  }
+
+  /**
     See #m_do_copy_null
   */
   bool do_copy_null() const { return m_do_copy_null; }
@@ -1231,24 +1300,16 @@ class Window {
   }
 
   /**
-    Set the current row number for diagnostics. This should be the
-    absolute row number across all partitions in the windowing step, i.e.
-    after ordering the row if applicable.
-
-    @param da                   Diagnostics_area to store row number
-    @param rowno_in_partition   The logical row number within the partition
-  */
-  void set_diagnostics_rowno(Diagnostics_area *da, int64 rowno_in_partition) {
-    da->set_current_row_for_condition(rowno_in_partition +
-                                      m_frame_buffer_partition_offset - 1);
-  }
-
-  /**
     Free up any resource used to process the window functions of this window,
     e.g. temporary files and in-memory data structures. Called when done
     with all window processing steps from SELECT_LEX::cleanup.
   */
   void cleanup(THD *thd);
+
+  /**
+    Free structures that were set up during preparation of window functions
+  */
+  void destroy();
 
   /**
    Reset window state for a new partition.
@@ -1259,7 +1320,8 @@ class Window {
   void reset_partition_state() { reset_execution_state(RL_PARTITION); }
 
   /**
-    Reset execution state for next call to JOIN::exec, cf. JOIN::reset.
+    Reset execution state for next call to JOIN::exec, cf. JOIN::reset,
+    or using [Buffering]WindowingIterator::Init.
   */
   void reset_round() { reset_execution_state(RL_ROUND); }
 
@@ -1286,56 +1348,9 @@ class Window {
   */
   void reset_all_wf_state();
 
-  /**
-    Collects evaluation requirements from a window function,
-    used by Item_sum::check_wf_semantics and its overrides.
-  */
-  struct Evaluation_requirements {
-    /**
-      Set to true if window function requires row buffering
-    */
-    bool needs_buffer;
-    /**
-      Set to true if we need peerset for evaluation (e.g. CUME_DIST)
-    */
-    bool needs_peerset;
-    /**
-      Set to true if we need FIRST_VALUE or optimized MIN/MAX
-    */
-    bool opt_first_row;
-    /**
-      Set to true if we need LAST_VALUE or optimized MIN/MAX
-    */
-    bool opt_last_row;
-    st_offset opt_nth_row;    ///< Used if we have NTH_VALUE
-    st_ll_offset opt_ll_row;  ///< Used if we have LEAD or LAG
-    /**
-      Set to true if we can compute a sliding window by a combination of
-      undoing the contribution of rows going out of the frame and adding the
-      contribution of rows coming into the frame.  For example, SUM and AVG
-      allows this, but MAX/MIN do not. Only applicable if the frame has ROW
-      bounds unit.
-    */
-    bool row_optimizable;
-    /**
-      Similar to row_optimizable but for RANGE frame bounds unit
-    */
-    bool range_optimizable;
+  const char *printable_name() const;
 
-    Evaluation_requirements()
-        : needs_buffer(false),
-          needs_peerset(false),
-          opt_first_row(false),
-          opt_last_row(false),
-          row_optimizable(true),
-          range_optimizable(true) {}
-  };
-
-  const char *printable_name() const {
-    return (m_name != nullptr ? m_name->str_value.ptr() : "<unnamed window>");
-  }
-
-  void print(THD *thd, String *str, enum_query_type qt,
+  void print(const THD *thd, String *str, enum_query_type qt,
              bool expand_definition) const;
 
   bool has_windowing_steps() const;
@@ -1356,8 +1371,9 @@ class Window {
     @param  before  True if 'before' is wanted; false if 'after' is.
   */
   bool before_or_after_frame(bool before);
-  void print_frame(String *str, enum_query_type qt) const;
-  void print_border(String *str, PT_border *b, enum_query_type qt) const;
+  void print_frame(const THD *thd, String *str, enum_query_type qt) const;
+  void print_border(const THD *thd, String *str, PT_border *b,
+                    enum_query_type qt) const;
 
   /**
     Reorder windows and eliminate redundant ordering. If a window has the
@@ -1373,16 +1389,8 @@ class Window {
     windows.
 
     @param windows     list of windows
-    @param first_exec  if true, the as done a part of a first prepare, not a
-                       reprepare. On a reprepare the analysis part will be
-                       skipped, since the flag m_sort_redundant flag is stable
-                       across prepares.
-    @todo in WL#6570 we may set m_sorting_order only once, during preparation,
-    then Window::m_sort_redundant could be removed, as well as the first_exec
-    argument.
   */
-  static void reorder_and_eliminate_sorts(List<Window> &windows,
-                                          bool first_exec);
+  static void reorder_and_eliminate_sorts(List<Window> &windows);
 
   /**
     Return true of the physical[1] sort orderings for the two windows are the
@@ -1412,17 +1420,73 @@ class Window {
   bool check_constant_bound(THD *thd, PT_border *border);
 
   /**
-    Check that frame borders are sane, e.g. they are not negative .
+    Check that frame borders are sane; resolution phase.
 
     @param thd      Session thread
-    @param w        The window whose frame we are checking
-    @param f        The frame to check, if any
-    @param prepare  false at EXECUTE ps prepare time, else true
 
-   @returns true if error
+    @returns true if error
   */
-  static bool check_border_sanity(THD *thd, Window *w, const PT_frame *f,
-                                  bool prepare);
+  bool check_border_sanity1(THD *thd);
+  /**
+    Like check_border_sanity1() but contains checks which must wait until
+    the start of the execution phase.
+
+    @param thd      Session thread
+
+    @returns true if error
+  */
+  bool check_border_sanity2(THD *thd);
+};
+
+/**
+  Collects evaluation requirements from a window function,
+  used by Item_sum::check_wf_semantics and its overrides.
+*/
+struct Window_evaluation_requirements {
+  /**
+    Set to true if window function requires row buffering
+  */
+  bool needs_buffer;
+  /**
+    Set to true if we need peerset for evaluation (e.g. CUME_DIST)
+  */
+  bool needs_peerset;
+  /**
+    Set to true if we need last peer for evaluation within a frame
+    (e.g. JSON_OBJECTAGG)
+  */
+  bool needs_last_peer_in_frame;
+  /**
+    Set to true if we need FIRST_VALUE or optimized MIN/MAX
+  */
+  bool opt_first_row;
+  /**
+    Set to true if we need LAST_VALUE or optimized MIN/MAX
+  */
+  bool opt_last_row;
+  Window::st_offset opt_nth_row;    ///< Used if we have NTH_VALUE
+  Window::st_ll_offset opt_ll_row;  ///< Used if we have LEAD or LAG
+  /**
+    Set to true if we can compute a sliding window by a combination of
+    undoing the contribution of rows going out of the frame and adding the
+    contribution of rows coming into the frame.  For example, SUM and AVG
+    allows this, but MAX/MIN do not. Only applicable if the frame has ROW
+    bounds unit.
+  */
+  bool row_optimizable;
+  /**
+    Similar to row_optimizable but for RANGE frame bounds unit
+  */
+  bool range_optimizable;
+
+  Window_evaluation_requirements()
+      : needs_buffer(false),
+        needs_peerset(false),
+        needs_last_peer_in_frame(false),
+        opt_first_row(false),
+        opt_last_row(false),
+        row_optimizable(true),
+        range_optimizable(true) {}
 };
 
 #endif /* WINDOWS_INCLUDED */

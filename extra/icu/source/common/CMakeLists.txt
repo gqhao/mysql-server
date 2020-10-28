@@ -1,7 +1,5 @@
 PROJECT (ICU-uc)
 
-INCLUDE(${MYSQL_CMAKE_SCRIPT_DIR}/compile_flags.cmake)
-
 ADD_DEFINITIONS(-DU_COMMON_IMPLEMENTATION)
 
 SET_DIRECTORY_PROPERTIES(PROPERTIES INCLUDE_DIRECTORIES "${PROJECT_SOURCE_DIR}")
@@ -11,11 +9,13 @@ SET(ICU_COMMON_SOURCES
   bmpset.cpp
   brkeng.cpp
   brkiter.cpp
+  bytesinkutil.cpp
   bytestream.cpp
   bytestriebuilder.cpp
   bytestrie.cpp
   bytestrieiterator.cpp
   caniter.cpp
+  characterproperties.cpp
   chariter.cpp
   charstr.cpp
   cmemory.cpp
@@ -31,17 +31,22 @@ SET(ICU_COMMON_SOURCES
   filterednormalizer2.cpp
   icudataver.cpp
   icuplug.cpp
-  listformatter.cpp
   loadednormalizer2impl.cpp
+  localebuilder.cpp
+  localematcher.cpp
+  localeprioritylist.cpp
   locavailable.cpp
   locbased.cpp
   locdispnames.cpp
+  locdistance.cpp
   locdspnm.cpp
   locid.cpp
   loclikely.cpp
+  loclikelysubtags.cpp
   locmap.cpp
   locresdata.cpp
   locutil.cpp
+  lsr.cpp
   messagepattern.cpp
   normalizer2.cpp
   normalizer2impl.cpp
@@ -53,6 +58,7 @@ SET(ICU_COMMON_SOURCES
   propsvec.cpp
   punycode.cpp
   putil.cpp
+  rbbi_cache.cpp
   rbbi.cpp
   rbbidata.cpp
   rbbinode.cpp
@@ -64,6 +70,7 @@ SET(ICU_COMMON_SOURCES
   resbund_cnv.cpp
   resbund.cpp
   resource.cpp
+  restrace.cpp
   ruleiter.cpp
   schriter.cpp
   serv.cpp
@@ -75,6 +82,7 @@ SET(ICU_COMMON_SOURCES
   servslkf.cpp
   sharedobject.cpp
   simpleformatter.cpp
+  static_unicode_sets.cpp
   stringpiece.cpp
   stringtriebuilder.cpp
   uarrsort.cpp
@@ -119,6 +127,7 @@ SET(ICU_COMMON_SOURCES
   ucnv_u7.cpp
   ucnv_u8.cpp
   ucol_swp.cpp
+  ucptrie.cpp
   ucurr.cpp
   udata.cpp
   udatamem.cpp
@@ -131,12 +140,12 @@ SET(ICU_COMMON_SOURCES
   uinvchar.cpp
   uiter.cpp
   ulist.cpp
-  ulistformatter.cpp
   uloc.cpp
   uloc_keytype.cpp
   uloc_tag.cpp
   umapfile.cpp
   umath.cpp
+  umutablecptrie.cpp
   umutex.cpp
   unames.cpp
   unifiedcache.cpp
@@ -185,6 +194,7 @@ SET(ICU_COMMON_SOURCES
   utrie2_builder.cpp
   utrie2.cpp
   utrie.cpp
+  utrie_swap.cpp
   uts46.cpp
   utypes.cpp
   uvector.cpp
@@ -196,7 +206,7 @@ SET(ICU_COMMON_SOURCES
 ADD_LIBRARY(icuuc STATIC ${ICU_COMMON_SOURCES})
 
 # uidna_toASCII_59 is marked as deprecated
-IF(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+IF(MY_COMPILER_IS_GNU_OR_CLANG)
   ADD_COMPILE_FLAGS(uidna.cpp COMPILE_FLAGS "-Wno-deprecated-declarations")
 ENDIF()
 

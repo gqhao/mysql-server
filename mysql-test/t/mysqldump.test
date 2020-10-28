@@ -657,7 +657,7 @@ drop table t1;
 
 
 --echo #
---echo # Bug#15328 Segmentation fault occured if my.cnf is invalid for escape sequence
+--echo # Bug#15328 Segmentation fault occurred if my.cnf is invalid for escape sequence
 --echo #
 
 --exec $MYSQL_MY_PRINT_DEFAULTS --config-file=$MYSQL_TEST_DIR/std_data/bug15328.cnf mysqldump
@@ -1621,15 +1621,15 @@ DROP TABLE t1,t2;
 --echo #
 
 --echo # --skip-dump-date:
---replace_regex /-- [^D][^u][^m][^p].*// /\/\*!.*//
+--replace_regex /-- [^D][^u][^m][^p].*\n// /\/\*!.*\n//
 --exec $MYSQL_DUMP --skip-dump-date test
 
 --echo # --dump-date:
---replace_regex /-- [^D][^u][^m][^p].*// /\/\*!.*// / on [0-9 :-]+/ on DATE/
+--replace_regex /-- [^D][^u][^m][^p].*\n// /\/\*!.*\n// / on [0-9 :-]+/ on DATE/
 --exec $MYSQL_DUMP --dump-date test
 
 --echo # --dump-date (default):
---replace_regex /-- [^D][^u][^m][^p].*// /\/\*!.*// / on [0-9 :-]+/ on DATE/
+--replace_regex /-- [^D][^u][^m][^p].*\n// /\/\*!.*\n// / on [0-9 :-]+/ on DATE/
 --exec $MYSQL_DUMP test
 
 --echo #
@@ -1728,7 +1728,7 @@ show create event ee1;
 
 ## prove three works (with spaces and tabs on the end)
 # start with one from the previous restore
-create event ee2 on schedule at '2018-12-31 21:01:23' do set @a=5;	      
+create event ee2 on schedule at '2029-12-31 21:01:23' do set @a=5;
 create event ee3 on schedule at '2030-12-31 22:01:23' do set @a=5;    		
 show events;
 --exec $MYSQL_DUMP --events second > $MYSQLTEST_VARDIR/tmp/bug16853-2.sql
@@ -2344,7 +2344,7 @@ INSERT INTO b12809202_db.t2 VALUES (1), (2), (3);
 --echo #        order in the output.
 --echo
 --echo #### Dump starts here ####
---replace_regex /-- Server version.*// /-- MySQL dump .*// /-- Dump completed on .*/-- Dump completed/
+--replace_regex /-- Server version.*\n// /-- MySQL dump .*\n// /-- Dump completed on .*\n/-- Dump completed/
 --exec $MYSQL_DUMP --verbose --single-transaction --flush-logs b12809202_db 2> $MYSQLTEST_VARDIR/tmp/b12809202_stderr.sql
 --echo
 --echo ## stderr ##
@@ -2574,7 +2574,7 @@ SELECT COUNT(*) FROM INFORMATION_SCHEMA.routines WHERE routine_schema = 'sys';
 --exec $MYSQL < $MYSQLTEST_VARDIR/tmp/bug21549860.sql
 SELECT COUNT(*) FROM INFORMATION_SCHEMA.routines WHERE routine_schema = 'sys';
 # restore and sys schema
---exec $MYSQL < $MYSQLTEST_VARDIR/tmp/sys.sql
+--exec $MYSQL --comments < $MYSQLTEST_VARDIR/tmp/sys.sql
 SELECT COUNT(*) FROM INFORMATION_SCHEMA.routines WHERE routine_schema = 'sys';
 --remove_file $MYSQLTEST_VARDIR/tmp/bug21549860.sql
 --remove_file $MYSQLTEST_VARDIR/tmp/sys.sql
@@ -2691,7 +2691,7 @@ FROM information_schema.COLUMN_STATISTICS;
 
 --exec $MYSQL_DUMP --column-statistics column_statistics_dump t1 > $assert_file
 
---let $assert_select= \/\*!80002 ANALYZE TABLE `t1` UPDATE HISTOGRAM ON `col1` WITH 22 BUCKETS; \*\/;
+--let $assert_select= \/\*!80002 ANALYZE TABLE `t1` UPDATE HISTOGRAM ON `col1` WITH 22 BUCKETS \*\/;
 --let $assert_count= 1
 --let $assert_text= Check for ANALYZE TABLE with histogram clause
 --source include/assert_grep.inc

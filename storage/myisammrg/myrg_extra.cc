@@ -1,4 +1,4 @@
-/* Copyright (c) 2000, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -35,48 +35,38 @@ int myrg_extra(MYRG_INFO *info, enum ha_extra_function function,
                void *extra_arg) {
   int error, save_error = 0;
   MYRG_TABLE *file;
-  DBUG_ENTER("myrg_extra");
+  DBUG_TRACE;
   DBUG_PRINT("info", ("function: %lu", (ulong)function));
 
-  if (!info->children_attached) DBUG_RETURN(1);
-  if (function == HA_EXTRA_CACHE) {
-    info->cache_in_use = 1;
-    info->cache_size =
-        (extra_arg ? *(ulong *)extra_arg : my_default_record_cache_size);
-  } else {
-    if (function == HA_EXTRA_NO_CACHE ||
-        function == HA_EXTRA_PREPARE_FOR_UPDATE)
-      info->cache_in_use = 0;
-    if (function == HA_EXTRA_RESET_STATE) {
-      info->current_table = 0;
-      info->last_used_table = info->open_tables;
-    }
-    for (file = info->open_tables; file != info->end_table; file++) {
-      if ((error = mi_extra(file->table, function, extra_arg)))
-        save_error = error;
-    }
+  if (!info->children_attached) return 1;
+  if (function == HA_EXTRA_RESET_STATE) {
+    info->current_table = nullptr;
+    info->last_used_table = info->open_tables;
   }
-  DBUG_RETURN(save_error);
+  for (file = info->open_tables; file != info->end_table; file++) {
+    if ((error = mi_extra(file->table, function, extra_arg)))
+      save_error = error;
+  }
+  return save_error;
 }
 
 int myrg_reset(MYRG_INFO *info) {
   int save_error = 0;
   MYRG_TABLE *file;
-  DBUG_ENTER("myrg_reset");
+  DBUG_TRACE;
 
-  info->cache_in_use = 0;
-  info->current_table = 0;
+  info->current_table = nullptr;
   info->last_used_table = info->open_tables;
 
   /*
     This is normally called with detached children.
     Return OK as this is the normal case.
   */
-  if (!info->children_attached) DBUG_RETURN(0);
+  if (!info->children_attached) return 0;
 
   for (file = info->open_tables; file != info->end_table; file++) {
     int error;
     if ((error = mi_reset(file->table))) save_error = error;
   }
-  DBUG_RETURN(save_error);
+  return save_error;
 }

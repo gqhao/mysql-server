@@ -1,4 +1,4 @@
-/* Copyright (c) 2011, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -21,6 +21,8 @@
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA */
 
 #include "vio_priv.h"
+
+#include "my_dbug.h"
 
 static size_t wait_overlapped_result(Vio *vio, int timeout) {
   size_t ret = (size_t)-1;
@@ -54,7 +56,7 @@ static size_t wait_overlapped_result(Vio *vio, int timeout) {
 size_t vio_read_pipe(Vio *vio, uchar *buf, size_t count) {
   DWORD transferred;
   size_t ret = (size_t)-1;
-  DBUG_ENTER("vio_read_pipe");
+  DBUG_TRACE;
 
   /* Attempt to read from the pipe (overlapped I/O). */
   if (ReadFile(vio->hPipe, buf, (DWORD)count, &transferred, &vio->overlapped)) {
@@ -65,13 +67,13 @@ size_t vio_read_pipe(Vio *vio, uchar *buf, size_t count) {
   else if (GetLastError() == ERROR_IO_PENDING)
     ret = wait_overlapped_result(vio, vio->read_timeout);
 
-  DBUG_RETURN(ret);
+  return ret;
 }
 
 size_t vio_write_pipe(Vio *vio, const uchar *buf, size_t count) {
   DWORD transferred;
   size_t ret = (size_t)-1;
-  DBUG_ENTER("vio_write_pipe");
+  DBUG_TRACE;
 
   /* Attempt to write to the pipe (overlapped I/O). */
   if (WriteFile(vio->hPipe, buf, (DWORD)count, &transferred,
@@ -83,7 +85,7 @@ size_t vio_write_pipe(Vio *vio, const uchar *buf, size_t count) {
   else if (GetLastError() == ERROR_IO_PENDING)
     ret = wait_overlapped_result(vio, vio->write_timeout);
 
-  DBUG_RETURN(ret);
+  return ret;
 }
 
 bool vio_is_connected_pipe(Vio *vio) {
@@ -94,18 +96,20 @@ bool vio_is_connected_pipe(Vio *vio) {
 }
 
 int vio_shutdown_pipe(Vio *vio) {
-  BOOL ret;
-  DBUG_ENTER("vio_shutdown_pipe");
+  BOOL ret = FALSE;
+  DBUG_TRACE;
 
-  CancelIo(vio->hPipe);
-  CloseHandle(vio->overlapped.hEvent);
-  FlushFileBuffers(vio->hPipe);
-  DisconnectNamedPipe(vio->hPipe);
-  ret = CloseHandle(vio->hPipe);
+  if (vio->inactive == false) {
+    CancelIo(vio->hPipe);
+    CloseHandle(vio->overlapped.hEvent);
+    FlushFileBuffers(vio->hPipe);
+    DisconnectNamedPipe(vio->hPipe);
+    ret = CloseHandle(vio->hPipe);
+  }
 
   vio->inactive = true;
   vio->hPipe = NULL;
   vio->mysql_socket = MYSQL_INVALID_SOCKET;
 
-  DBUG_RETURN(ret);
+  return ret;
 }

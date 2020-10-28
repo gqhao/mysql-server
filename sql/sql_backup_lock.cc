@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -57,7 +57,11 @@ static bool check_backup_admin_privilege(THD *thd) {
 
 bool Sql_cmd_lock_instance::execute(THD *thd) {
   if (check_backup_admin_privilege(thd) ||
-      acquire_exclusive_backup_lock(thd, thd->variables.lock_wait_timeout))
+      acquire_exclusive_backup_lock(
+          thd,
+          DBUG_EVALUATE_IF("stop_slave_dont_release_backup_lock", 5,
+                           thd->variables.lock_wait_timeout),
+          false))
     return true;
 
   my_ok(thd);
@@ -105,7 +109,7 @@ static bool acquire_mdl_for_backup(THD *thd, enum_mdl_type mdl_type,
 
 class Release_all_backup_locks : public MDL_release_locks_visitor {
  public:
-  virtual bool release(MDL_ticket *ticket) {
+  bool release(MDL_ticket *ticket) override {
     return ticket->get_key()->mdl_namespace() == MDL_key::BACKUP_LOCK;
   }
 };
@@ -128,13 +132,16 @@ void release_backup_lock(THD *thd) {
   Backup Lock and IX lock should be considered as Shared Backup Lock.
 */
 
-bool acquire_exclusive_backup_lock(THD *thd, ulong lock_wait_timeout) {
-  return acquire_mdl_for_backup(thd, MDL_SHARED, MDL_EXPLICIT,
-                                lock_wait_timeout);
+bool acquire_exclusive_backup_lock(THD *thd, ulong lock_wait_timeout,
+                                   bool for_trx) {
+  enum_mdl_duration duration = (for_trx ? MDL_TRANSACTION : MDL_EXPLICIT);
+  return acquire_mdl_for_backup(thd, MDL_SHARED, duration, lock_wait_timeout);
 }
 
-bool acquire_shared_backup_lock(THD *thd, ulong lock_wait_timeout) {
-  return acquire_mdl_for_backup(thd, MDL_INTENTION_EXCLUSIVE, MDL_TRANSACTION,
+bool acquire_shared_backup_lock(THD *thd, ulong lock_wait_timeout,
+                                bool for_trx) {
+  enum_mdl_duration duration = (for_trx ? MDL_TRANSACTION : MDL_EXPLICIT);
+  return acquire_mdl_for_backup(thd, MDL_INTENTION_EXCLUSIVE, duration,
                                 lock_wait_timeout);
 }
 

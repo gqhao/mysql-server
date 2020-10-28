@@ -53,7 +53,7 @@ SELECT city.Name, country.Name, countrylanguage.Language
         city.Name LIKE 'L%' AND country.Population > 3000000 AND
         countrylanguage.Percentage > 50;
 
-set join_buffer_size=256;
+set join_buffer_size=2048;
 show variables like 'join_buffer_size';
 
 EXPLAIN
@@ -530,7 +530,7 @@ explain
 select t1.a, count(t2.p) as count
   from t1 left join t2 on t1.a=t2.a and t2.p % 2 = 1 group by t1.a;
 select t1.a, count(t2.p) as count
-  from t1 left join t2 on t1.a=t2.a and t2.p % 2 = 1 group by t1.a asc;
+  from t1 left join t2 on t1.a=t2.a and t2.p % 2 = 1 group by t1.a order by t1.a;
 drop table t1, t2;
 
 --echo #
@@ -802,6 +802,7 @@ explain
 select t1.id1, sum(t2.id2) from t1 join t2 on t1.id1=t2.id1 
   where t1.d=3 group by t1.id1;
 
+--sorted_result
 select t1.id1, sum(t2.id2) from t1 join t2 on t1.id1=t2.id1 
   where t1.d=3 group by t1.id1;
 
@@ -1267,9 +1268,10 @@ INSERT INTO t2 VALUES (2),(3);
 --echo
 
 --echo # The query shall return 1 record with a max value 9 and one of the 
---echo # int_key values inserted above (undefined which one). A changed 
---echo # execution plan may change the value in the second column
+--echo # int_key values inserted above (undefined which one, so it's replaced
+--echo # with "#").
 --source include/turn_off_only_full_group_by.inc
+--replace_column 2 #
 SELECT  MAX(t1.int_key), t1.int_key
 FROM t1 STRAIGHT_JOIN t2  
 ORDER BY t1.int_key;
@@ -1359,6 +1361,7 @@ CREATE TABLE t3 (a INT, b INT);
 INSERT INTO t3 VALUES (1,1),(2,2);
 
 EXPLAIN SELECT t1.* FROM t1,t2,t3;
+--sorted_result
 SELECT t1.* FROM t1,t2,t3;
 
 DROP TABLE t1,t2,t3;
@@ -1681,9 +1684,11 @@ let $query2= SELECT * FROM t1 LEFT JOIN t2 force index (idx) ON t2.t2b <=> t1.t1
 --echo # t2b is NULL-able
 --echo
 --eval EXPLAIN $query1
+--sorted_result
 --eval $query1
 --echo
 --eval EXPLAIN $query2
+--sorted_result
 --eval $query2
 --echo
 
@@ -1696,9 +1701,11 @@ INSERT INTO t2 VALUES (100,0),(150,200),(999, 0);
 --echo # t2b is NOT NULL
 --echo
 --eval EXPLAIN $query1
+--sorted_result
 --eval $query1
 --echo
 --eval EXPLAIN $query2
+--sorted_result
 --eval $query2
 --echo
 
@@ -1765,15 +1772,22 @@ SELECT t3.c1 FROM t3
 WHERE t3.c1 = SOME (SELECT t1.c2_key FROM t2 JOIN t1 ON t2.pk < t1.c1)
 XOR TRUE;
 
+--skip_if_hypergraph  # Depends on the query plan.
+eval explain format=tree $query_some;  # Tests FORMAT=tree for AlternativeIterator.
 eval explain $query_some;
 eval explain $query_any;
 eval explain $query_in;
 eval explain $query_notin;
 eval explain $query_in_toplevel;
+--sorted_result
 eval $query_some;
+--sorted_result
 eval $query_any;
+--sorted_result
 eval $query_in;
+--sorted_result
 eval $query_notin;
+--sorted_result
 eval $query_in_toplevel;
 
 
@@ -1823,6 +1837,7 @@ GROUP BY field2
 ORDER BY field1;
 
 eval explain $query;
+--sorted_result
 eval $query;
 
 DROP TABLE t1,t2;
@@ -1950,6 +1965,7 @@ let $query=SELECT t2.pk as t2_pk, t4.pk as t4_pk, t4.k as t4_k, t4.i
   LEFT JOIN t4 ON t4.pk = t2.pk;
 
 eval EXPLAIN $query;
+--sorted_result
 eval $query;
 
 DROP TABLE t1, t2, t3, t4; 
@@ -1994,6 +2010,7 @@ SELECT t4.col_int
   WHERE t1.col_int OR t3.col_int;
 
 eval EXPLAIN $query;
+--sorted_result
 eval $query;
 
 DROP TABLE t1, t2, t3, t4;
@@ -2059,3 +2076,78 @@ eval $query;
 set @@session.optimizer_switch=@optimizer_switch_saved;
 
 DROP TABLE t1,t2;
+
+--echo #
+--echo # Bug#29435133 JOIN_CACHE::JOIN_RECORD() MAY LEAVE A TABLE IN HAS_NULL_ROW-STATE
+--echo #
+
+CREATE TABLE t1 (
+  col_varchar_10_unique varchar(10)
+) ENGINE=innodb;
+
+INSERT INTO t1 VALUES ('nthfyejwxd');
+INSERT INTO t1 VALUES ('drrqahbhai');
+
+CREATE TABLE t3 (
+  col_int int(11) NOT NULL,
+  col_int_unique int(11) not null,
+  col_varchar_10 varchar(10) not null
+) ENGINE=innodb;
+
+INSERT INTO t3 VALUES(9, 4, '');
+
+
+CREATE TABLE t4 (
+  col_int_unique int(11)
+) ENGINE=innodb;
+
+# Rows *not* matching t3.col_int_unique
+INSERT INTO t4 VALUES(3);
+
+
+CREATE TABLE t2 (
+  col_int int(11)
+) ENGINE=innodb;
+
+# t2 intentionally empty
+
+let $query=SELECT * FROM t1 AS table1
+WHERE
+  table1.col_varchar_10_unique = ALL (
+    SELECT STRAIGHT_JOIN table3s.col_varchar_10 AS field3 FROM
+      t4 AS table4s LEFT JOIN
+        (t3 AS table3s JOIN t2 AS table2s)
+      ON table3s.col_int_unique = table4s.col_int_unique);
+
+eval EXPLAIN $query;
+eval $query;
+
+DROP TABLE t1,t2,t3,t4;
+
+--echo #
+--echo # t2 and t3 are const tables, which makes for a t1-t4 join on a constant,
+--echo # where the constant comes from a multi-equality. Verify that we get the expected
+--echo # query plan and don't crash (we don't care about the result).
+--echo #
+
+CREATE TABLE t1 (
+  pk integer NOT NULL,
+  a integer,
+  b integer,
+  PRIMARY KEY (pk),
+  KEY idx1 (b)
+) ENGINE=InnoDB;
+
+INSERT INTO t1 VALUES (1,5,5);
+ANALYZE TABLE t1;
+
+--skip_if_hypergraph  # Depends on the query plan.
+EXPLAIN FORMAT=tree SELECT *
+FROM
+  t1
+  LEFT JOIN t1 AS t2 ON t1.a = t2.pk
+  LEFT JOIN t1 AS t3 ON t2.pk = t3.pk
+  LEFT JOIN t1 AS t4 ON t3.b = t4.b
+WHERE t2.pk = 1;
+
+DROP TABLE t1;

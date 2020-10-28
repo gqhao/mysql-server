@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2.0,
@@ -56,26 +56,27 @@ bool myfunc_double_init(UDF_INIT *initid, UDF_ARGS *args, char *message) {
 
   if (!args->arg_count) {
     strcpy(message, "myfunc_double must have at least one argument");
-    return 1;
+    return true;
   }
   /*
   ** As this function wants to have everything as strings, force all arguments
   ** to strings.
   */
   for (i = 0; i < args->arg_count; i++) args->arg_type[i] = STRING_RESULT;
-  initid->maybe_null = 1; /* The result may be null */
-  initid->decimals = 2;   /* We want 2 decimals in the result */
-  initid->max_length = 6; /* 3 digits + . + 2 decimals */
-  return 0;
+  initid->maybe_null = true; /* The result may be null */
+  initid->decimals = 2;      /* We want 2 decimals in the result */
+  initid->max_length = 6;    /* 3 digits + . + 2 decimals */
+  return false;
 }
 
-double myfunc_double(UDF_INIT *, UDF_ARGS *args, char *is_null, char *) {
+double myfunc_double(UDF_INIT *, UDF_ARGS *args, unsigned char *is_null,
+                     unsigned char *) {
   unsigned long val = 0;
   unsigned long v = 0;
   unsigned i, j;
 
   for (i = 0; i < args->arg_count; i++) {
-    if (args->args[i] == NULL) continue;
+    if (args->args[i] == nullptr) continue;
     val += args->lengths[i];
     for (j = args->lengths[i]; j-- > 0;) v += args->args[i][j];
   }
@@ -101,12 +102,13 @@ double myfunc_double(UDF_INIT *, UDF_ARGS *args, char *is_null, char *) {
 
 /* This function returns the sum of all arguments */
 
-long long myfunc_int(UDF_INIT *, UDF_ARGS *args, char *, char *) {
+long long myfunc_int(UDF_INIT *, UDF_ARGS *args, unsigned char *,
+                     unsigned char *) {
   long long val = 0;
   unsigned i;
 
   for (i = 0; i < args->arg_count; i++) {
-    if (args->args[i] == NULL) continue;
+    if (args->args[i] == nullptr) continue;
     switch (args->arg_type[i]) {
       case STRING_RESULT: /* Add string lengths */
         val += args->lengths[i];
@@ -124,7 +126,7 @@ long long myfunc_int(UDF_INIT *, UDF_ARGS *args, char *, char *) {
   return val;
 }
 
-bool myfunc_int_init(UDF_INIT *, UDF_ARGS *, char *) { return 0; }
+bool myfunc_int_init(UDF_INIT *, UDF_ARGS *, char *) { return false; }
 
 /***************************************************************************
 ** Syntax for the new aggregate commands are:
@@ -151,13 +153,13 @@ bool avgcost_init(UDF_INIT *initid, UDF_ARGS *args, char *message) {
   if (args->arg_count != 2) {
     strcpy(message,
            "wrong number of arguments: AVGCOST() requires two arguments");
-    return 1;
+    return true;
   }
 
   if ((args->arg_type[0] != INT_RESULT) || (args->arg_type[1] != REAL_RESULT)) {
     strcpy(message,
            "wrong argument type: AVGCOST() requires an INT and a REAL");
-    return 1;
+    return true;
   }
 
   /*
@@ -166,20 +168,20 @@ bool avgcost_init(UDF_INIT *initid, UDF_ARGS *args, char *message) {
   /*args->arg_type[0]   = REAL_RESULT;
     args->arg_type[1]   = REAL_RESULT;*/
 
-  initid->maybe_null = 0;  /* The result may be null */
-  initid->decimals = 4;    /* We want 4 decimals in the result */
-  initid->max_length = 20; /* 6 digits + . + 10 decimals */
+  initid->maybe_null = false; /* The result may be null */
+  initid->decimals = 4;       /* We want 4 decimals in the result */
+  initid->max_length = 20;    /* 6 digits + . + 10 decimals */
 
   if (!(data = new (std::nothrow) avgcost_data)) {
     strcpy(message, "Couldn't allocate memory");
-    return 1;
+    return true;
   }
   data->totalquantity = 0;
   data->totalprice = 0.0;
 
   initid->ptr = (char *)data;
 
-  return 0;
+  return false;
 }
 
 void avgcost_deinit(UDF_INIT *initid) {
@@ -190,14 +192,15 @@ void avgcost_deinit(UDF_INIT *initid) {
 
 /* This is needed to get things to work in MySQL 4.1.1 and above */
 
-void avgcost_clear(UDF_INIT *initid, char *, char *) {
+void avgcost_clear(UDF_INIT *initid, unsigned char *, unsigned char *) {
   struct avgcost_data *data = (struct avgcost_data *)initid->ptr;
   data->totalprice = 0.0;
   data->totalquantity = 0;
   data->count = 0;
 }
 
-void avgcost_add(UDF_INIT *initid, UDF_ARGS *args, char *, char *) {
+void avgcost_add(UDF_INIT *initid, UDF_ARGS *args, unsigned char *,
+                 unsigned char *) {
   if (args->args[0] && args->args[1]) {
     struct avgcost_data *data = (struct avgcost_data *)initid->ptr;
     long long quantity = *((long long *)args->args[0]);
@@ -233,7 +236,8 @@ void avgcost_add(UDF_INIT *initid, UDF_ARGS *args, char *, char *) {
   }
 }
 
-double avgcost(UDF_INIT *initid, UDF_ARGS *, char *is_null, char *) {
+double avgcost(UDF_INIT *initid, UDF_ARGS *, unsigned char *is_null,
+               unsigned char *) {
   struct avgcost_data *data = (struct avgcost_data *)initid->ptr;
   if (!data->count || !data->totalquantity) {
     *is_null = 1;
@@ -249,18 +253,17 @@ double avgcost(UDF_INIT *initid, UDF_ARGS *, char *is_null, char *) {
 static mysql_service_status_t init() {
   bool ret_int = false;
   ret_int = mysql_service_udf_registration->udf_register(
-      "myfunc_int", INT_RESULT, (Udf_func_any)myfunc_int,
-      (Udf_func_init)myfunc_int_init, NULL);
-  //                                                    (Udf_func_deinit)myfunc_double_deinit);
+      "myfunc_int", INT_RESULT, (Udf_func_any)myfunc_int, myfunc_int_init,
+      nullptr);
+  // myfunc_double_deinit);
   bool ret_double = false;
   ret_double = mysql_service_udf_registration->udf_register(
       "myfunc_double", REAL_RESULT, (Udf_func_any)myfunc_double,
-      (Udf_func_init)myfunc_double_init, NULL);
+      myfunc_double_init, nullptr);
   bool ret_avgcost = false;
   ret_avgcost = mysql_service_udf_registration_aggregate->udf_register(
-      "avgcost", REAL_RESULT, (Udf_func_any)avgcost,
-      (Udf_func_init)avgcost_init, (Udf_func_deinit)avgcost_deinit,
-      (Udf_func_add)avgcost_add, (Udf_func_clear)avgcost_clear);
+      "avgcost", REAL_RESULT, (Udf_func_any)avgcost, avgcost_init,
+      avgcost_deinit, avgcost_add, avgcost_clear);
   return ret_int && ret_double && ret_avgcost;
 }
 

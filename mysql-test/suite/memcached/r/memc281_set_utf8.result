@@ -13,12 +13,14 @@ c21 CHAR(60) NOT NULL DEFAULT '',
 primary key(c1))
 ENGINE = INNODB DEFAULT CHARSET UTF8;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 INSERT INTO t1 VALUES ('1', 'Darmstadt', 'City');
 INSERT INTO t1 VALUES ('2', 'Berlin', 'Mitte');
 INSERT INTO t1 VALUES ('3', 'Cottbus', 'West');
 INSERT INTO t1 VALUES ('4', 'München', 'Süd');
 INSTALL PLUGIN daemon_memcached SONAME 'libmemcached.so';
+Warnings:
+Warning	1681	'InnoDB Memcached Plugin' is deprecated and will be removed in a future release.
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
@@ -33,12 +35,9 @@ c1	c2	c21
 2	Berlin	Mitte
 3	Cottbus	West
 4	München	Süd
-SELECT SLEEP(2);
-SLEEP(2)
-0
-Here the memcached results before set:
+Here are the memcached results before set:
 Darmstadt                                                                                                               |City                                                        
-Here the memcached results after set:
+Here are the memcached results after set:
 Beijing                                                                                                                 |City                                                        
 SELECT c1, c2, c21 FROM t1;
 c1	c2	c21

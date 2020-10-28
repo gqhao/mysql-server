@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -32,6 +32,7 @@
 #include "m_string.h"
 #include "my_inttypes.h"
 #include "sql/dd/dd.h"
+#include "sql/dd/impl/properties_impl.h"
 #include "sql/dd/impl/sdi.h"
 #include "sql/dd/impl/sdi_impl.h"
 #include "sql/dd/impl/types/column_impl.h"
@@ -80,8 +81,9 @@ bool equal_prefix_chars_driver(const dd::String_type &a,
 
 static void mock_properties(dd::Properties &p, uint64 size) {
   for (uint64 i = 0; i < size; ++i) {
-    std::string key = std::to_string(i);
-    p.set_uint64(dd::String_type{key.begin(), key.end()}, i);
+    dd::String_type key =
+        (dynamic_cast<dd::Properties_impl &>(p)).valid_key_at(i);
+    p.set(key, i);
   }
 }
 
@@ -138,7 +140,7 @@ static void mock_dd_obj(dd::Index_element *ie) {
   ie->set_order(dd::Index_element::ORDER_DESC);
 }
 
-static void mock_dd_obj(dd::Index *i, dd::Column *c = NULL) {
+static void mock_dd_obj(dd::Index *i, dd::Column *c = nullptr) {
   static dd::Object_id curid = 10000;
   dynamic_cast<dd::Entity_object_impl *>(i)->set_id(curid++);
   i->set_comment("mocked index comment");
@@ -180,7 +182,7 @@ static void mock_dd_obj(dd::Partition_value *pv) {
   pv->set_value_utf8("mocked partition value");
 }
 
-static void mock_dd_obj(dd::Partition *p, dd::Index *ix = NULL) {
+static void mock_dd_obj(dd::Partition *p, dd::Index *ix = nullptr) {
   p->set_number(42);
   p->set_engine("mocked partition engine");
   p->set_comment("mocked comment");
@@ -237,9 +239,9 @@ static void mock_dd_obj(dd::Tablespace *ts) {
 
 class SdiTest : public ::testing::Test {
  protected:
-  void SetUp() {}
+  void SetUp() override {}
 
-  void TearDown() {}
+  void TearDown() override {}
 
   SdiTest() {}
 

@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2016, 2017, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2016, 2020, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -46,7 +46,21 @@ namespace lob {
 ulint z_read(ReadContext *ctx, lob::ref_t ref, ulint offset, ulint len,
              byte *buf) {
   ut_ad(offset == 0);
-  const uint32_t lob_version = ref.offset();
+  ut_ad(len > 0);
+
+  const ulint avail_lob = ref.length();
+
+  if (avail_lob == 0) {
+    return (0);
+  }
+
+  if (ref.is_being_modified()) {
+    /* This should happen only for READ UNCOMMITTED transactions. */
+    ut_ad(ctx->assert_read_uncommitted());
+    return (0);
+  }
+
+  const uint32_t lob_version = ref.version();
 
   fil_addr_t old_node_loc = fil_addr_null;
   fil_addr_t node_loc = fil_addr_null;
@@ -55,9 +69,6 @@ ulint z_read(ReadContext *ctx, lob::ref_t ref, ulint offset, ulint len,
   ut_ad(ctx->m_space_id == ref.space_id());
 
   const page_no_t first_page_no = ref.page_no();
-#ifdef UNIV_DEBUG
-  const uint32_t avail_lob = ref.length();
-#endif /* UNIV_DEBUG */
   const space_id_t space_id = ctx->m_space_id;
   const page_id_t first_page_id(space_id, first_page_no);
 
@@ -79,7 +90,14 @@ ulint z_read(ReadContext *ctx, lob::ref_t ref, ulint offset, ulint len,
     return (reader.length());
   }
 
-  ut_ad(page_type == FIL_PAGE_TYPE_ZLOB_FIRST);
+  if (page_type != FIL_PAGE_TYPE_ZLOB_FIRST) {
+    /* Assume that the BLOB has been freed and return without taking further
+    action.  This condition is hit when there are stale LOB references in the
+    clustered index record, especially when there are server crashes during
+    updation of delete-marked clustered index record with external fields. */
+    mtr_commit(&mtr);
+    return (0);
+  }
 
   flst_base_node_t *flst = first.index_list();
 
@@ -150,6 +168,9 @@ ulint z_read(ReadContext *ctx, lob::ref_t ref, ulint offset, ulint len,
     }
 
     cur_entry.reset(nullptr);
+    mtr_commit(&mtr);
+    mtr_start(&mtr);
+    first.load_x(first_page_no);
   }
 
   const ulint total_read = len - remain;
@@ -159,13 +180,13 @@ ulint z_read(ReadContext *ctx, lob::ref_t ref, ulint offset, ulint len,
 }
 
 /** Read one data chunk associated with one index entry.
-@param[in]	index	the clustered index containing the LOB.
-@param[in]	entry	pointer to the index entry
-@param[in]	offset	the offset from which to read the chunk.
-@param[in,out]	len	the length of the output buffer. This length can
+@param[in]	index	The clustered index containing the LOB.
+@param[in]	entry	Pointer to the index entry
+@param[in]	offset	The offset from which to read the chunk.
+@param[in,out]	len	The length of the output buffer. This length can
                         be greater than the chunk size.
-@param[in,out]	buf	the output buffer.
-@param[in]	mtr	mini-transaction context.
+@param[in,out]	buf	The output buffer.
+@param[in]	mtr	Mini-transaction context.
 @return number of bytes copied into the output buffer. */
 ulint z_read_chunk(dict_index_t *index, z_index_entry_t &entry, ulint offset,
                    ulint &len, byte *&buf, mtr_t *mtr) {
@@ -189,13 +210,13 @@ ulint z_read_chunk(dict_index_t *index, z_index_entry_t &entry, ulint offset,
   int ret = inflateInit(&strm);
   ut_a(ret == Z_OK);
 
-  strm.avail_in = zbytes;
+  strm.avail_in = static_cast<uInt>(zbytes);
   strm.next_in = zbuf.get();
 
   ulint to_copy = 0;
   if (offset == 0 && len >= data_len) {
     /* The full chunk is needed for output. */
-    strm.avail_out = len;
+    strm.avail_out = static_cast<uInt>(len);
     strm.next_out = buf;
 
     ret = inflate(&strm, Z_FINISH);
@@ -230,11 +251,11 @@ ulint z_read_chunk(dict_index_t *index, z_index_entry_t &entry, ulint offset,
 }
 
 /** Read one zlib stream fully, given its index entry.
-@param[in]      index      the index dictionary object.
-@param[in]      entry      the index entry (memory copy).
-@param[in,out]  zbuf       the output buffer
-@param[in]      zbuf_size  the size of the output buffer.
-@param[in,out]  mtr        mini-transaction.
+@param[in]      index      The index dictionary object.
+@param[in]      entry      The index entry (memory copy).
+@param[in,out]  zbuf       The output buffer
+@param[in]      zbuf_size  The size of the output buffer.
+@param[in,out]  mtr        Mini-transaction.
 @return the size of the zlib stream.*/
 ulint z_read_strm(dict_index_t *index, z_index_entry_t &entry, byte *zbuf,
                   ulint zbuf_size, mtr_t *mtr) {
@@ -247,7 +268,7 @@ ulint z_read_strm(dict_index_t *index, z_index_entry_t &entry, byte *zbuf,
         buf_page_get(page_id_t(dict_index_get_space(index), page_no),
                      dict_table_page_size(index->table), RW_X_LATCH, mtr);
 
-    ulint ptype = block->get_page_type();
+    page_type_t ptype = block->get_page_type();
     byte *data = nullptr;
     ulint data_size = 0;
     if (ptype == FIL_PAGE_TYPE_ZLOB_FRAG) {
@@ -279,13 +300,8 @@ ulint z_read_strm(dict_index_t *index, z_index_entry_t &entry, byte *zbuf,
 }
 
 #ifdef UNIV_DEBUG
-/** Validate one zlib stream, given its index entry.
-@param[in]	index      the index dictionary object.
-@param[in]	entry      the index entry (memory copy).
-@param[in]	mtr        mini-transaction.
-@return true if validation passed.
-@return does not return if validation failed.*/
-bool z_validate_strm(dict_index_t *index, z_index_entry_t &entry, mtr_t *mtr) {
+static bool z_validate_strm_low(dict_index_t *index, z_index_entry_t &entry,
+                                mtr_t *mtr) {
   /* Expected length of compressed data. */
   const ulint exp_zlen = entry.get_zdata_len();
   page_no_t page_no = entry.get_z_page_no();
@@ -296,7 +312,7 @@ bool z_validate_strm(dict_index_t *index, z_index_entry_t &entry, mtr_t *mtr) {
         buf_page_get(page_id_t(dict_index_get_space(index), page_no),
                      dict_table_page_size(index->table), RW_X_LATCH, mtr);
 
-    ulint ptype = block->get_page_type();
+    page_type_t ptype = block->get_page_type();
     ulint data_size = 0;
     if (ptype == FIL_PAGE_TYPE_ZLOB_FRAG) {
       frag_id_t fid = entry.get_z_frag_id();
@@ -320,6 +336,16 @@ bool z_validate_strm(dict_index_t *index, z_index_entry_t &entry, mtr_t *mtr) {
   ut_ad(remain == 0);
   return (true);
 }
+
+bool z_validate_strm(dict_index_t *index, z_index_entry_t &entry, mtr_t *mtr) {
+  static const uint32_t FREQ = 50;
+  static std::atomic<uint32_t> n{0};
+  bool ret = true;
+  if (++n % FREQ == 0) {
+    ret = z_validate_strm_low(index, entry, mtr);
+  }
+  return (ret);
+}
 #endif /* UNIV_DEBUG */
 
-};  // namespace lob
+}  // namespace lob

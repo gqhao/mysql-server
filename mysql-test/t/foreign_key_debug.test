@@ -7,6 +7,8 @@
 # Some parts of the test require enabled binary log.
 --source include/have_log_bin.inc
 
+SET @saved_binlog_format= @@SESSION.binlog_format;
+
 SET SESSION debug= '+d,skip_dd_table_access_check';
 SET @@foreign_key_checks= DEFAULT;
 
@@ -25,6 +27,7 @@ ALTER TABLE t3 ADD FOREIGN KEY (b) REFERENCES t1(a);
 # InnoDB generated name (until after WL#6599)
 SHOW CREATE TABLE t3;
 # Server generated name (until after WL#6599)
+--sorted_result
 SELECT fk.name FROM mysql.foreign_keys AS fk, mysql.tables AS t
 WHERE fk.table_id = t.id AND t.name = 't3';
 
@@ -32,6 +35,7 @@ ALTER TABLE t3 ADD FOREIGN KEY (c) REFERENCES t1(a);
 # InnoDB generated name (until after WL#6599)
 SHOW CREATE TABLE t3;
 # Server generated name (until after WL#6599)
+--sorted_result
 SELECT fk.name FROM mysql.foreign_keys AS fk, mysql.tables AS t
 WHERE fk.table_id = t.id AND t.name = 't3';
 
@@ -39,6 +43,7 @@ ALTER TABLE t3 ADD FOREIGN KEY (b) REFERENCES t1(a);
 # InnoDB generated name (until after WL#6599)
 SHOW CREATE TABLE t3;
 # Server generated name (until after WL#6599)
+--sorted_result
 SELECT fk.name FROM mysql.foreign_keys AS fk, mysql.tables AS t
 WHERE fk.table_id = t.id AND t.name = 't3';
 
@@ -46,6 +51,7 @@ ALTER TABLE t3 DROP FOREIGN KEY t3_ibfk_1;
 # InnoDB generated name (until after WL#6599)
 SHOW CREATE TABLE t3;
 # Server generated name (until after WL#6599)
+--sorted_result
 SELECT fk.name FROM mysql.foreign_keys AS fk, mysql.tables AS t
 WHERE fk.table_id = t.id AND t.name = 't3';
 
@@ -53,6 +59,7 @@ ALTER TABLE t3 ADD FOREIGN KEY (b) REFERENCES t1(a);
 # InnoDB generated name (until after WL#6599)
 SHOW CREATE TABLE t3;
 # Server generated name (until after WL#6599)
+--sorted_result
 SELECT fk.name FROM mysql.foreign_keys AS fk, mysql.tables AS t
 WHERE fk.table_id = t.id AND t.name = 't3';
 
@@ -94,6 +101,7 @@ CREATE TABLE child(pk INTEGER PRIMARY KEY, fk INTEGER,
   FOREIGN KEY (fk) REFERENCES parent(j));
 
 --echo # An index is created for the FK, but the unique constraint name is NULL.
+--sorted_result
 SELECT name FROM mysql.indexes
   WHERE table_id = (SELECT id from mysql.tables WHERE name LIKE 'child');
 SELECT unique_constraint_name FROM mysql.foreign_keys
@@ -123,8 +131,10 @@ SELECT unique_constraint_name FROM mysql.foreign_keys
 CREATE TABLE child_copy LIKE child;
 
 --echo ## The index is re-created for the new table.
+--sorted_result
 SELECT name FROM mysql.indexes
   WHERE table_id = (SELECT id from mysql.tables WHERE name LIKE 'child');
+--sorted_result
 SELECT name FROM mysql.indexes
   WHERE table_id = (SELECT id from mysql.tables WHERE name LIKE 'child_copy');
 
@@ -143,6 +153,7 @@ CREATE TABLE child(pk INTEGER PRIMARY KEY, fk INTEGER,
   FOREIGN KEY (fk) REFERENCES parent(j));
 
 --echo ## An index is created for the FK, but the unique constraint name is NULL.
+--sorted_result
 SELECT name FROM mysql.indexes
   WHERE table_id = (SELECT id from mysql.tables WHERE name LIKE 'parent');
 SELECT unique_constraint_name FROM mysql.foreign_keys
@@ -170,11 +181,14 @@ CREATE TABLE parent(pk INTEGER PRIMARY KEY, j INTEGER,
   UNIQUE KEY my_key(j));
 INSERT INTO parent VALUES (2, 1);
 
+SET @@SESSION.binlog_format=STATEMENT;
 CREATE TABLE child(pk INTEGER PRIMARY KEY, fk INTEGER,
   FOREIGN KEY (fk) REFERENCES parent(j)) AS SELECT pk, j AS fk FROM source;
+SET SESSION binlog_format= @saved_binlog_format;
 SELECT * FROM child;
 
 --echo ## An index is created for the FK, and the unique constraint name is updated.
+--sorted_result
 SELECT name FROM mysql.indexes
   WHERE table_id = (SELECT id from mysql.tables WHERE name LIKE 'child');
 SELECT unique_constraint_name FROM mysql.foreign_keys
@@ -194,13 +208,16 @@ CREATE TABLE child(pk INTEGER PRIMARY KEY, fk INTEGER,
   FOREIGN KEY (fk) REFERENCES parent(j));
 
 --echo ## An index is created for the FK, but the unique constraint name is NULL.
+--sorted_result
 SELECT name FROM mysql.indexes
   WHERE table_id = (SELECT id from mysql.tables WHERE name LIKE 'child');
 SELECT unique_constraint_name FROM mysql.foreign_keys
   WHERE referenced_table_name LIKE 'parent';
 
+SET @@SESSION.binlog_format=STATEMENT;
 CREATE TABLE parent(pk INTEGER PRIMARY KEY, j INTEGER,
   UNIQUE KEY my_key(j)) AS SELECT * FROM source;
+SET SESSION binlog_format= @saved_binlog_format;
 SELECT * FROM child;
 SET @@foreign_key_checks= 1;
 
@@ -236,6 +253,7 @@ SET @@foreign_key_checks= 1;
 
 --echo # FK definitions before rename:
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -246,6 +264,7 @@ RENAME TABLE child TO siebling;
 --echo # 1. The name of the constraint is changed to 'siebling_ibfk...'.
 --echo # 2. The referenced table name of the grandchild is changed to 'siebling'.
 --echo # 3. The unique constraint name of the orphan_grandchild is corrected.
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -267,98 +286,6 @@ DROP TABLE orphan_grandchild;
 DROP TABLE siebling;
 DROP TABLE parent;
 
---echo #
---echo # RENAME will update FK information in both children and parents, also
---echo # when there are tables in the statement that belong in SEs without
---echo # support for atomic DDL. Basically the same test case as above with
---echo # an additional MyISAM table.
---echo #
-
-CREATE TABLE parent(pk INTEGER PRIMARY KEY, j INTEGER,
-  UNIQUE KEY parent_key(j));
-
-CREATE TABLE child(pk INTEGER PRIMARY KEY, k INTEGER, fk INTEGER,
-  FOREIGN KEY (fk) REFERENCES parent(j), UNIQUE KEY child_key(k));
-
-CREATE TABLE grandchild(pk INTEGER PRIMARY KEY, fk INTEGER,
-  FOREIGN KEY (fk) REFERENCES child(k));
-
-SET @@foreign_key_checks= 0;
-CREATE TABLE orphan_grandchild(pk INTEGER PRIMARY KEY, fk INTEGER,
-  FOREIGN KEY (fk) REFERENCES siebling(k));
-SET @@foreign_key_checks= 1;
-
-CREATE TABLE non_atomic_t1(pk INTEGER) ENGINE= MyISAM;
-
---echo # FK definitions before rename:
-SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
-  FROM mysql.foreign_keys
-  WHERE referenced_table_schema LIKE 'test';
-
-RENAME TABLE non_atomic_t1 TO non_atomic_t2, child TO siebling;
-
---echo # After the rename, we see that:
---echo # 1. The name of the constraint is changed to 'siebling_ibfk...'.
---echo # 2. The referenced table name of the grandchild is changed to 'siebling'.
---echo # 3. The unique constraint name of the orphan_grandchild is corrected.
-SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
-  FROM mysql.foreign_keys
-  WHERE referenced_table_schema LIKE 'test';
-
-DROP TABLE grandchild;
-DROP TABLE orphan_grandchild;
-DROP TABLE siebling;
-DROP TABLE parent;
-DROP TABLE non_atomic_t2;
-
---echo #
---echo # RENAME will rollback FK information in both children and parents, also
---echo # when there are tables in the statement that belong in SEs without
---echo # support for atomic DDL. Basically the same test case as above with
---echo # an additional MyISAM table, where renaming fails due to an existing table.
---echo #
-
-CREATE TABLE parent(pk INTEGER PRIMARY KEY, j INTEGER,
-  UNIQUE KEY parent_key(j));
-
-CREATE TABLE child(pk INTEGER PRIMARY KEY, k INTEGER, fk INTEGER,
-  FOREIGN KEY (fk) REFERENCES parent(j), UNIQUE KEY child_key(k));
-
-CREATE TABLE grandchild(pk INTEGER PRIMARY KEY, fk INTEGER,
-  FOREIGN KEY (fk) REFERENCES child(k));
-
-SET @@foreign_key_checks= 0;
-CREATE TABLE orphan_grandchild(pk INTEGER PRIMARY KEY, fk INTEGER,
-  FOREIGN KEY (fk) REFERENCES siebling(k));
-SET @@foreign_key_checks= 1;
-
-CREATE TABLE non_atomic_t1(pk INTEGER) ENGINE= MyISAM;
-CREATE TABLE non_atomic_t2(pk INTEGER) ENGINE= MyISAM;
-
---echo # FK definitions before rename:
-SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
-  FROM mysql.foreign_keys
-  WHERE referenced_table_schema LIKE 'test';
-
---error ER_TABLE_EXISTS_ERROR
-RENAME TABLE child TO siebling,
- non_atomic_t1 TO non_atomic_t3,
- non_atomic_t3 TO non_atomic_t2;
-
---echo # After the rename, we see that the FK information remain unchanged.
---echo # TODO: Note that the unique constraint name of orphan_grandchild is not reverted.
-SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
-  FROM mysql.foreign_keys
-  WHERE referenced_table_schema LIKE 'test';
-
-DROP TABLE grandchild;
-DROP TABLE orphan_grandchild;
-DROP TABLE child;
-DROP TABLE parent;
-DROP TABLE non_atomic_t1;
-DROP TABLE non_atomic_t2;
-
---echo #
 --echo # When processing LOCK TABLES, we will prelock even
 --echo # when F_K_C = 0.
 --echo #
@@ -473,18 +400,21 @@ CREATE TABLE child(pk INTEGER PRIMARY KEY, fk_i INTEGER,
 
 RENAME TABLE parent TO mother, mother TO father;
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 
 RENAME TABLE child TO sister, sister TO brother;
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 
 RENAME TABLE father TO mother, brother TO sister, mother TO parent, sister TO child;
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -504,12 +434,14 @@ SET @@foreign_key_checks= 1;
 CREATE TABLE parent(pk INTEGER PRIMARY KEY, i INTEGER,
   UNIQUE KEY parent_key(i));
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 
 RENAME TABLE parent TO mother, mother TO father;
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -528,12 +460,14 @@ CREATE TABLE child(pk INTEGER PRIMARY KEY, fk_i INTEGER, fk_j INTEGER,
   FOREIGN KEY (fk_i) REFERENCES parent(i),
   FOREIGN KEY (fk_j) REFERENCES parent(j));
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 
 RENAME TABLE parent TO mother;
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -546,14 +480,17 @@ DROP TABLES child, mother;
 --echo # self-referncing foreign key.
 --echo #
 CREATE TABLE self (pk INT PRIMARY KEY, fk INT, FOREIGN KEY(fk) REFERENCES self(pk));
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 ALTER TABLE self RENAME TO self2;
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 ALTER TABLE self2 RENAME TO self3, ADD COLUMN i INT;
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -572,6 +509,7 @@ CREATE TABLE grandchild(pk INTEGER PRIMARY KEY, fk_i INTEGER,
   FOREIGN KEY (fk_i) REFERENCES s1.child(i));
 SET @@foreign_key_checks= 1;
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 's1';
@@ -581,25 +519,29 @@ CREATE TABLE s1.child(pk INTEGER PRIMARY KEY, i INTEGER, fk_i INTEGER,
   UNIQUE KEY child_i_key(i),
   FOREIGN KEY (fk_i) REFERENCES test.parent(i));
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 's1';
 
---error ER_ROW_IS_REFERENCED
+--error ER_FK_CANNOT_DROP_PARENT
 DROP SCHEMA s1;
 
 SET @@foreign_key_checks= 0;
 DROP SCHEMA s1;
 SET @@foreign_key_checks= 1;
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 's1';
@@ -609,17 +551,19 @@ CREATE SCHEMA s1;
 CREATE TABLE s1.child(pk INTEGER PRIMARY KEY, i INTEGER,
   UNIQUE KEY child_i_key(i));
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 's1';
 
---error ER_ROW_IS_REFERENCED
+--error ER_FK_CANNOT_DROP_PARENT
 DROP SCHEMA s1;
 
 SET @@foreign_key_checks= 0;
 DROP SCHEMA s1;
 SET @@foreign_key_checks= 1;
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 's1';
@@ -630,6 +574,7 @@ DROP TABLE grandchild;
 CREATE SCHEMA s1;
 CREATE TABLE s1.child(pk INTEGER PRIMARY KEY, fk_i INTEGER);
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -637,6 +582,7 @@ SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_n
 --echo # Introduce FK to parent.
 ALTER TABLE s1.child ADD FOREIGN KEY (fk_i) REFERENCES test.parent(i);
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -656,6 +602,7 @@ CREATE TABLE parent(pk INTEGER PRIMARY KEY, i INTEGER,
 CREATE TABLE child(pk INTEGER PRIMARY KEY, fk_i INTEGER,
   FOREIGN KEY (fk_i) REFERENCES parent(i));
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -664,6 +611,7 @@ SET @@session.debug= '+d,fail_while_invalidating_fk_parents';
 ALTER TABLE child RENAME TO siebling;
 SET @@session.debug= '-d,fail_while_invalidating_fk_parents';
 
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -676,10 +624,12 @@ DROP TABLE siebling, parent;
 --echo #
 CREATE TABLE parent (i INT, j INT, PRIMARY KEY (i), UNIQUE u(i,j));
 CREATE TABLE child (i INT, j INT, FOREIGN KEY (i, j) REFERENCES parent (i, j));
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 ALTER TABLE parent RENAME KEY u TO u1;
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -687,10 +637,12 @@ DROP TABLE child, parent;
 
 CREATE TABLE parent (i INT, j INT, k INT, PRIMARY KEY (i), UNIQUE u(j), UNIQUE u1(i,j), UNIQUE u2(i,j,k));
 CREATE TABLE child (i INT, j INT, k INT, FOREIGN KEY (i, j, k) REFERENCES parent (i, j, k));
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 ALTER TABLE parent RENAME KEY u2 TO u3;
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -701,10 +653,12 @@ CREATE TABLE parent (i INT, j INT,
                      e INT GENERATED ALWAYS AS (j) VIRTUAL,
                      PRIMARY KEY (i), UNIQUE u(i,d), UNIQUE u1(i,j,e));
 CREATE TABLE child (i INT, j INT, FOREIGN KEY (i, j) REFERENCES parent (i, j));
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 ALTER TABLE parent RENAME KEY u1 TO u2;
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -713,10 +667,12 @@ DROP TABLE child, parent;
 CREATE TABLE parent (i INT, a VARCHAR(10), b VARCHAR(10),
                      PRIMARY KEY (i), UNIQUE u(i,a(5)), UNIQUE u1(i,a,b(5)));
 CREATE TABLE child (i INT, a VARCHAR(10), FOREIGN KEY (i, a) REFERENCES parent (i, a));
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 ALTER TABLE parent RENAME KEY u1 TO u2;
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -724,10 +680,12 @@ DROP TABLE child, parent;
 
 CREATE TABLE self (i INT, j INT, i2 INT, j2 INT, PRIMARY KEY (i), UNIQUE u(i,j),
                    FOREIGN KEY (i2, j2) REFERENCES self (i, j));
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 ALTER TABLE self RENAME KEY u TO u1;
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -736,10 +694,12 @@ DROP TABLE self;
 CREATE TABLE self (i INT, j INT, k INT, i2 INT, j2 INT, k2 INT,
                    PRIMARY KEY (i), UNIQUE u(j), UNIQUE u1(i,j), UNIQUE u2(i,j,k),
                    FOREIGN KEY (i2, j2, k2) REFERENCES self (i, j, k));
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 ALTER TABLE self RENAME KEY u2 TO u3;
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -750,10 +710,12 @@ CREATE TABLE self (i INT, j INT, i2 INT, j2 INT,
                    e INT GENERATED ALWAYS AS (j) VIRTUAL,
                      PRIMARY KEY (i), UNIQUE u(i,d), UNIQUE u1(i,j,e),
                      FOREIGN KEY (i2, j2) REFERENCES self (i, j));
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 ALTER TABLE self RENAME KEY u1 TO u2;
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -762,10 +724,12 @@ DROP TABLE self;
 CREATE TABLE self (i INT, a VARCHAR(10), b VARCHAR(10), i2 INT, a2 VARCHAR(10),
                    PRIMARY KEY (i), UNIQUE u(i,a(5)), UNIQUE u1(i,a,b(5)),
                    FOREIGN KEY (i2, a2) REFERENCES self (i, a));
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
 ALTER TABLE self RENAME KEY u1 TO u2;
+--sorted_result
 SELECT name, unique_constraint_name, referenced_table_schema, referenced_table_name
   FROM mysql.foreign_keys
   WHERE referenced_table_schema LIKE 'test';
@@ -887,49 +851,4 @@ connection con1;
 disconnect con1;
 --source include/wait_until_disconnected.inc
 connection default;
---disable_connect_log
-
-
---echo #
---echo # Additional test coverage for case when ALTER TABLE is non-atomic but
---echo # still adds foreign keys and fails at the late stage (after foreign
---echo # keys are added to the data-dictionary).
---echo #
-
---enable_connect_log
-connect (con1, localhost, root,,);
-SET @old_lock_wait_timeout= @@lock_wait_timeout;
-connection default;
-
-CREATE TABLE t1 (pk INT PRIMARY KEY) ENGINE=InnoDB;
-CREATE TABLE t2 (fk INT) ENGINE=MyISAM;
-SET @@debug='+d,injecting_fault_writing';
---replace_regex /(errno: .*)/(errno: #)/
---error ER_ERROR_ON_WRITE
-ALTER TABLE t2 ADD FOREIGN KEY (fk) REFERENCES t1(pk), ENGINE=InnoDB;
-SET @@debug='-d,injecting_fault_writing';
---echo # Even though the above ALTER TABLE has failed it has updated
---echo # data-dictionary. So cached object for parent table should
---echo # be updated to reflect this new foreign key.
---echo # The below LOCK TABLES should implicitly lock t2 too.
-LOCK TABLES t1 WRITE;
-
-connection con1;
---echo # So concurrent inserts into child are blocked.
-SET @@lock_wait_timeout= 1;
---error ER_LOCK_WAIT_TIMEOUT
-INSERT INTO t1 VALUES (NULL);
-SET @@lock_wait_timeout= @old_lock_wait_timeout;
-
-connection default;
---echo # And delete from parent table is possible and doesn't cause asserts.
-DELETE FROM t1;
-UNLOCK TABLES;
-DROP TABLES t2, t1;
-
-connection con1;
-disconnect con1;
---source include/wait_until_disconnected.inc
-connection default;
-
 --disable_connect_log

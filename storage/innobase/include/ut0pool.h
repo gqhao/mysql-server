@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2013, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2013, 2019, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -60,7 +60,7 @@ struct Pool {
 
     m_lock_strategy.create();
 
-    ut_a(m_start == 0);
+    ut_a(m_start == nullptr);
 
     m_start = reinterpret_cast<Element *>(ut_zalloc_nokey(m_size));
 
@@ -88,7 +88,7 @@ struct Pool {
     }
 
     ut_free(m_start);
-    m_end = m_last = m_start = 0;
+    m_end = m_last = m_start = nullptr;
     m_size = 0;
   }
 
@@ -112,12 +112,12 @@ struct Pool {
       elem = m_pqueue.top();
       m_pqueue.pop();
     } else {
-      elem = NULL;
+      elem = nullptr;
     }
 
     m_lock_strategy.exit();
 
-    return (elem != NULL ? &elem->m_type : 0);
+    return (elem != nullptr ? &elem->m_type : nullptr);
   }
 
   /** Add the object to the pool.
@@ -209,7 +209,7 @@ struct PoolManager {
   value_type *get() {
     size_t index = 0;
     size_t delay = 1;
-    value_type *ptr = NULL;
+    value_type *ptr = nullptr;
 
     do {
       m_lock_strategy.enter();
@@ -224,16 +224,9 @@ struct PoolManager {
 
       ptr = pool->get();
 
-      if (ptr == 0 && (index / n_pools) > 2) {
+      if (ptr == nullptr && (index / n_pools) > 2) {
         if (!add_pool(n_pools)) {
-          ib::error() << "Failed to allocate"
-                         " memory for a pool of size "
-                      << m_size
-                      << " bytes. Will"
-                         " wait for "
-                      << delay
-                      << " seconds for a thread to"
-                         " free a resource";
+          ib::error(ER_IB_MSG_FAILED_TO_ALLOCATE_WAIT, m_size, delay);
 
           /* There is nothing much we can do
           except crash and burn, however lets
@@ -252,7 +245,7 @@ struct PoolManager {
 
       ++index;
 
-    } while (ptr == NULL);
+    } while (ptr == nullptr);
 
     return (ptr);
   }
@@ -279,12 +272,12 @@ struct PoolManager {
 
       pool = UT_NEW_NOKEY(PoolType(m_size));
 
-      if (pool != NULL) {
+      if (pool != nullptr) {
         ut_ad(n_pools <= m_pools.size());
 
         m_pools.push_back(pool);
 
-        ib::info() << "Number of pools: " << m_pools.size();
+        ib::info(ER_IB_MSG_NUM_POOLS, m_pools.size());
 
         added = true;
       }

@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2018, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -31,7 +31,7 @@
 
 #define JAM_FILE_ID 409
 
-#ifdef VM_TRACE
+#if (defined(VM_TRACE) || defined(ERROR_INSERT))
 //#define DEBUG_LCP 1
 #endif
 
@@ -182,7 +182,7 @@ void Dbtup::do_tup_abortreq(Signal* signal, Uint32 flags)
   TablerecPtr regTabPtr;
 
   regOperPtr.i = signal->theData[0];
-  c_operation_pool.getPtr(regOperPtr);
+  ndbrequire(c_operation_pool.getValidPtr(regOperPtr));
   TransState trans_state= get_trans_state(regOperPtr.p);
   ndbrequire((trans_state == TRANS_STARTED) ||
              (trans_state == TRANS_TOO_MUCH_AI) ||
@@ -199,6 +199,9 @@ void Dbtup::do_tup_abortreq(Signal* signal, Uint32 flags)
 
   regTabPtr.i = regFragPtr.p->fragTableId;
   ptrCheckGuard(regTabPtr, cnoOfTablerec, tablerec);
+
+  prepare_fragptr = regFragPtr;
+  prepare_tabptr = regTabPtr;
 
   PagePtr page;
   Tuple_header *tuple_ptr= (Tuple_header*)
@@ -231,7 +234,7 @@ void Dbtup::do_tup_abortreq(Signal* signal, Uint32 flags)
       while (loopOpPtr.i != RNIL) 
       {
         jam();
-        c_operation_pool.getPtr(loopOpPtr);
+        ndbrequire(c_operation_pool.getValidPtr(loopOpPtr));
         if (get_tuple_state(loopOpPtr.p) != TUPLE_ALREADY_ABORTED)
         {
           jam();
@@ -259,7 +262,7 @@ void Dbtup::do_tup_abortreq(Signal* signal, Uint32 flags)
       while (loopOpPtr.i != RNIL) 
       {
         jam();
-        c_operation_pool.getPtr(loopOpPtr);
+        ndbrequire(c_operation_pool.getValidPtr(loopOpPtr));
         if (get_tuple_state(loopOpPtr.p) != TUPLE_ALREADY_ABORTED)
         {
           jam();
@@ -441,7 +444,7 @@ int Dbtup::TUPKEY_abort(KeyReqStruct * req_struct, int error_type)
       jam();
       terrorCode = ZSEIZE_ATTRINBUFREC_ERROR;
     } else {
-      ndbrequire(false);
+      ndbabort();
     }//if
     break;
   case 40:
@@ -449,8 +452,7 @@ int Dbtup::TUPKEY_abort(KeyReqStruct * req_struct, int error_type)
     terrorCode = ZUNSUPPORTED_BRANCH;
     break;
   default:
-    ndbrequire(false);
-    break;
+    ndbabort();
   }//switch
   tupkeyErrorLab(req_struct);
   return -1;
@@ -469,38 +471,40 @@ void Dbtup::early_tupkey_error(KeyReqStruct* req_struct)
 void Dbtup::tupkeyErrorLab(KeyReqStruct* req_struct)
 {
   Operationrec * const regOperPtr = req_struct->operPtrP;
+  Uint32 undo_buffer_space = regOperPtr->m_undo_buffer_space;
+  bool is_tuple_loc_null = regOperPtr->m_tuple_location.isNull();
+
   set_trans_state(regOperPtr, TRANS_IDLE);
   set_tuple_state(regOperPtr, TUPLE_PREPARED);
 
-  FragrecordPtr fragPtr;
-  fragPtr.i= regOperPtr->fragmentPtr;
-  ptrCheckGuard(fragPtr, cnoOfFragrec, fragrecord);
-
-  TablerecPtr tabPtr;
-  tabPtr.i= fragPtr.p->fragTableId;
-  ptrCheckGuard(tabPtr, cnoOfTablerec, tablerec);
-
-  if (regOperPtr->m_undo_buffer_space &&
+  if (undo_buffer_space &&
       (regOperPtr->is_first_operation() && regOperPtr->is_last_operation()))
   {
     jam();
+
     D("Logfile_client - tupkeyErrorLab");
-    Logfile_client lgman(this, c_lgman, fragPtr.p->m_logfile_group_id);
+    Logfile_client lgman(this, c_lgman, prepare_fragptr.p->m_logfile_group_id);
     lgman.free_log_space(regOperPtr->m_undo_buffer_space,
                          jamBuffer());
   }
 
   Uint32 *ptr = 0;
-  if (!regOperPtr->m_tuple_location.isNull())
+  if (!is_tuple_loc_null)
   {
     PagePtr tmp;
-    ptr= get_ptr(&tmp, &regOperPtr->m_tuple_location, tabPtr.p);
+    ptr= get_ptr(&tmp,
+                 &regOperPtr->m_tuple_location,
+                 prepare_tabptr.p);
   }
 
 
   removeActiveOpList(regOperPtr, (Tuple_header*)ptr);
   initOpConnection(regOperPtr);
-  send_TUPKEYREF(req_struct);
+  TupKeyRef * const tupKeyRef =
+    (TupKeyRef *)req_struct->signal->getDataPtrSend();  
+  tupKeyRef->userRef = req_struct->operPtrP->userpointer;
+  tupKeyRef->errorCode = terrorCode;
+  tupKeyRef->noExecInstructions = req_struct->no_exec_instructions;
 }
 
 void Dbtup::send_TUPKEYREF(const KeyReqStruct* req_struct)
@@ -535,7 +539,7 @@ void Dbtup::removeActiveOpList(Operationrec*  const regOperPtr,
     if (nextOperPtr.i != RNIL)
     {
       jam();
-      c_operation_pool.getPtr(nextOperPtr);
+      ndbrequire(c_operation_pool.getValidPtr(nextOperPtr));
       nextOperPtr.p->prevActiveOp = prevOperPtr.i;
     }
     else
@@ -546,7 +550,7 @@ void Dbtup::removeActiveOpList(Operationrec*  const regOperPtr,
     if (prevOperPtr.i != RNIL)
     {
       jam();
-      c_operation_pool.getPtr(prevOperPtr);
+      ndbrequire(c_operation_pool.getValidPtr(prevOperPtr));
       prevOperPtr.p->nextActiveOp = nextOperPtr.i;
       if (nextOperPtr.i == RNIL)
       {

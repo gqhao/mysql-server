@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2019, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -25,20 +25,24 @@
 // MySQL DB access module, for use by plugins and others
 // For the module that implements interactive DB functionality see mod_db
 
-#ifndef X_CLIENT_CONNECTION_IMPL_H_
-#define X_CLIENT_CONNECTION_IMPL_H_
+#ifndef PLUGIN_X_CLIENT_XCONNECTION_IMPL_H_
+#define PLUGIN_X_CLIENT_XCONNECTION_IMPL_H_
 
 #include <memory>
 
 #include "my_io.h"
+#include "plugin/x/client/context/xcontext.h"
 #include "plugin/x/client/mysqlxclient/xconnection.h"
 #include "plugin/x/client/mysqlxclient/xerror.h"
-#include "plugin/x/client/xcontext.h"
 #include "violite.h"
 
 struct sockaddr_un;
 
 namespace xcl {
+
+namespace details {
+int make_vio_timeout(const int64_t value);
+}  // namespace details
 
 class Ssl_config;
 class Connection_config;
@@ -88,4 +92,4 @@ class Connection_impl : public XConnection {
 
 }  // namespace xcl
 
-#endif  // X_CLIENT_CONNECTION_IMPL_H_
+#endif  // PLUGIN_X_CLIENT_XCONNECTION_IMPL_H_

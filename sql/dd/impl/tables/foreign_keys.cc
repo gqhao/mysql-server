@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -41,6 +41,14 @@ const Foreign_keys &Foreign_keys::instance() {
   return *s_instance;
 }
 
+///////////////////////////////////////////////////////////////////////////
+
+const CHARSET_INFO *Foreign_keys::name_collation() {
+  return &my_charset_utf8_general_ci;
+}
+
+///////////////////////////////////////////////////////////////////////////
+
 Foreign_keys::Foreign_keys() {
   m_target_def.set_table_name("foreign_keys");
 
@@ -51,7 +59,8 @@ Foreign_keys::Foreign_keys() {
   m_target_def.add_field(FIELD_TABLE_ID, "FIELD_TABLE_ID",
                          "table_id BIGINT UNSIGNED NOT NULL");
   m_target_def.add_field(FIELD_NAME, "FIELD_NAME",
-                         "name VARCHAR(64) NOT NULL COLLATE utf8_general_ci");
+                         "name VARCHAR(64) NOT NULL COLLATE " +
+                             String_type(name_collation()->name));
   m_target_def.add_field(
       FIELD_UNIQUE_CONSTRAINT_NAME, "FIELD_UNIQUE_CONSTRAINT_NAME",
       "unique_constraint_name VARCHAR(64) COLLATE utf8_tolower_ci");
@@ -107,7 +116,8 @@ Foreign_keys::Foreign_keys() {
 Object_key *Foreign_keys::create_key_by_foreign_key_name(
     Object_id schema_id, const String_type &foreign_key_name) {
   return new (std::nothrow)
-      Item_name_key(FIELD_SCHEMA_ID, schema_id, FIELD_NAME, foreign_key_name);
+      Item_name_key(FIELD_SCHEMA_ID, schema_id, FIELD_NAME, foreign_key_name,
+                    name_collation());
 }
 
 Object_key *Foreign_keys::create_key_by_table_id(Object_id table_id) {
@@ -129,11 +139,11 @@ Object_key *Foreign_keys::create_key_by_referenced_name(
 bool Foreign_keys::check_foreign_key_exists(THD *thd, Object_id schema_id,
                                             const String_type &foreign_key_name,
                                             bool *exists) {
-  DBUG_ENTER("Foreign_keys::check_foreign_key_exists");
+  DBUG_TRACE;
 
   Transaction_ro trx(thd, ISO_READ_COMMITTED);
   trx.otx.register_tables<dd::Foreign_key>();
-  if (trx.otx.open_tables()) DBUG_RETURN(true);
+  if (trx.otx.open_tables()) return true;
 
   const std::unique_ptr<Object_key> key(
       create_key_by_foreign_key_name(schema_id, foreign_key_name.c_str()));
@@ -143,14 +153,14 @@ bool Foreign_keys::check_foreign_key_exists(THD *thd, Object_id schema_id,
 
   // Find record by the object-key.
   std::unique_ptr<Raw_record> record;
-  if (table->find_record(*key, record)) DBUG_RETURN(true);
+  if (table->find_record(*key, record)) return true;
 
   if (record.get())
     *exists = true;
   else
     *exists = false;
 
-  DBUG_RETURN(false);
+  return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////

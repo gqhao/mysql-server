@@ -2,7 +2,7 @@
 # ----------------------------------------------------------------------
 SET NAMES utf8;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 SELECT NTH_VALUE(6,1)    OVER ();
 NTH_VALUE(6,1)    OVER ()
 6
@@ -54,9 +54,11 @@ SELECT id, sex, NTH_VALUE(id, 'a') OVER () FROM t1;
 ERROR HY000: Incorrect arguments to nth_value
 SELECT id, sex, NTH_VALUE(id, -3) OVER () le1 FROM t1;
 ERROR HY000: Incorrect arguments to nth_value
-NULL argument is OK
+NULL literal is not OK (but NULL value is)
 SELECT id, sex, NTH_VALUE(id, NULL) OVER () FROM t1;
-id	sex	NTH_VALUE(id, NULL) OVER ()
+ERROR HY000: Incorrect arguments to nth_value
+SELECT id, sex, NTH_VALUE(id, @oijlkjlkjxozijqlj) OVER () FROM t1;
+id	sex	NTH_VALUE(id, @oijlkjlkjxozijqlj) OVER ()
 1	M	NULL
 2	F	NULL
 3	F	NULL
@@ -93,10 +95,10 @@ NULL	M	NULL
 11	NULL	NULL
 SET @p1= '1';
 EXECUTE p USING @p1;
-ERROR HY000: Incorrect arguments to nth_value
+ERROR HY000: Incorrect arguments to EXECUTE
 SET @p1= 1.2;
 EXECUTE p USING @p1;
-ERROR HY000: Incorrect arguments to nth_value
+ERROR HY000: Incorrect arguments to EXECUTE
 DROP PREPARE p;
 Ok, default semantics:
 SELECT id, sex, NTH_VALUE(id, 1) RESPECT NULLS OVER () FROM t1;
@@ -637,6 +639,8 @@ CREATE TABLE `test`(
 `dt` DATETIME DEFAULT NULL,
 `ge` GEOMETRY DEFAULT NULL
 );
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 INSERT INTO `test` VALUES
 (1, '2007-05-08 12:10:55', ST_GeomFromText('POINT(1 1)')),
 (2, NULL, NULL), (3, NULL, NULL),
@@ -746,6 +750,7 @@ SELECT ((MAKETIME(((QUARTER('| !*c>*{/'))<=>
 ,1)OVER())),'9236-05-27',0xe2a7d4))^(0x1109))
 NULL
 Warnings:
+Warning	1292	Incorrect datetime value: '| !*c>*{/'
 Warning	1292	Incorrect datetime value: '| !*c>*{/'
 Warning	1292	Truncated incorrect INTEGER value: '9236-05-27'
 SELECT ((NTH_VALUE(JSON_MERGE_PATCH(1.755913e+308,'{ }'),246)OVER())<=(1));

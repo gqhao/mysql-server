@@ -1,4 +1,4 @@
-/* Copyright (c) 2010, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2010, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -29,7 +29,7 @@
 
 #include <string.h>
 
-#define COPYRIGHT_NOTICE_CURRENT_YEAR "2018"
+#define COPYRIGHT_NOTICE_CURRENT_YEAR "2020"
 
 /*
   This define specifies copyright notice which is displayed by every MySQL
@@ -70,6 +70,14 @@
   "   along with this program; if not, write to the Free Software\n"          \
   "   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  " \
   "USA */\n"
+
+#define ORACLE_COPYRIGHT_NOTICE(first_year)                                \
+  (strcmp(first_year, COPYRIGHT_NOTICE_CURRENT_YEAR)                       \
+       ? "/* Copyright (c) " first_year ", " COPYRIGHT_NOTICE_CURRENT_YEAR \
+         ", Oracle and/or its affiliates. All rights reserved. */\n"       \
+         "\n"                                                              \
+       : "/* Copyright (c) " first_year                                    \
+         ", Oracle and/or its affiliates. All rights reserved. */\n")
 
 #define ORACLE_GPL_COPYRIGHT_NOTICE(first_year)                            \
   (strcmp(first_year, COPYRIGHT_NOTICE_CURRENT_YEAR)                       \

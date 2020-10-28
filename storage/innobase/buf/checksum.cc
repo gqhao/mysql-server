@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2020, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -153,7 +153,6 @@ const char *buf_checksum_algorithm_name(
   }
 
   ut_error;
-  return (NULL);
 }
 
 /** Do lsn checks on a page during innodb recovery.
@@ -313,7 +312,7 @@ bool BlockReporter::is_corrupted() const {
 
   /* declare empty pages non-corrupted */
   if (checksum_field1 == 0 && checksum_field2 == 0 &&
-      *reinterpret_cast<const ib_uint64_t *>(m_read_buf + FIL_PAGE_LSN) == 0) {
+      mach_read_from_8(m_read_buf + FIL_PAGE_LSN) == 0) {
     /* make sure that the page is really empty */
 
     bool empty = true;
@@ -495,7 +494,7 @@ uint32_t BlockReporter::calc_zip_checksum(
 
 /** Calculate the compressed page checksum. This variant
 should be used when only the page_size_t is unknown and
-only physical page_size of compressed page is available
+only physical page_size of compressed page is available.
 @param[in]	read_buf		buffer holding the page
 @param[in]	phys_page_size		physical page size
 @param[in]	algo			checksum algorithm to use
@@ -546,7 +545,6 @@ uint32_t BlockReporter::calc_zip_checksum(
   }
 
   ut_error;
-  return (0);
 }
 
 /** Verify a compressed page's checksum.
@@ -563,8 +561,7 @@ bool BlockReporter::verify_zip_checksum() const {
 #endif
 
   /* Check if page is empty */
-  if (stored == 0 &&
-      *reinterpret_cast<const ib_uint64_t *>(m_read_buf + FIL_PAGE_LSN) == 0) {
+  if (stored == 0 && mach_read_from_8(m_read_buf + FIL_PAGE_LSN) == 0) {
     /* make sure that the page is really empty */
 
     ulint i;

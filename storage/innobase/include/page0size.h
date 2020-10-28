@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2013, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2013, 2019, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -34,16 +34,15 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #define page0size_t
 
 #include "fsp0types.h"
-#include "univ.i"
 
-#define FIELD_REF_SIZE 20
+constexpr size_t FIELD_REF_SIZE = 20;
 
 /** A BLOB field reference full of zero, for use in assertions and
 tests.Initially, BLOB field references are set to zero, in
 dtuple_convert_big_rec(). */
 extern const byte field_ref_zero[FIELD_REF_SIZE];
 
-#define PAGE_SIZE_T_SIZE_BITS 17
+constexpr size_t PAGE_SIZE_T_SIZE_BITS = 17;
 
 /** Page size descriptor. Contains the physical and logical page size, as well
 as whether the page is compressed or not. */
@@ -53,7 +52,7 @@ class page_size_t {
   @param[in]	physical	physical (on-disk/zipped) page size
   @param[in]	logical		logical (in-memory/unzipped) page size
   @param[in]	is_compressed	whether the page is compressed */
-  page_size_t(ulint physical, ulint logical, bool is_compressed) {
+  page_size_t(uint32_t physical, uint32_t logical, bool is_compressed) {
     if (physical == 0) {
       physical = UNIV_PAGE_SIZE_ORIG;
     }
@@ -78,8 +77,8 @@ class page_size_t {
 
   /** Constructor from (fsp_flags).
   @param[in]	fsp_flags	filespace flags */
-  explicit page_size_t(ulint fsp_flags) {
-    ulint ssize = FSP_FLAGS_GET_PAGE_SSIZE(fsp_flags);
+  explicit page_size_t(uint32_t fsp_flags) {
+    uint32_t ssize = FSP_FLAGS_GET_PAGE_SSIZE(fsp_flags);
 
     /* If the logical page size is zero in fsp_flags, then use the
     legacy 16k page size. */
@@ -118,7 +117,7 @@ class page_size_t {
 
   /** Retrieve the physical page size (on-disk).
   @return physical page size in bytes */
-  inline uint physical() const {
+  inline size_t physical() const {
     ut_ad(m_physical > 0);
 
     return (m_physical);
@@ -126,7 +125,7 @@ class page_size_t {
 
   /** Retrieve the logical page size (in-memory).
   @return logical page size in bytes */
-  inline uint logical() const {
+  inline size_t logical() const {
     ut_ad(m_logical > 0);
     return (m_logical);
   }
@@ -151,7 +150,7 @@ class page_size_t {
     return (size);
   }
 
-  ulint extents_per_xdes() const { return (m_physical / extent_size()); }
+  size_t extents_per_xdes() const { return (m_physical / extent_size()); }
 
   /** Check whether the page is compressed on disk.
   @return true if compressed */
@@ -173,15 +172,15 @@ class page_size_t {
             a.is_compressed() == m_is_compressed);
   }
 
-  inline void set_flag(ulint fsp_flags) {
-    ulint ssize = FSP_FLAGS_GET_PAGE_SSIZE(fsp_flags);
+  inline void set_flag(uint32_t fsp_flags) {
+    uint32_t ssize = FSP_FLAGS_GET_PAGE_SSIZE(fsp_flags);
 
     /* If the logical page size is zero in fsp_flags, then
     use the legacy 16k page size. */
     ssize = (0 == ssize) ? UNIV_PAGE_SSIZE_ORIG : ssize;
 
     /* Convert from a 'log2 minus 9' to a page size in bytes. */
-    const ulint size = ((UNIV_ZIP_SIZE_MIN >> 1) << ssize);
+    const uint32_t size = ((UNIV_ZIP_SIZE_MIN >> 1) << ssize);
 
     ut_ad(size <= UNIV_PAGE_SIZE_MAX);
     ut_ad(size <= (1 << PAGE_SIZE_T_SIZE_BITS));
@@ -211,10 +210,12 @@ class page_size_t {
     }
   }
 
- private:
   /* Disable implicit copying. */
-  void operator=(const page_size_t &);
+  void operator=(const page_size_t &) = delete;
 
+  page_size_t(const page_size_t &) = default;
+
+ private:
   /* For non compressed tablespaces, physical page size is equal to
   the logical page size and the data is stored in buf_page_t::frame
   (and is also always equal to univ_page_size (--innodb-page-size=)).

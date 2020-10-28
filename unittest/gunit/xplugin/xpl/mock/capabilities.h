@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2020, Oracle and/or its affiliates.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,10 +22,13 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-#include "plugin/x/ngs/include/ngs/capabilities/configurator.h"
-#include "plugin/x/ngs/include/ngs/capabilities/handler.h"
+#ifndef UNITTEST_GUNIT_XPLUGIN_XPL_MOCK_CAPABILITIES_H_
+#define UNITTEST_GUNIT_XPLUGIN_XPL_MOCK_CAPABILITIES_H_
 
-namespace ngs {
+#include "plugin/x/src/capabilities/configurator.h"
+#include "plugin/x/src/capabilities/handler.h"
+
+namespace xpl {
 
 namespace test {
 
@@ -44,19 +47,22 @@ class Mock_capabilities_configurator : public Capabilities_configurator {
 
 class Mock_capability_handler : public Capability_handler {
  public:
-  MOCK_CONST_METHOD0(name, const std::string());
-  MOCK_CONST_METHOD0(is_supported, bool());
-  MOCK_METHOD1(set, bool(const ::Mysqlx::Datatypes::Any &));
+  MOCK_CONST_METHOD0(name, std::string());
+  MOCK_CONST_METHOD0(is_supported_impl, bool());
+  MOCK_CONST_METHOD0(is_settable, bool());
+  MOCK_CONST_METHOD0(is_gettable, bool());
+  MOCK_METHOD1(set_impl, ngs::Error_code(const ::Mysqlx::Datatypes::Any &));
 
   // Workaround for GMOCK undefined behaviour with ResultHolder
-  MOCK_METHOD1(get_void, bool(::Mysqlx::Datatypes::Any &));
+  MOCK_METHOD1(get_void, bool(::Mysqlx::Datatypes::Any *));
   MOCK_METHOD0(commit_void, bool());
 
-  void get(::Mysqlx::Datatypes::Any &any) { get_void(any); }
+  void get_impl(::Mysqlx::Datatypes::Any *any) override { get_void(any); }
 
-  void commit() { commit_void(); }
+  void commit() override { commit_void(); }
 };
 
 }  // namespace test
+}  // namespace xpl
 
-}  // namespace ngs
+#endif  // UNITTEST_GUNIT_XPLUGIN_XPL_MOCK_CAPABILITIES_H_

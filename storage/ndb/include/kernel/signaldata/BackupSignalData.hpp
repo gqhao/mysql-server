@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2013, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -50,6 +50,8 @@ public:
   STATIC_CONST( SignalLength = 4 );
   STATIC_CONST( WAITCOMPLETED = 0x3 );
   STATIC_CONST( USE_UNDO_LOG = 0x4 );
+  STATIC_CONST( MT_BACKUP = 0x8);
+  STATIC_CONST( ENCRYPTED_BACKUP = 0x10);
 
 private:
   Uint32 senderData;
@@ -59,6 +61,19 @@ private:
    */
   Uint32 flags;
   Uint32 inputBackupId;
+};
+
+struct EncryptionPasswordData
+{
+  Uint32 password_length;
+  // one byte extra for trailing null, but for keep alignment make it four extra
+  alignas(Uint32) char encryption_password[MAX_BACKUP_ENCRYPTION_PASSWORD_LENGTH + 4];
+
+  EncryptionPasswordData()
+  {
+    password_length = 0;
+    memset(encryption_password, 0, sizeof(encryption_password));
+  }
 };
 
 class BackupData {
@@ -143,7 +158,13 @@ private:
     OutOfResources = 1303,
     SequenceFailure = 1304,
     BackupDefinitionNotImplemented = 1305,
-    CannotBackupDiskless = 1306
+    CannotBackupDiskless = 1306,
+    EncryptionNotSupported = 1307,
+    EncryptionPasswordMissing = 1308,
+    BadEncryptionPassword = 1309,
+    EncryptionPasswordTooLong = 1310,
+    EncryptionPasswordZeroLength = 1311,
+    BackupDuringUpgradeUnsupported = 1329
   };
   Uint32 senderData;
   Uint32 errorCode;
@@ -168,12 +189,11 @@ class BackupConf {
 
   friend bool printBACKUP_CONF(FILE *, const Uint32 *, Uint32, Uint16);
 public:
-  STATIC_CONST( SignalLength = 2 + NdbNodeBitmask::Size );
+  STATIC_CONST( SignalLength = 2);
   
 private:
   Uint32 senderData;
   Uint32 backupId;
-  NdbNodeBitmaskPOD nodes;
 };
 
 /**
@@ -216,7 +236,7 @@ class BackupCompleteRep {
 
   friend bool printBACKUP_COMPLETE_REP(FILE *, const Uint32 *, Uint32, Uint16);
 public:
-  STATIC_CONST( SignalLength = 10 + NdbNodeBitmask::Size );
+  STATIC_CONST( SignalLength = 12 );
 private:
   Uint32 senderData;
   Uint32 backupId;
@@ -226,7 +246,7 @@ private:
   Uint32 noOfRecordsLow;
   Uint32 noOfLogBytes;
   Uint32 noOfLogRecords;
-  NdbNodeBitmaskPOD nodes;
+  Uint32 unused[2];
   Uint32 noOfBytesHigh;
   Uint32 noOfRecordsHigh;
 };
@@ -246,11 +266,12 @@ class AbortBackupOrd {
    * Sender / Reciver
    */
   friend class Backup;
+  friend class BackupProxy;
   friend class MgmtSrvr;
 
   friend bool printABORT_BACKUP_ORD(FILE *, const Uint32 *, Uint32, Uint16);
 public:
-  STATIC_CONST( SignalLength = 3 );
+  STATIC_CONST( SignalLength = 4 );
   
   enum RequestType {
     ClientAbort = 1321,
@@ -271,6 +292,7 @@ private:
     Uint32 backupPtr;
     Uint32 senderData;
   };
+  Uint32 senderRef;
 };
 
 

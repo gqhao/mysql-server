@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2016, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2016, 2020, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -69,14 +69,16 @@ static void z_print_partial_update_hit(upd_field_t *uf, dict_index_t *index) {
 #endif /* UNIV_DEBUG */
 
 /** Update a portion of the given LOB.
-@param[in] trx       the transaction that is doing the modification.
-@param[in] index     the clustered index containing the LOB.
-@param[in] upd       update vector
-@param[in] field_no  the LOB field number
+@param[in]	ctx		update operation context information.
+@param[in]	trx		the transaction that is doing the modification.
+@param[in]	index		the clustered index containing the LOB.
+@param[in]	upd		update vector
+@param[in]	field_no	the LOB field number
+@param[in]	blobref		LOB reference stored in clust record.
 @return DB_SUCCESS on success, error code on failure. */
 dberr_t z_update(InsertContext &ctx, trx_t *trx, dict_index_t *index,
                  const upd_t *upd, ulint field_no, ref_t blobref) {
-  DBUG_ENTER("lob::z_update");
+  DBUG_TRACE;
   dberr_t err = DB_SUCCESS;
   mtr_t *mtr = ctx.get_mtr();
 
@@ -115,21 +117,21 @@ dberr_t z_update(InsertContext &ctx, trx_t *trx, dict_index_t *index,
     }
   }
 
-  blobref.set_offset(lob_version, 0);
+  blobref.set_offset(lob_version, nullptr);
 
   if (!ctx.is_bulk()) {
     ctx.zblob_write_blobref(field_no, ctx.m_mtr);
   }
 
-  DBUG_RETURN(err);
+  return err;
 }
 
 /** Find the location of the given offset within LOB.
-@param[in]	trx		the current transaction.
-@param[in]	index		the index where LOB is located.
-@param[in]	node_loc	the location of first page.
-@param[in,out]	offset		the requested offset.
-@param[in]	mtr		mini-transaction context.
+@param[in]	trx		The current transaction.
+@param[in]	index		The index where LOB is located.
+@param[in]	node_loc	The location of first page.
+@param[in,out]	offset		The requested offset.
+@param[in]	mtr		Mini-transaction context.
 @return the file address of requested offset or fil_addr_null. */
 fil_addr_t z_find_offset(trx_t *trx, dict_index_t *index, fil_addr_t node_loc,
                          ulint &offset, mtr_t *mtr) {
@@ -175,7 +177,8 @@ fil_addr_t z_find_offset(trx_t *trx, dict_index_t *index, fil_addr_t node_loc,
 static dberr_t z_replace(InsertContext &ctx, trx_t *trx, dict_index_t *index,
                          ref_t ref, z_first_page_t &first_page, ulint offset,
                          ulint len, byte *buf) {
-  DBUG_ENTER("lob::z_replace");
+  DBUG_TRACE;
+  dberr_t ret(DB_SUCCESS);
   uint32_t new_entries = 0;
   trx_id_t trxid = (trx == nullptr) ? 0 : trx->id;
   const undo_no_t undo_no = (trx == nullptr ? 0 : trx->undo_no - 1);
@@ -216,7 +219,12 @@ static dberr_t z_replace(InsertContext &ctx, trx_t *trx, dict_index_t *index,
 
   /* The cur_entry points to the chunk that needs to be
   partially replaced. */
-  std::unique_ptr<byte[]> tmp(new byte[Z_CHUNK_SIZE]);
+  std::unique_ptr<byte[]> tmp(new (std::nothrow) byte[Z_CHUNK_SIZE]);
+
+  if (tmp == nullptr) {
+    return (DB_OUT_OF_MEMORY);
+  }
+
   byte *chunk = tmp.get();
   ut_ad(yet_to_skip < Z_CHUNK_SIZE);
 
@@ -264,8 +272,12 @@ static dberr_t z_replace(InsertContext &ctx, trx_t *trx, dict_index_t *index,
       ut_ad(first_page.get_page_type() == FIL_PAGE_TYPE_ZLOB_FIRST);
 
       /* Chunk now contains new data to be inserted. */
-      z_insert_chunk(index, first_page, trx, ref, chunk, len1, &new_entry, mtr,
-                     false);
+      ret = z_insert_chunk(index, first_page, trx, ref, chunk, len1, &new_entry,
+                           mtr, false);
+
+      if (ret != DB_SUCCESS) {
+        return (ret);
+      }
 
       cur_entry.insert_after(base_node, new_entry);
       cur_entry.remove(base_node);
@@ -283,8 +295,12 @@ static dberr_t z_replace(InsertContext &ctx, trx_t *trx, dict_index_t *index,
 
       /* Full chunk is to be replaced. No need to read
       old data. */
-      z_insert_chunk(index, first_page, trx, ref, from_ptr, size, &new_entry,
-                     mtr, false);
+      ret = z_insert_chunk(index, first_page, trx, ref, from_ptr, size,
+                           &new_entry, mtr, false);
+
+      if (ret != DB_SUCCESS) {
+        return (ret);
+      }
 
       ut_ad(new_entry.get_trx_id() == trx->id);
 
@@ -314,7 +330,7 @@ static dberr_t z_replace(InsertContext &ctx, trx_t *trx, dict_index_t *index,
   ut_ad(first_page.validate());
 #endif /* LOB_DEBUG */
 
-  DBUG_RETURN(DB_SUCCESS);
+  return ret;
 }
 
-}; /* namespace lob */
+} /* namespace lob */

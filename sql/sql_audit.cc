@@ -1,4 +1,4 @@
-/* Copyright (c) 2007, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2007, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -70,8 +70,8 @@ class Audit_error_handler : public Internal_error_handler {
     @brief Blocked copy constructor (private).
   */
   Audit_error_handler(const Audit_error_handler &obj MY_ATTRIBUTE((unused)))
-      : m_thd(NULL),
-        m_warning_message(NULL),
+      : m_thd(nullptr),
+        m_warning_message(nullptr),
         m_error_reported(false),
         m_active(false) {}
 
@@ -99,7 +99,7 @@ class Audit_error_handler : public Internal_error_handler {
   /**
     @brief Destruction.
   */
-  virtual ~Audit_error_handler() {
+  ~Audit_error_handler() override {
     if (m_active) {
       /* Deactivate this handler. */
       m_thd->pop_internal_handler();
@@ -120,9 +120,9 @@ class Audit_error_handler : public Internal_error_handler {
 
     @returns True on error rejection, otherwise false.
   */
-  virtual bool handle_condition(THD *, uint sql_errno, const char *sqlstate,
-                                Sql_condition::enum_severity_level *,
-                                const char *msg) {
+  bool handle_condition(THD *, uint sql_errno, const char *sqlstate,
+                        Sql_condition::enum_severity_level *,
+                        const char *msg) override {
     if (m_active && handle()) {
       /* Error has been rejected. Write warning message. */
       print_warning(m_warning_message, sql_errno, sqlstate, msg);
@@ -282,24 +282,34 @@ static inline bool check_audit_mask(const unsigned long *lhs,
 }
 
 /**
-  Fill query and query charset info extracted from the thread object.
+  Fill query info extracted from the thread object and return
+  the thread object charset info.
 
   @param[in]  thd     Thread data.
   @param[out] query   SQL query text.
-  @param[out] charset SQL query charset.
-*/
-inline void thd_get_audit_query(THD *thd, MYSQL_LEX_CSTRING *query,
-                                const CHARSET_INFO **charset) {
-  if (!thd->rewritten_query.length()) mysql_rewrite_query(thd);
 
-  if (thd->rewritten_query.length()) {
-    query->str = thd->rewritten_query.ptr();
-    query->length = thd->rewritten_query.length();
-    *charset = thd->rewritten_query.charset();
+  @return SQL query charset.
+*/
+inline const CHARSET_INFO *thd_get_audit_query(THD *thd,
+                                               MYSQL_LEX_CSTRING *query) {
+  /*
+    If we haven't tried to rewrite the query to obfuscate passwords
+    etc. yet, do so now.
+  */
+  if (thd->rewritten_query().length() == 0) mysql_rewrite_query(thd);
+
+  /*
+    If there was something to rewrite, use the rewritten query;
+    otherwise, just use the original as submitted by the client.
+  */
+  if (thd->rewritten_query().length() > 0) {
+    query->str = thd->rewritten_query().ptr();
+    query->length = thd->rewritten_query().length();
+    return thd->rewritten_query().charset();
   } else {
     query->str = thd->query().str;
     query->length = thd->query().length;
-    *charset = thd->charset();
+    return thd->charset();
   }
 }
 
@@ -314,7 +324,7 @@ class Ignore_event_error_handler : public Audit_error_handler {
     @brief Construction.
 
     @param thd             Current thread data.
-    @param event_name
+    @param event_name      Textual form of the audit event enum.
   */
   Ignore_event_error_handler(THD *thd, const char *event_name)
       : Audit_error_handler(thd, ""), m_event_name(event_name) {}
@@ -324,7 +334,7 @@ class Ignore_event_error_handler : public Audit_error_handler {
 
     @retval True on error rejection, otherwise false.
   */
-  virtual bool handle() { return true; }
+  bool handle() override { return true; }
 
   /**
     @brief Custom warning print routine.
@@ -336,9 +346,9 @@ class Ignore_event_error_handler : public Audit_error_handler {
     @param sqlstate  The SQL state of the underlying error. NULL if none
     @param msg       The text of the underlying error. NULL if none
   */
-  virtual void print_warning(const char *warn_msg MY_ATTRIBUTE((unused)),
-                             uint sql_errno, const char *sqlstate,
-                             const char *msg) {
+  void print_warning(const char *warn_msg MY_ATTRIBUTE((unused)),
+                     uint sql_errno, const char *sqlstate,
+                     const char *msg) override {
     LogErr(WARNING_LEVEL, ER_AUDIT_CANT_ABORT_EVENT, m_event_name, sql_errno,
            sqlstate ? sqlstate : "<NO_STATE>", msg ? msg : "<NO_MESSAGE>");
   }
@@ -376,8 +386,8 @@ int mysql_audit_notify(THD *thd, mysql_event_general_subclass_t subclass,
   event.general_rows = thd->get_stmt_da()->current_row_for_condition();
   event.general_sql_command = sql_statement_names[thd->lex->sql_command];
 
-  thd_get_audit_query(thd, &event.general_query,
-                      (const CHARSET_INFO **)&event.general_charset);
+  event.general_charset = const_cast<CHARSET_INFO *>(
+      thd_get_audit_query(thd, &event.general_query));
 
   event.general_time = thd->query_start_in_secs();
 
@@ -404,9 +414,15 @@ int mysql_audit_notify(THD *thd, mysql_event_connection_subclass_t subclass,
                        const char *subclass_name, int errcode) {
   mysql_event_connection event;
 
+  /*
+    Do not take into account m_auditing_activated flag. Always generate
+    events of the MYSQL_AUDIT_CONNECTION_CLASS class.
+  */
   if (mysql_audit_acquire_plugins(thd, MYSQL_AUDIT_CONNECTION_CLASS,
-                                  static_cast<unsigned long>(subclass)))
+                                  static_cast<unsigned long>(subclass),
+                                  false)) {
     return 0;
+  }
 
   event.event_subclass = subclass;
   event.status = errcode;
@@ -487,7 +503,8 @@ inline bool generate_table_access_event(TABLE_LIST *table) {
 
   /* Generate event for SYSTEM and USER tables, which are not temp tables. */
   if ((table->table->s->table_category == TABLE_CATEGORY_SYSTEM ||
-       table->table->s->table_category == TABLE_CATEGORY_USER) &&
+       table->table->s->table_category == TABLE_CATEGORY_USER ||
+       table->table->s->table_category == TABLE_CATEGORY_ACL_TABLE) &&
       table->table->s->tmp_table == NO_TMP_TABLE)
     return true;
 
@@ -539,7 +556,7 @@ static int mysql_audit_notify(THD *thd,
   event.connection_id = thd->thread_id();
   event.sql_command_id = thd->lex->sql_command;
 
-  thd_get_audit_query(thd, &event.query, &event.query_charset);
+  event.query_charset = thd_get_audit_query(thd, &event.query);
 
   lex_cstring_set(&str, table->db);
   event.table_database.str = str.str;
@@ -602,6 +619,7 @@ int mysql_audit_table_access_notify(THD *thd, TABLE_LIST *table) {
       break;
     case SQLCOM_SELECT:
     case SQLCOM_HA_READ:
+    case SQLCOM_ANALYZE:
       set_table_access_subclass(&subclass, &subclass_name,
                                 AUDIT_EVENT(MYSQL_AUDIT_TABLE_ACCESS_READ));
       break;
@@ -715,7 +733,7 @@ int mysql_audit_notify(mysql_event_server_shutdown_subclass_t subclass,
     return mysql_audit_notify(thd.thd, subclass, reason, exit_code);
   }
 
-  return mysql_audit_notify(NULL, subclass, reason, exit_code);
+  return mysql_audit_notify(nullptr, subclass, reason, exit_code);
 }
 
 /*
@@ -735,7 +753,7 @@ int mysql_audit_notify(THD *thd, mysql_event_authorization_subclass_t subclass,
   event.connection_id= thd->thread_id();
   event.sql_command_id= thd->lex->sql_command;
 
-  thd_get_audit_query(thd, &event.query, &event.query_charset);
+  event.query_charset = thd_get_audit_query(thd, &event.query);
 
   LEX_CSTRING obj_str;
 
@@ -768,7 +786,7 @@ class Ignore_command_start_error_handler : public Audit_error_handler {
 
     @param thd     Current thread data.
     @param command Current command that the handler will be active against.
-    @param command_text
+    @param command_text SQL command.
   */
   Ignore_command_start_error_handler(THD *thd, enum_server_command command,
                                      const char *command_text)
@@ -781,7 +799,7 @@ class Ignore_command_start_error_handler : public Audit_error_handler {
 
     @retval True on error rejection, otherwise false.
   */
-  virtual bool handle() { return ignore_command(m_command); }
+  bool handle() override { return ignore_command(m_command); }
 
   /**
     @brief Custom warning print routine.
@@ -793,9 +811,9 @@ class Ignore_command_start_error_handler : public Audit_error_handler {
     @param sqlstate  The SQL state of the underlying error. NULL if none
     @param msg       The text of the underlying error. NULL if none
   */
-  virtual void print_warning(const char *warn_msg MY_ATTRIBUTE((unused)),
-                             uint sql_errno, const char *sqlstate,
-                             const char *msg) {
+  void print_warning(const char *warn_msg MY_ATTRIBUTE((unused)),
+                     uint sql_errno, const char *sqlstate,
+                     const char *msg) override {
     LogErr(WARNING_LEVEL, ER_AUDIT_CANT_ABORT_COMMAND, m_command_text,
            sql_errno, sqlstate ? sqlstate : "<NO_STATE>",
            msg ? msg : "<NO_MESSAGE>");
@@ -870,7 +888,7 @@ int mysql_audit_notify(THD *thd, mysql_event_query_subclass_t subclass,
 
   event.sql_command_id = thd->lex->sql_command;
 
-  thd_get_audit_query(thd, &event.query, &event.query_charset);
+  event.query_charset = thd_get_audit_query(thd, &event.query);
 
   return event_class_dispatch_error(thd, MYSQL_AUDIT_QUERY_CLASS, subclass_name,
                                     &event);
@@ -889,7 +907,7 @@ int mysql_audit_notify(THD *thd, mysql_event_stored_program_subclass_t subclass,
   event.connection_id = thd->thread_id();
   event.sql_command_id = thd->lex->sql_command;
 
-  thd_get_audit_query(thd, &event.query, &event.query_charset);
+  event.query_charset = thd_get_audit_query(thd, &event.query);
 
   LEX_CSTRING obj_str;
 
@@ -923,7 +941,7 @@ int mysql_audit_notify(THD *thd, mysql_event_authentication_subclass_t subclass,
   event.connection_id = thd->thread_id();
   event.sql_command_id = thd->lex->sql_command;
 
-  thd_get_audit_query(thd, &event.query, &event.query_charset);
+  event.query_charset = thd_get_audit_query(thd, &event.query);
 
   LEX_CSTRING obj_str;
 
@@ -949,7 +967,36 @@ int mysql_audit_notify(THD *thd, mysql_event_authentication_subclass_t subclass,
   event.new_host.str = obj_str.str;
   event.new_host.length = obj_str.length;
 
-  return event_class_dispatch_error(thd, MYSQL_AUDIT_AUTHENTICATION_CLASS,
+  Ignore_event_error_handler handler(thd, subclass_name);
+
+  return handler.get_result(event_class_dispatch_error(
+      thd, MYSQL_AUDIT_AUTHENTICATION_CLASS, subclass_name, &event));
+}
+
+int mysql_audit_notify(THD *thd, mysql_event_message_subclass_t subclass,
+                       const char *subclass_name, const char *component,
+                       size_t component_length, const char *producer,
+                       size_t producer_length, const char *message,
+                       size_t message_length,
+                       mysql_event_message_key_value_t *key_value_map,
+                       size_t key_value_map_length) {
+  if (mysql_audit_acquire_plugins(thd, MYSQL_AUDIT_MESSAGE_CLASS,
+                                  static_cast<unsigned long>(subclass)))
+    return 0;
+
+  mysql_event_message event;
+
+  event.event_subclass = subclass;
+  event.component.str = component;
+  event.component.length = component_length;
+  event.producer.str = producer;
+  event.producer.length = producer_length;
+  event.message.str = message;
+  event.message.length = message_length;
+  event.key_value_map = key_value_map;
+  event.key_value_map_length = key_value_map_length;
+
+  return event_class_dispatch_error(thd, MYSQL_AUDIT_MESSAGE_CLASS,
                                     subclass_name, &event);
 }
 
@@ -995,15 +1042,23 @@ static bool acquire_plugins(THD *thd, plugin_ref plugin, void *arg) {
     return false;
   }
 
+  /* Prevent from adding the same plugin more than one time. */
+  if (!thd->audit_class_plugins.exists(plugin)) {
+    /* lock the plugin and add it to the list */
+    plugin = my_plugin_lock(nullptr, &plugin);
+
+    /* The plugin could not be acquired. */
+    if (plugin == nullptr) {
+      /* Add this plugin mask to non subscribed mask. */
+      add_audit_mask(evt->not_subscribed_mask, data->class_mask);
+      return false;
+    }
+
+    thd->audit_class_plugins.push_back(plugin);
+  }
+
   /* Copy subscription mask from the plugin into the array. */
   add_audit_mask(evt->subscribed_mask, data->class_mask);
-
-  /* Prevent from adding the same plugin more than one time. */
-  if (thd->audit_class_plugins.exists(plugin)) return false;
-
-  /* lock the plugin and add it to the list */
-  plugin = my_plugin_lock(NULL, &plugin);
-  thd->audit_class_plugins.push_back(plugin);
 
   return false;
 }
@@ -1015,14 +1070,20 @@ static bool acquire_plugins(THD *thd, plugin_ref plugin, void *arg) {
   @param thd            MySQL thread handle.
   @param event_class    Audit event class.
   @param event_subclass Audit event subclass.
+  @param check_audited  Take into account m_auditing_activated flag
+                        of the THD.
 
   @return Zero, when there is a plugins interested in the event specified
           by event_class and event_subclass. Otherwise non zero value is
           returned.
 */
 int mysql_audit_acquire_plugins(THD *thd, mysql_event_class_t event_class,
-                                unsigned long event_subclass) {
-  DBUG_ENTER("mysql_audit_acquire_plugins");
+                                unsigned long event_subclass,
+                                bool check_audited) {
+  DBUG_TRACE;
+
+  if (check_audited && thd && thd->m_audited == false) return 1;
+
   unsigned long global_mask = mysql_global_audit_mask[event_class];
 
   if (thd && !check_audit_mask(global_mask, event_subclass) &&
@@ -1042,7 +1103,8 @@ int mysql_audit_acquire_plugins(THD *thd, mysql_event_class_t event_class,
                                     {
                                         0,
                                     }};
-    plugin_foreach_func *funcs[] = {acquire_lookup_mask, acquire_plugins, NULL};
+    plugin_foreach_func *funcs[] = {acquire_lookup_mask, acquire_plugins,
+                                    nullptr};
     /*
       Acquire lookup_mask, which contains mask of all plugins that subscribe
       event specified by the event_class and event_subclass
@@ -1065,13 +1127,13 @@ int mysql_audit_acquire_plugins(THD *thd, mysql_event_class_t event_class,
   }
 
   /* Check whether there is a plugin registered for this event. */
-  DBUG_RETURN(check_audit_mask(global_mask, event_subclass) ? 1 : 0);
+  return check_audit_mask(global_mask, event_subclass) ? 1 : 0;
 }
 
 /**
   Release any resources associated with the current thd.
 
-  @param[in] thd
+  @param[in] thd Current thread
 
 */
 
@@ -1093,7 +1155,7 @@ void mysql_audit_release(THD *thd) {
   }
 
   /* Now we actually unlock the plugins */
-  plugin_unlock_list(NULL, thd->audit_class_plugins.begin(),
+  plugin_unlock_list(nullptr, thd->audit_class_plugins.begin(),
                      thd->audit_class_plugins.size());
 
   /* Reset the state of thread values */
@@ -1102,10 +1164,12 @@ void mysql_audit_release(THD *thd) {
   thd->audit_class_mask.resize(MYSQL_AUDIT_CLASS_MASK_SIZE);
 }
 
+void mysql_audit_enable_auditing(THD *thd) { thd->m_audited = true; }
+
 /**
   Initialize thd variables used by Audit
 
-  @param[in] thd
+  @param[in] thd Current thread
 
 */
 
@@ -1163,7 +1227,7 @@ void mysql_audit_finalize() { mysql_mutex_destroy(&LOCK_audit_mask); }
 /**
   Initialize an Audit plug-in
 
-  @param[in] plugin
+  @param[in] plugin Plugin structure pointer to be initialized.
 
   @retval false  OK
   @retval true   There was an error.
@@ -1208,8 +1272,8 @@ int initialize_audit_plugin(st_plugin_int *plugin) {
 /**
   Performs a bitwise OR of the installed plugins event class masks
 
-  @param[in] plugin
-  @param[in] arg
+  @param[in] plugin Source of the audit mask.
+  @param[in] arg    Destination, where the audit mask is copied.
 
   @retval false  always
 */
@@ -1217,13 +1281,13 @@ static bool calc_class_mask(THD *, plugin_ref plugin, void *arg) {
   st_mysql_audit *data = plugin_data<st_mysql_audit *>(plugin);
   if (data)
     add_audit_mask(reinterpret_cast<unsigned long *>(arg), data->class_mask);
-  return 0;
+  return false;
 }
 
 /**
   Finalize an Audit plug-in
 
-  @param[in] plugin
+  @param[in] plugin Plugin data pointer to be deinitialized.
 
   @retval false  OK
   @retval true   There was an error.
@@ -1231,13 +1295,13 @@ static bool calc_class_mask(THD *, plugin_ref plugin, void *arg) {
 int finalize_audit_plugin(st_plugin_int *plugin) {
   unsigned long event_class_mask[MYSQL_AUDIT_CLASS_MASK_SIZE];
 
-  if (plugin->plugin->deinit && plugin->plugin->deinit(NULL)) {
+  if (plugin->plugin->deinit && plugin->plugin->deinit(nullptr)) {
     DBUG_PRINT("warning", ("Plugin '%s' deinit function returned error.",
                            plugin->name.str));
     DBUG_EXECUTE("finalize_audit_plugin", return 1;);
   }
 
-  plugin->data = NULL;
+  plugin->data = nullptr;
   memset(&event_class_mask, 0, sizeof(event_class_mask));
 
   /* Iterate through all the installed plugins to create new mask */
@@ -1260,9 +1324,9 @@ int finalize_audit_plugin(st_plugin_int *plugin) {
 /**
   Dispatches an event by invoking the plugin's event_notify method.
 
-  @param[in] thd
-  @param[in] plugin
-  @param[in] arg
+  @param[in] thd    Session THD containing references to the audit plugins.
+  @param[in] plugin Plugin used for dispatching the event.
+  @param[in] arg    Opaque event data structure.
 
   @retval false  always
 */
@@ -1270,7 +1334,8 @@ int finalize_audit_plugin(st_plugin_int *plugin) {
 static int plugins_dispatch(THD *thd, plugin_ref plugin, void *arg) {
   const struct st_mysql_event_generic *event_generic =
       (const struct st_mysql_event_generic *)arg;
-  unsigned long subclass = (unsigned long)*(int *)event_generic->event;
+  unsigned long subclass = static_cast<unsigned long>(
+      *static_cast<const int *>(event_generic->event));
   st_mysql_audit *data = plugin_data<st_mysql_audit *>(plugin);
 
   /* Check to see if the plugin is interested in this event */
@@ -1289,9 +1354,9 @@ static bool plugins_dispatch_bool(THD *thd, plugin_ref plugin, void *arg) {
 /**
   Distributes an audit event to plug-ins
 
-  @param[in] thd
-  @param     event_class
-  @param[in] event
+  @param[in] thd          THD that generated the event.
+  @param     event_class  Audit event class.
+  @param[in] event        Opaque pointer to the event data.
 */
 
 static int event_class_dispatch(THD *thd, mysql_event_class_t event_class,
@@ -1371,4 +1436,18 @@ bool is_global_audit_mask_set() {
     if (mysql_global_audit_mask[i] != 0) return true;
   }
   return false;
+}
+
+size_t make_user_name(Security_context *sctx, char *buf) {
+  LEX_CSTRING sctx_user = sctx->user();
+  LEX_CSTRING sctx_host = sctx->host();
+  LEX_CSTRING sctx_ip = sctx->ip();
+  LEX_CSTRING sctx_priv_user = sctx->priv_user();
+  return static_cast<size_t>(
+      strxnmov(buf, MAX_USER_HOST_SIZE,
+               sctx_priv_user.str[0] ? sctx_priv_user.str : "", "[",
+               sctx_user.length ? sctx_user.str : "", "] @ ",
+               sctx_host.length ? sctx_host.str : "", " [",
+               sctx_ip.length ? sctx_ip.str : "", "]", NullS) -
+      buf);
 }

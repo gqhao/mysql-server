@@ -65,8 +65,18 @@ START GROUP_REPLICATION;
 
 -- source include/mysql_upgrade_preparation.inc
 --echo Run mysql_upgrade
---exec $MYSQL_UPGRADE --skip-verbose --force 2>&1
---source include/mysql_upgrade_cleanup.inc
+
+--let $allow_rpl_inited=1
+--let $_group_replication_local_address= `SELECT @@GLOBAL.group_replication_local_address`
+--let $_group_replication_group_seeds= `SELECT @@GLOBAL.group_replication_group_seeds`
+--let $explicit_default_wait_counter = 10000
+--let $restart_parameters=restart:--group_replication_group_name=$group_replication_group_name --group_replication_local_address=$_group_replication_local_address --group_replication_group_seeds=$_group_replication_group_seeds --upgrade=FORCE
+--replace_result $group_replication_group_name GROUP_REPLICATION_GROUP_NAME $_group_replication_local_address GROUP_REPLICATION_LOCAL_ADDRESS $_group_replication_group_seeds GROUP_REPLICATION_GROUP_SEEDS
+--source include/restart_mysqld.inc
+
+# Needed as we are not using rpl_restart_server.inc
+--let $rpl_server_number= 1
+--source include/rpl_reconnect.inc
 
 --source include/start_and_bootstrap_group_replication.inc
 
@@ -74,7 +84,7 @@ START GROUP_REPLICATION;
 --echo # Uninstall plugin and verify that user is still there
 --echo #
 
-UNINSTALL PLUGIN group_replication;
+--source include/uninstall_group_replication_plugin.inc
 
 --let $assert_text= The group replication user should exist after install
 --let $assert_cond= [SELECT COUNT(*) FROM mysql.user WHERE user="mysql.session"] = 1;
@@ -84,13 +94,11 @@ UNINSTALL PLUGIN group_replication;
 --echo # Cleaning
 --echo #
 
---replace_result $GROUP_REPLICATION GROUP_REPLICATION
---eval INSTALL PLUGIN group_replication SONAME '$GROUP_REPLICATION'
+--source include/install_group_replication_plugin.inc
 
 SET SESSION sql_log_bin= 0;
 call mtr.add_suppression("There was an error when trying to access the server with user: mysql.session.*");
 call mtr.add_suppression("Failed to establish an internal server connection to execute plugin operations");
-call mtr.add_suppression("Error calling group communication interfaces while trying to leave the group");
 call mtr.add_suppression("On plugin shutdown it was not possible to reset the server read mode settings. Try to reset it manually.");
 SET SESSION sql_log_bin= 1;
 

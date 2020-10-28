@@ -20,11 +20,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
 
-IF(MSVC_VERSION LESS 1910)
-  SET(WIX_REQUIRED_VERSION "V3.10")
-ELSE()
-  SET(WIX_REQUIRED_VERSION "V3.11")
-ENDIF()
+SET(WIX_REQUIRED_VERSION "V3.11")
 
 # Need an extra indirection to access ENV(ProgramFiles(x86))
 SET(MYENV "ProgramFiles(x86)")
@@ -46,9 +42,6 @@ MACRO(FIND_WIX_PATH VERSION)
 ENDMACRO()
 
 FIND_WIX_PATH(${WIX_REQUIRED_VERSION})
-IF(MSVC_VERSION EQUAL 1900 AND NOT WIX_DIR)
-  FIND_WIX_PATH("V3.11")
-ENDIF()
 
 # Finally, look in environment
 IF(NOT WIX_DIR)
@@ -67,3 +60,19 @@ ENDIF()
 FIND_PROGRAM(HEAT_EXECUTABLE heat ${WIX_DIR})
 FIND_PROGRAM(CANDLE_EXECUTABLE candle ${WIX_DIR})
 FIND_PROGRAM(LIGHT_EXECUTABLE light ${WIX_DIR})
+
+FUNCTION (CREATE_WIX_LICENCE_AND_RTF license_file)
+  # WiX wants the license text as rtf; if there is no rtf license,
+  # we create a fake one from the plain text LICENSE file.
+  IF(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.rtf")
+   SET(LICENSE_RTF "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.rtf" PARENT_SCOPE)
+  ELSE()
+    FILE(READ ${license_file} CONTENTS)
+    STRING(REGEX REPLACE "\n" "\\\\par\n" CONTENTS "${CONTENTS}")
+    STRING(REGEX REPLACE "\t" "\\\\tab" CONTENTS "${CONTENTS}")
+    FILE(WRITE "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.rtf" "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0\\fnil\\fcharset0 Courier New;}}\\viewkind4\\uc1\\pard\\lang1031\\f0\\fs15")
+    FILE(APPEND "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.rtf" "${CONTENTS}")
+    FILE(APPEND "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.rtf" "\n}\n")
+    SET(LICENSE_RTF "${CMAKE_CURRENT_BINARY_DIR}/LICENSE.rtf" PARENT_SCOPE)
+  ENDIF()
+ENDFUNCTION()

@@ -17,6 +17,10 @@
 ###############################################################################
 
 --source include/have_binlog_format_row.inc
+
+# this test requires creating a large binlog that triggers rotation
+# with compression turned on this is not deterministic
+--source include/not_binlog_transaction_compression_on.inc
 --let $MYSQLD_DATADIR= `select @@datadir`
 
 --echo #
@@ -74,3 +78,5 @@ RESET MASTER;
 --echo #
 DROP TABLE t1,t2;
 SET GLOBAL max_binlog_size=@save_max_binlog_size;
+--remove_file $MYSQLTEST_VARDIR/tmp/xa_trx_part1.sql
+--remove_file $MYSQLTEST_VARDIR/tmp/xa_trx_part2.sql

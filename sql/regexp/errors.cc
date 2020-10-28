@@ -1,4 +1,4 @@
-/* Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -29,16 +29,13 @@
 
 #include "errors.h"
 
-#include <functional>
+#include <cstddef>
 #include <unordered_map>
 
-#include "my_inttypes.h"   // MYF
-#include "my_sys.h"        // my_error
-#include "mysqld_error.h"  // Error codes
-#include "sql/current_thd.h"
-#include "sql/derror.h"      // ER_THD()
-#include "sql/sql_class.h"   // THD
-#include "sql/sql_error.h"   // Sql_condition
+#include "my_dbug.h"
+#include "my_inttypes.h"     // MYF
+#include "my_sys.h"          // my_error
+#include "mysqld_error.h"    // Error codes
 #include "unicode/utypes.h"  // UErrorCode
 
 namespace regexp {
@@ -54,6 +51,11 @@ struct UErrorCodeHash {
 std::unordered_map<UErrorCode, int, UErrorCodeHash> error_map = {
     // ICU Error code                 MySQL error code
     {U_ILLEGAL_ARGUMENT_ERROR, ER_REGEXP_ILLEGAL_ARGUMENT},
+
+    // Recent versions of ICU are returning "Incorrect Unicode property".
+    // Map it to the same as the more generic U_ILLEGAL_ARGUMENT_ERROR.
+    {U_REGEX_PROPERTY_SYNTAX, ER_REGEXP_ILLEGAL_ARGUMENT},
+
     {U_INDEX_OUTOFBOUNDS_ERROR, ER_REGEXP_INDEX_OUTOFBOUNDS_ERROR},
     {U_BUFFER_OVERFLOW_ERROR, ER_REGEXP_BUFFER_OVERFLOW},
     {U_REGEX_INTERNAL_ERROR, ER_REGEXP_INTERNAL_ERROR},
@@ -71,7 +73,9 @@ std::unordered_map<UErrorCode, int, UErrorCodeHash> error_map = {
     {U_REGEX_STOPPED_BY_CALLER, ER_QUERY_INTERRUPTED},
     {U_REGEX_TIME_OUT, ER_REGEXP_TIME_OUT},
     {U_REGEX_PATTERN_TOO_BIG, ER_REGEXP_PATTERN_TOO_BIG},
-    {U_REGEX_INVALID_CAPTURE_GROUP_NAME, ER_REGEXP_INVALID_CAPTURE_GROUP_NAME}};
+    {U_REGEX_INVALID_CAPTURE_GROUP_NAME, ER_REGEXP_INVALID_CAPTURE_GROUP_NAME},
+    {U_REGEX_INVALID_FLAG, ER_REGEXP_INVALID_FLAG},
+    {U_REGEX_NUMBER_TOO_BIG, ER_REGEX_NUMBER_TOO_BIG}};
 
 bool check_icu_status(UErrorCode status, const UParseError *parse_error) {
   if (status == U_ZERO_ERROR || U_SUCCESS(status)) return false;

@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2007, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2007, 2019, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -32,10 +32,10 @@ this program; if not, write to the Free Software Foundation, Inc.,
 
 #include <sys/types.h>
 
+#include "dict0dd.h"
 #include "dict0dict.h"
 #include "fts0priv.h"
 #include "fts0types.h"
-#include "my_inttypes.h"
 #include "pars0pars.h"
 #include "que0que.h"
 #include "trx0roll.h"
@@ -64,7 +64,7 @@ int fts_get_table_id(
 {
   int len;
 
-  ut_a(fts_table->table != NULL);
+  ut_a(fts_table->table != nullptr);
 
   switch (fts_table->type) {
     case FTS_COMMON_TABLE:
@@ -210,6 +210,14 @@ que_t *fts_parse_sql(
     fts_get_table_name(fts_table, table_name);
 
     aux_table = dd_table_open_on_name_in_mem(table_name, false);
+    DBUG_EXECUTE_IF(
+        "force_evict_fts_aux_table_and_reload", if (aux_table != nullptr) {
+          mutex_enter(&dict_sys->mutex);
+          dd_table_close(aux_table, nullptr, nullptr, true);
+          dict_table_remove_from_cache(aux_table);
+          mutex_exit(&dict_sys->mutex);
+          aux_table = nullptr;
+        });
 
     if (aux_table == nullptr) {
       aux_table = dd_table_open_on_name(thd, &mdl, table_name, false,
@@ -307,5 +315,5 @@ dberr_t fts_sql_commit(trx_t *trx) /*!< in: transaction */
  @return DB_SUCCESS or error code */
 dberr_t fts_sql_rollback(trx_t *trx) /*!< in: transaction */
 {
-  return (trx_rollback_to_savepoint(trx, NULL));
+  return (trx_rollback_to_savepoint(trx, nullptr));
 }

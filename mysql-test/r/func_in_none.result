@@ -104,6 +104,8 @@ A
 NULL
 drop table t1;
 create table t1 (id int(10) primary key);
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 insert into t1 values (1),(2),(3),(4),(5),(6),(7),(8),(9);
 select * from t1 where id in (2,5,9);
 id
@@ -152,10 +154,10 @@ drop table t1;
 set names utf8mb4;
 set names utf8;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 create table t1 (a char(10) character set utf8 not null);
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 insert into t1 values ('bbbb'),(_koi8r x'C3C3C3C3'),(_latin1 x'C4C4C4C4');
 select a from t1 where a in ('bbbb',_koi8r x'C3C3C3C3',_latin1 x'C4C4C4C4') order by a;
 a
@@ -342,6 +344,9 @@ select @str:=concat(@str, @cnt:=@cnt+1, ",")
 from t1 A, t1 B, t1 C, t1 D) Z;
 count(*)
 10000
+Warnings:
+Warning	1287	Setting user variables within expressions is deprecated and will be removed in a future release. Consider alternatives: 'SET variable=expression, ...', or 'SELECT expression(s) INTO variables(s)'.
+Warning	1287	Setting user variables within expressions is deprecated and will be removed in a future release. Consider alternatives: 'SET variable=expression, ...', or 'SELECT expression(s) INTO variables(s)'.
 set @str:=concat(@str, "10000)");
 select substr(@str, 1, 50);
 substr(@str, 1, 50)
@@ -356,6 +361,8 @@ create table t1 (
 some_id smallint(5) unsigned,
 key (some_id)
 );
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 insert into t1 values (1),(2);
 select some_id from t1 where some_id not in(2,-1);
 some_id
@@ -522,10 +529,10 @@ create table t1(f1 char(1));
 insert into t1 values ('a'),('b'),('1');
 select f1 from t1 where f1 in ('a',1);
 f1
-a
 1
-Warnings:
 Warning	1292	Truncated incorrect DOUBLE value: 'b'
+Warnings:
+a
 select f1, case f1 when 'a' then '+' when 1 then '-' end from t1;
 f1	case f1 when 'a' then '+' when 1 then '-' end
 a	+
@@ -537,9 +544,9 @@ create index t1f1_idx on t1(f1);
 select f1 from t1 where f1 in ('a',1);
 f1
 1
-a
-Warnings:
 Warning	1292	Truncated incorrect DOUBLE value: 'b'
+Warnings:
+a
 explain select f1 from t1 where f1 in ('a',1);
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	index	t1f1_idx	t1f1_idx	2	NULL	3	50.00	Using where; Using index
@@ -926,7 +933,7 @@ DROP TABLE t1,subq;
 #
 # Bug #11766270  59343: YEAR(4): INCORRECT RESULT AND VALGRIND WARNINGS WITH MIN/MAX, UNION
 #
-CREATE TABLE t1(f1 YEAR(4));
+CREATE TABLE t1(f1 YEAR);
 INSERT INTO t1 VALUES (0000),(2001);
 (SELECT MAX(f1) FROM t1) UNION (SELECT MAX(f1) FROM t1);
 Catalog	Database	Table	Table_alias	Column	Column_alias	Type	Length	Max length	Is_null	Flags	Decimals	Charsetnr

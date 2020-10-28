@@ -83,6 +83,12 @@ INSERT INTO test.t2 VALUES (1);
 --let $sync_slave_connection=server1
 --source include/sync_slave_sql_with_master.inc
 
+--let $rpl_channel_name=
+--let $rpl_connection_name= server2
+--source include/rpl_connection.inc
+--let $sync_slave_connection=server1
+--source include/sync_slave_sql_with_master.inc
+
 # Wait for all servers to be in sync
 --source include/rpl_sync.inc
 
@@ -243,3 +249,6 @@ SET SESSION sql_log_bin= 1;
 DROP TABLE test.t1;
 
 --source include/group_replication_end.inc
+# Bug#27845579 - GR_START_SLAVE_GR_ON_BOOT_ON_REJOINING_NODE_ERROR FAILS CHECK-TESTCASE
+# Restart is needed to get rid of the error file created due to --log-error option
+--source include/force_restart.inc

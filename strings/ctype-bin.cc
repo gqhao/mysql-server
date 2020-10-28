@@ -1,5 +1,5 @@
 /* Copyright (c) 2002 MySQL AB & tommy@valley.ne.jp
-   Copyright (c) 2002, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2002, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Library General Public
@@ -27,7 +27,16 @@
    Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston,
    MA 02110-1301  USA */
 
-/* This file is for binary pseudo charset, created by bar@mysql.com */
+/**
+  @file ctype-bin.cc
+  The “binary” pseudo-charset. binary is special in that it's not really
+  a character set; conversions from another charset _to_ binary means
+  “erase the charset information” and conversions _from_ binary to another
+  charset means “interpret these bytes as the destination charset”.
+  In other words, in no event are the bytes changed; you can think of
+  binary as the charset equivalent of void * that you can cast through.
+  Needless to say, this also means that using it can be rather dangerous.
+ */
 
 #include <string.h>
 #include <sys/types.h>
@@ -38,6 +47,7 @@
 #include "my_compiler.h"
 #include "my_inttypes.h"
 #include "my_macros.h"
+#include "template_utils.h"
 
 static const uchar ctype_bin[] = {
     0,  32,  32,  32,  32,  32,  32,  32,  32,  32,  40,  40, 40, 40, 40, 32,
@@ -128,13 +138,13 @@ static size_t my_lengthsp_binary(const CHARSET_INFO *cs MY_ATTRIBUTE((unused)),
 extern "C" {
 static int my_strnncollsp_binary(const CHARSET_INFO *cs, const uchar *s,
                                  size_t slen, const uchar *t, size_t tlen) {
-  return my_strnncoll_binary(cs, s, slen, t, tlen, 0);
+  return my_strnncoll_binary(cs, s, slen, t, tlen, false);
 }
 
 static int my_strnncoll_8bit_bin(const CHARSET_INFO *cs MY_ATTRIBUTE((unused)),
                                  const uchar *s, size_t slen, const uchar *t,
                                  size_t tlen, bool t_is_prefix) {
-  size_t len = MY_MIN(slen, tlen);
+  size_t len = std::min(slen, tlen);
   int cmp = memcmp(s, t, len);
   return cmp ? cmp : (int)((t_is_prefix ? len : slen) - tlen);
 }
@@ -168,7 +178,7 @@ static int my_strnncollsp_8bit_bin(
   size_t length;
   int res;
 
-  end = a + (length = MY_MIN(a_length, b_length));
+  end = a + (length = std::min(a_length, b_length));
   while (a < end) {
     if (*a++ != *b++) return ((int)a[-1] - (int)b[-1]);
   }
@@ -241,11 +251,11 @@ static int my_wc_mb_bin(const CHARSET_INFO *cs MY_ATTRIBUTE((unused)),
 
 extern "C" {
 static void my_hash_sort_8bit_bin(const CHARSET_INFO *cs MY_ATTRIBUTE((unused)),
-                                  const uchar *key, size_t len, ulong *nr1,
-                                  ulong *nr2) {
+                                  const uchar *key, size_t len, uint64 *nr1,
+                                  uint64 *nr2) {
   const uchar *pos = key;
-  ulong tmp1;
-  ulong tmp2;
+  uint64 tmp1;
+  uint64 tmp2;
 
   /*
      Remove trailing spaces. We have to do this to be able to compare
@@ -256,8 +266,8 @@ static void my_hash_sort_8bit_bin(const CHARSET_INFO *cs MY_ATTRIBUTE((unused)),
   tmp1 = *nr1;
   tmp2 = *nr2;
 
-  for (; pos < (uchar *)key; pos++) {
-    tmp1 ^= (ulong)((((uint)tmp1 & 63) + tmp2) * ((uint)*pos)) + (tmp1 << 8);
+  for (; pos < key; pos++) {
+    tmp1 ^= (uint64)((((uint)tmp1 & 63) + tmp2) * ((uint)*pos)) + (tmp1 << 8);
     tmp2 += 3;
   }
 
@@ -266,19 +276,19 @@ static void my_hash_sort_8bit_bin(const CHARSET_INFO *cs MY_ATTRIBUTE((unused)),
 }
 
 static void my_hash_sort_bin(const CHARSET_INFO *cs MY_ATTRIBUTE((unused)),
-                             const uchar *key, size_t len, ulong *nr1,
-                             ulong *nr2) {
+                             const uchar *key, size_t len, uint64 *nr1,
+                             uint64 *nr2) {
   const uchar *pos = key;
-  ulong tmp1;
-  ulong tmp2;
+  uint64 tmp1;
+  uint64 tmp2;
 
   key += len;
 
   tmp1 = *nr1;
   tmp2 = *nr2;
 
-  for (; pos < (uchar *)key; pos++) {
-    tmp1 ^= (ulong)((((uint)tmp1 & 63) + tmp2) * ((uint)*pos)) + (tmp1 << 8);
+  for (; pos < key; pos++) {
+    tmp1 ^= (uint64)((((uint)tmp1 & 63) + tmp2) * ((uint)*pos)) + (tmp1 << 8);
     tmp2 += 3;
   }
 
@@ -349,7 +359,7 @@ static int my_wildcmp_bin_impl(const CHARSET_INFO *cs, const char *str,
                                   w_one, w_many, recurse_level + 1);
           if (tmp <= 0) return (tmp);
         }
-      } while (str != str_end && wildstr[0] != w_many);
+      } while (str != str_end);
       return (-1);
     }
   }
@@ -370,7 +380,7 @@ static size_t my_strnxfrm_8bit_bin_pad_space(const CHARSET_INFO *cs, uchar *dst,
                                              uint flags) {
   srclen = std::min(srclen, dstlen);
   srclen = std::min<size_t>(srclen, nweights);
-  if (dst != src) memcpy(dst, src, srclen);
+  if (dst != src && srclen > 0) memcpy(dst, src, srclen);
   return my_strxfrm_pad(cs, dst, dst + srclen, dst + dstlen,
                         static_cast<uint>(nweights - srclen), flags);
 }
@@ -381,7 +391,7 @@ static size_t my_strnxfrm_8bit_bin_no_pad(const CHARSET_INFO *cs, uchar *dst,
                                           uint flags) {
   srclen = std::min(srclen, dstlen);
   srclen = std::min<size_t>(srclen, nweights);
-  if (dst != src) memcpy(dst, src, srclen);
+  if (dst != src && srclen > 0) memcpy(dst, src, srclen);
   if ((flags & MY_STRXFRM_PAD_TO_MAXLEN) && srclen < dstlen) {
     cs->cset->fill(cs, pointer_cast<char *>(dst) + srclen, dstlen - srclen,
                    cs->pad_char);
@@ -469,8 +479,8 @@ static MY_COLLATION_HANDLER my_collation_binary_handler = {
     my_propagate_simple};
 
 static MY_CHARSET_HANDLER my_charset_handler = {
-    NULL,              /* init */
-    NULL,              /* ismbchar      */
+    nullptr,           /* init */
+    nullptr,           /* ismbchar      */
     my_mbcharlen_8bit, /* mbcharlen     */
     my_numchars_8bit,
     my_charpos_8bit,
@@ -504,19 +514,19 @@ CHARSET_INFO my_charset_bin = {
     MY_CS_COMPILED | MY_CS_BINSORT | MY_CS_PRIMARY, /* state */
     "binary",                                       /* cs name    */
     "binary",                                       /* name          */
-    "",                                             /* comment       */
-    NULL,                                           /* tailoring     */
-    NULL,                                           /* coll_param    */
+    "Binary pseudo charset",                        /* comment       */
+    nullptr,                                        /* tailoring     */
+    nullptr,                                        /* coll_param    */
     ctype_bin,                                      /* ctype         */
     bin_char_array,                                 /* to_lower      */
     bin_char_array,                                 /* to_upper      */
-    NULL,                                           /* sort_order    */
-    NULL,                                           /* uca           */
-    NULL,                                           /* tab_to_uni    */
-    NULL,                                           /* tab_from_uni  */
+    nullptr,                                        /* sort_order    */
+    nullptr,                                        /* uca           */
+    nullptr,                                        /* tab_to_uni    */
+    nullptr,                                        /* tab_from_uni  */
     &my_unicase_default,                            /* caseinfo     */
-    NULL,                                           /* state_map    */
-    NULL,                                           /* ident_map    */
+    nullptr,                                        /* state_map    */
+    nullptr,                                        /* ident_map    */
     1,                                              /* strxfrm_multiply */
     1,                                              /* caseup_multiply  */
     1,                                              /* casedn_multiply  */
@@ -526,8 +536,8 @@ CHARSET_INFO my_charset_bin = {
     0,                                              /* min_sort_char */
     255,                                            /* max_sort_char */
     0,                                              /* pad char      */
-    0, /* escape_with_backslash_is_dangerous */
-    1, /* levels_for_compare */
+    false, /* escape_with_backslash_is_dangerous */
+    1,     /* levels_for_compare */
     &my_charset_handler,
     &my_collation_binary_handler,
     NO_PAD};

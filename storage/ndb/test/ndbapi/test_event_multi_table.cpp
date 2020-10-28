@@ -1,4 +1,4 @@
-/* Copyright (c) 2005, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2005, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -103,7 +103,7 @@ static int copy_events(Ndb *ndb)
       Uint32 gci= pOp->getGCI();
 
       if (!pOp->isConsistent()) {
-	g_err << "A node failure has occured and events might be missing\n";
+	g_err << "A node failure has occurred and events might be missing\n";
 	DBUG_RETURN(-1);
       }
 	
@@ -273,16 +273,13 @@ int
 main(int argc, char** argv)
 {
   NDB_INIT(argv[0]);
-  const char *load_default_groups[]= { "mysql_cluster",0 };
-  MEM_ROOT alloc;
-  ndb_load_defaults(NULL,load_default_groups,&argc,&argv,&alloc);
+  Ndb_opts opts(argc, argv, my_long_options);
 
   int ho_error;
 #ifndef DBUG_OFF
   opt_debug= "d:t:F:L";
 #endif
-  if ((ho_error=handle_options(&argc, &argv, my_long_options, 
-			       ndb_std_get_one_option)))
+  if ((ho_error=opts.handle_options(())))
     return NDBT_ProgramExit(NDBT_WRONGARGS);
 
   DBUG_ENTER("main");

@@ -4,6 +4,7 @@
 
 --source include/force_myisam_default.inc
 --source include/have_myisam.inc
+--source include/not_hypergraph.inc  # Appears to depend on query plans.
 
 # Save the initial number of concurrent sessions
 --source include/count_sessions.inc
@@ -4620,7 +4621,7 @@ connection default;
 let $wait_condition=
   select count(*) = 1 from information_schema.processlist
   where state = "Waiting for table metadata lock" and
-        info = "select * from t1, t2";
+        info = "PREPARE stmt1 FROM ...";
 --source include/wait_condition.inc
 
 --echo # This ALTER TABLE upgrades SNRW lock on t1 to X lock.

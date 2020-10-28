@@ -43,6 +43,8 @@ INSERT INTO t1 VALUES (2);
 ==== Try START SLAVE on slave : I/O thread should throw error ====
 [connection slave]
 START SLAVE;
+Warnings:
+Warning	1287	'START SLAVE' is deprecated and will be removed in a future release. Please use START REPLICA instead
 include/wait_for_slave_io_error.inc [errno=2061]
 ==== Try setting correct public key ====
 [connection slave]
@@ -60,8 +62,9 @@ Warnings:
 Note	###	Sending passwords in plain text without SSL/TLS is extremely insecure.
 Note	###	Storing MySQL user name or password information in the master info repository is not secure and is therefore not recommended. Please consider using the USER and PASSWORD connection options for START SLAVE; see the 'START SLAVE Syntax' in the MySQL Manual for more information.
 ==== IO thread should start without issues because password is still cached ====
-[connection slave]
 include/start_slave.inc
+[connection master]
+include/sync_slave_sql_with_master.inc
 SELECT * FROM t1;
 c1
 1

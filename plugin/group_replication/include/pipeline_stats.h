@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include <mysql/group_replication_priv.h>
 #include "my_inttypes.h"
 #include "plugin/group_replication/include/gcs_plugin_messages.h"
 #include "plugin/group_replication/include/plugin_psi.h"
@@ -37,24 +38,6 @@
     FCM_QUOTA introduces a delay only on transactions the exceed a quota
 */
 enum Flow_control_mode { FCM_DISABLED = 0, FCM_QUOTA };
-extern ulong flow_control_mode_var;
-
-/**
-  Flow control queue threshold for certifier and for applier.
-*/
-extern long flow_control_certifier_threshold_var;
-extern long flow_control_applier_threshold_var;
-
-/**
-  Options to fine-tune flow-control behaviour
-*/
-extern long flow_control_min_quota_var;
-extern long flow_control_min_recovery_quota_var;
-extern long flow_control_max_quota_var;
-extern int flow_control_member_quota_percent_var;
-extern int flow_control_period_var;
-extern int flow_control_hold_percent_var;
-extern int flow_control_release_percent_var;
 
 /**
   @class Pipeline_stats_member_message
@@ -158,7 +141,7 @@ class Pipeline_stats_member_message : public Plugin_gcs_message {
   /**
     Message destructor
    */
-  virtual ~Pipeline_stats_member_message();
+  ~Pipeline_stats_member_message() override;
 
   /**
     Get transactions waiting certification counter value.
@@ -251,7 +234,7 @@ class Pipeline_stats_member_message : public Plugin_gcs_message {
 
     @param[out] buffer   the message buffer to be written
   */
-  void encode_payload(std::vector<unsigned char> *buffer) const;
+  void encode_payload(std::vector<unsigned char> *buffer) const override;
 
   /**
     Message decoding method
@@ -259,7 +242,8 @@ class Pipeline_stats_member_message : public Plugin_gcs_message {
     @param[in] buffer the received data
     @param[in] end    the end of the buffer
   */
-  void decode_payload(const unsigned char *buffer, const unsigned char *end);
+  void decode_payload(const unsigned char *buffer,
+                      const unsigned char *end) override;
 
  private:
   int32 m_transactions_waiting_certification;
@@ -334,6 +318,43 @@ class Pipeline_stats_member_collector {
   void increment_transactions_applied_during_recovery();
 
   /**
+    @returns transactions waiting to be applied during recovery.
+  */
+  uint64 get_transactions_waiting_apply_during_recovery();
+
+  /**
+    Increment delivered transactions during recovery counter value.
+  */
+  void increment_transactions_delivered_during_recovery();
+
+  /**
+    Increment certified transactions during recovery counter value.
+  */
+  void increment_transactions_certified_during_recovery();
+
+  /**
+    Increment negatively certified transactions during recovery counter value.
+  */
+  void increment_transactions_certified_negatively_during_recovery();
+
+  /**
+    @returns transactions waiting to be certified during recovery.
+  */
+  uint64 get_transactions_waiting_certification_during_recovery();
+
+  /**
+    Compute the transactions applied during last flow-control tick
+    while the member is in recovery.
+  */
+  void compute_transactions_deltas_during_recovery();
+
+  /**
+    @returns transactions applied during last flow-control tick
+             while the member is in recovery.
+  */
+  uint64 get_delta_transactions_applied_during_recovery();
+
+  /**
     @returns transactions waiting to be applied.
   */
   int32 get_transactions_waiting_apply();
@@ -365,18 +386,19 @@ class Pipeline_stats_member_collector {
   */
   void set_send_transaction_identifiers();
 
-  /**
-    @returns recovery transactions applied
-  */
-  uint64 get_transactions_applied_during_recovery();
-
  private:
   std::atomic<int32> m_transactions_waiting_apply;
   std::atomic<int64> m_transactions_certified;
   std::atomic<int64> m_transactions_applied;
   std::atomic<int64> m_transactions_local;
   std::atomic<int64> m_transactions_local_rollback;
+  /* Includes both positively and negatively certified. */
+  std::atomic<uint64> m_transactions_certified_during_recovery;
+  std::atomic<uint64> m_transactions_certified_negatively_during_recovery;
   std::atomic<uint64> m_transactions_applied_during_recovery;
+  uint64 m_previous_transactions_applied_during_recovery;
+  std::atomic<uint64> m_delta_transactions_applied_during_recovery;
+  std::atomic<uint64> m_transactions_delivered_during_recovery;
 
   bool send_transaction_identifiers;
   mysql_mutex_t m_transactions_waiting_apply_lock;
@@ -400,9 +422,11 @@ class Pipeline_member_stats {
   Pipeline_member_stats(Pipeline_stats_member_message &msg);
 
   /**
-    Destructor.
+    Constructor.
   */
-  virtual ~Pipeline_member_stats();
+  Pipeline_member_stats(Pipeline_stats_member_collector *pipeline_stats,
+                        ulonglong applier_queue, ulonglong negative_certified,
+                        ulonglong certificatin_size);
 
   /**
     Updates member statistics with a new message from the network
@@ -464,18 +488,24 @@ class Pipeline_member_stats {
   int64 get_transactions_rows_validating();
 
   /**
-    Get set of stable group transactions.
-
-    @return the transaction identifier.
+    Get the stable group transactions.
   */
-  const std::string &get_transaction_committed_all_members();
+  void get_transaction_committed_all_members(std::string &value);
 
   /**
-    Get last positive certified transaction.
-
-    @return the transaction identifier.
+    Set the stable group transactions.
   */
-  const std::string &get_transaction_last_conflict_free();
+  void set_transaction_committed_all_members(char *str, size_t len);
+
+  /**
+    Get the last positive certified transaction.
+  */
+  void get_transaction_last_conflict_free(std::string &value);
+
+  /**
+    Set the last positive certified transaction.
+  */
+  void set_transaction_last_conflict_free(std::string &value);
 
   /**
     Get local member transactions negatively certified.
@@ -615,6 +645,10 @@ class Flow_control_module {
   mysql_cond_t m_flow_control_cond;
 
   Flow_control_module_info m_info;
+  /*
+    A rw lock to protect the Flow_control_module_info map.
+  */
+  Checkable_rwlock *m_flow_control_module_info_lock;
 
   /*
     Number of members that did have waiting transactions on

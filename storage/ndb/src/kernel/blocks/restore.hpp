@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2005, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2005, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -44,7 +44,7 @@ class Restore : public SimulatedBlock
 
 public:
   Restore(Block_context& ctx, Uint32 instanceNumber = 0);
-  virtual ~Restore();
+  ~Restore() override;
   BLOCK_DEFINES(Restore);
   
 protected:
@@ -198,7 +198,6 @@ private:
   /* Methods to handle UPGRADE from old LCP format to new LCP format. */
   void lcp_create_ctl_open(Signal*, FilePtr);
   void lcp_create_ctl_done_open(Signal*, FilePtr);
-  void lcp_create_ctl_write(Signal*, FilePtr);
   void lcp_create_ctl_done_write(Signal*, FilePtr);
   void lcp_create_ctl_done_close(Signal*, FilePtr);
 
@@ -284,7 +283,8 @@ private:
   
   List::DataBufferPool m_databuffer_pool;
   Uint32 m_table_buf[MAX_WORDS_META_FILE];
-  Uint32 m_lcp_ctl_file_data[2][BackupFormat::NDB_LCP_CTL_FILE_SIZE_BIG/4];
+  Uint32
+    m_lcp_ctl_file_data[2][BackupFormat::LCP_CTL_FILE_BUFFER_SIZE_IN_WORDS];
 };
 
 NdbOut& operator << (NdbOut&, const Restore::Column&);

@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -41,9 +41,9 @@ namespace gcs_parameters_unittest {
 
 class GcsNodeAddressTest : public GcsBaseTest {
  protected:
-  GcsNodeAddressTest(){};
+  GcsNodeAddressTest() {}
 
-  static void SetUpTestCase() { My_xp_util::init_time(); }
+  static void SetUpTestCase() {}
 };
 
 TEST_F(GcsNodeAddressTest, TestNodeAddress) {
@@ -88,6 +88,7 @@ TEST_F(GcsNodeAddressTest, TestNodeAddress) {
   ASSERT_EQ(invalid_addr_1.get_member_address(), address);
   ASSERT_EQ(invalid_addr_1.get_member_ip(), hostname);
   ASSERT_EQ(invalid_addr_1.get_member_port(), port);
+  ASSERT_FALSE(invalid_addr_1.is_valid());
   rep = invalid_addr_1.get_member_representation();
   ASSERT_EQ(*rep, address);
   delete rep;
@@ -95,7 +96,7 @@ TEST_F(GcsNodeAddressTest, TestNodeAddress) {
   /*
     Check address "127.0.0.1:".
   */
-  hostname = "127.0.0.1";
+  hostname = "";
   port = 0;
   address = "127.0.0.1:";
   Gcs_xcom_node_address invalid_addr_2(address);
@@ -103,6 +104,7 @@ TEST_F(GcsNodeAddressTest, TestNodeAddress) {
   ASSERT_EQ(invalid_addr_2.get_member_address(), address);
   ASSERT_EQ(invalid_addr_2.get_member_ip(), hostname);
   ASSERT_EQ(invalid_addr_2.get_member_port(), port);
+  ASSERT_FALSE(invalid_addr_2.is_valid());
   rep = invalid_addr_2.get_member_representation();
   ASSERT_EQ(*rep, address);
   delete rep;
@@ -110,7 +112,7 @@ TEST_F(GcsNodeAddressTest, TestNodeAddress) {
   /*
     Check address "127.0.0.1:invalid".
   */
-  hostname = "127.0.0.1";
+  hostname = "";
   port = 0;
   address = "127.0.0.1:invalid";
   Gcs_xcom_node_address invalid_addr_3(address);
@@ -118,23 +120,153 @@ TEST_F(GcsNodeAddressTest, TestNodeAddress) {
   ASSERT_EQ(invalid_addr_3.get_member_address(), address);
   ASSERT_EQ(invalid_addr_3.get_member_ip(), hostname);
   ASSERT_EQ(invalid_addr_3.get_member_port(), port);
+  ASSERT_FALSE(invalid_addr_3.is_valid());
   rep = invalid_addr_3.get_member_representation();
+  ASSERT_EQ(*rep, address);
+  delete rep;
+}
+
+TEST_F(GcsNodeAddressTest, TestNodeAddressV6) {
+  /*
+    Check address "[::1]:1030".
+  */
+  std::string hostname = "::1";
+  xcom_port port = 1030;
+  std::string address = "[::1]:1030";
+  Gcs_xcom_node_address local_addr_2(address);
+
+  ASSERT_EQ(local_addr_2.get_member_address(), address);
+  ASSERT_EQ(local_addr_2.get_member_ip(), hostname);
+  ASSERT_EQ(local_addr_2.get_member_port(), port);
+  std::string *rep = local_addr_2.get_member_representation();
+  ASSERT_EQ(*rep, address);
+  delete rep;
+
+  /*
+    Check address "[::1]".
+  */
+  hostname = "";
+  port = 0;
+  address = "[::1]";
+  Gcs_xcom_node_address invalid_addr_1(address);
+
+  ASSERT_EQ(invalid_addr_1.get_member_address(), address);
+  ASSERT_EQ(invalid_addr_1.get_member_ip(), hostname);
+  ASSERT_EQ(invalid_addr_1.get_member_port(), port);
+  ASSERT_FALSE(invalid_addr_1.is_valid());
+  rep = invalid_addr_1.get_member_representation();
+  ASSERT_EQ(*rep, address);
+  delete rep;
+
+  /*
+    Check address "[::1]:".
+  */
+  hostname = "";
+  port = 0;
+  address = "[::1]:";
+  Gcs_xcom_node_address invalid_addr_2(address);
+
+  ASSERT_EQ(invalid_addr_2.get_member_address(), address);
+  ASSERT_EQ(invalid_addr_2.get_member_ip(), hostname);
+  ASSERT_EQ(invalid_addr_2.get_member_port(), port);
+  ASSERT_FALSE(invalid_addr_2.is_valid());
+  rep = invalid_addr_2.get_member_representation();
+  ASSERT_EQ(*rep, address);
+  delete rep;
+
+  /*
+    Check address "[::1:1]:".
+  */
+  hostname = "";
+  port = 0;
+  address = "[::1:1]:";
+  Gcs_xcom_node_address invalid_addr_3(address);
+
+  ASSERT_EQ(invalid_addr_3.get_member_address(), address);
+  ASSERT_EQ(invalid_addr_3.get_member_ip(), hostname);
+  ASSERT_EQ(invalid_addr_3.get_member_port(), port);
+  ASSERT_FALSE(invalid_addr_3.is_valid());
+  rep = invalid_addr_3.get_member_representation();
+  ASSERT_EQ(*rep, address);
+  delete rep;
+
+  /*
+    Check address "::1".
+  */
+  hostname = "";
+  port = 0;
+  address = "::1";
+  Gcs_xcom_node_address invalid_addr_4(address);
+
+  ASSERT_EQ(invalid_addr_4.get_member_address(), address);
+  ASSERT_EQ(invalid_addr_4.get_member_ip(), hostname);
+  ASSERT_EQ(invalid_addr_4.get_member_port(), port);
+  ASSERT_FALSE(invalid_addr_4.is_valid());
+  rep = invalid_addr_4.get_member_representation();
+  ASSERT_EQ(*rep, address);
+  delete rep;
+
+  /*
+    Check address "[::1".
+  */
+  hostname = "";
+  port = 0;
+  address = "[::1";
+  Gcs_xcom_node_address invalid_addr_5(address);
+
+  ASSERT_EQ(invalid_addr_5.get_member_address(), address);
+  ASSERT_EQ(invalid_addr_5.get_member_ip(), hostname);
+  ASSERT_EQ(invalid_addr_5.get_member_port(), port);
+  ASSERT_FALSE(invalid_addr_5.is_valid());
+  rep = invalid_addr_5.get_member_representation();
+  ASSERT_EQ(*rep, address);
+  delete rep;
+
+  /*
+  Check address "::1]".
+  */
+  hostname = "";
+  port = 0;
+  address = "2606:b400:85c:1048:221:f6ff:fe2e:972b]:10301";
+  Gcs_xcom_node_address invalid_addr_6(address);
+
+  ASSERT_EQ(invalid_addr_6.get_member_address(), address);
+  ASSERT_EQ(invalid_addr_6.get_member_ip(), hostname);
+  ASSERT_EQ(invalid_addr_6.get_member_port(), port);
+  ASSERT_FALSE(invalid_addr_6.is_valid());
+  rep = invalid_addr_6.get_member_representation();
+  ASSERT_EQ(*rep, address);
+  delete rep;
+
+  /*
+  Check address "[hostname]".
+  */
+  hostname = "";
+  port = 0;
+  address = "[hostname]:10301";
+  Gcs_xcom_node_address invalid_addr_7(address);
+
+  ASSERT_EQ(invalid_addr_7.get_member_address(), address);
+  ASSERT_EQ(invalid_addr_7.get_member_ip(), hostname);
+  ASSERT_EQ(invalid_addr_7.get_member_port(), port);
+  ASSERT_FALSE(invalid_addr_7.is_valid());
+  rep = invalid_addr_7.get_member_representation();
   ASSERT_EQ(*rep, address);
   delete rep;
 }
 
 class GcsUUIDTest : public GcsBaseTest {
  protected:
-  GcsUUIDTest(){};
+  GcsUUIDTest() {}
 
-  static void SetUpTestCase() { My_xp_util::init_time(); }
+  static void SetUpTestCase() {}
 };
 
 TEST_F(GcsUUIDTest, TestGcsUUID) {
   /*
     Check that the UUIDs are different as expected.
   */
-  uchar *buffer = NULL;
+  uchar *buffer = nullptr;
   u_int size = 0;
   Gcs_xcom_uuid uuid_1 = Gcs_xcom_uuid::create_uuid();
 
@@ -161,7 +293,7 @@ TEST_F(GcsUUIDTest, TestGcsUUID) {
   */
   My_xp_util::sleep_seconds(1);
   Gcs_xcom_uuid uuid_2 = Gcs_xcom_uuid::create_uuid();
-  ASSERT_FALSE(uuid_2.decode(static_cast<uchar *>(NULL), size));
+  ASSERT_FALSE(uuid_2.decode(nullptr, size));
 
   /*
     Check that if we decode the buffer objects will have the same value.
@@ -175,9 +307,9 @@ TEST_F(GcsUUIDTest, TestGcsUUID) {
 
 class GcsNodeInformationTest : public GcsBaseTest {
  protected:
-  GcsNodeInformationTest(){};
+  GcsNodeInformationTest() {}
 
-  static void SetUpTestCase() { My_xp_util::init_time(); }
+  static void SetUpTestCase() {}
 };
 
 TEST_F(GcsNodeInformationTest, TestGcsNodeInformation) {
@@ -232,11 +364,11 @@ TEST_F(GcsNodeInformationTest, TestGcsNodeInformation) {
 
   /*
     Set the timestamp and check whether it has timed out:
-    (m_timestamp + timeout) < now_ts
+    (m_suspicion_creation_timestamp + suspicion_timeout) < now_ts
   */
-  node_1.set_timestamp(1 /* Set the m_timestamp */);
+  node_1.set_suspicion_creation_timestamp(1 /* Set the m_timestamp */);
   ASSERT_TRUE(node_1.has_timed_out(3 /* now_ts */, 1 /* timeout */));
-  ASSERT_EQ(node_1.get_timestamp(), 1);
+  ASSERT_EQ(node_1.get_suspicion_creation_timestamp(), 1);
 
   /*
     Check whether the constructor:
@@ -262,9 +394,9 @@ TEST_F(GcsNodeInformationTest, TestGcsNodeInformation) {
 
 class GcsNodesTest : public GcsBaseTest {
  protected:
-  GcsNodesTest(){};
+  GcsNodesTest() {}
 
-  static void SetUpTestCase() { My_xp_util::init_time(); }
+  static void SetUpTestCase() {}
 };
 
 TEST_F(GcsNodesTest, TestGcsNodesBasicProperties) {
@@ -279,7 +411,7 @@ TEST_F(GcsNodesTest, TestGcsNodesBasicProperties) {
   Gcs_xcom_node_information node_3("localhost:1033");
   node_3.set_node_no(3);
 
-  const Gcs_xcom_node_information *ret = NULL;
+  const Gcs_xcom_node_information *ret = nullptr;
 
   /*
     Initially the node's number is void and check whether the
@@ -323,7 +455,7 @@ TEST_F(GcsNodesTest, TestGcsNodesBasicProperties) {
   ASSERT_EQ(ret->get_member_id(), node_2.get_member_id());
 
   ret = nodes.get_node(node_3.get_member_id());
-  ASSERT_TRUE(ret == NULL);
+  ASSERT_TRUE(ret == nullptr);
 
   /*
     Trying to get a node using get_node(const std::string &member_id).
@@ -335,7 +467,7 @@ TEST_F(GcsNodesTest, TestGcsNodesBasicProperties) {
   ASSERT_EQ(ret->get_member_id(), node_2.get_member_id());
 
   ret = nodes.get_node(node_3.get_member_id().get_member_id());
-  ASSERT_TRUE(ret == NULL);
+  ASSERT_TRUE(ret == nullptr);
 
   /*
     Trying to get a node using get_node(unsigned int node_no).
@@ -347,7 +479,7 @@ TEST_F(GcsNodesTest, TestGcsNodesBasicProperties) {
   ASSERT_EQ(ret->get_member_id(), node_2.get_member_id());
 
   ret = nodes.get_node(node_3.get_member_id().get_member_id());
-  ASSERT_TRUE(ret == NULL);
+  ASSERT_TRUE(ret == nullptr);
 
   /*
     Trying to get a node using get_node(const Gcs_xcom_uuid &uuid).
@@ -372,9 +504,9 @@ TEST_F(GcsNodesTest, TestGcsNodesCopyingNodes) {
   node_2.set_node_no(2);
   nodes.add_node(node_2);
 
-  const Gcs_xcom_node_information *ret = NULL;
-  Gcs_xcom_node_information *ret_1 = NULL;
-  Gcs_xcom_node_information *ret_2 = NULL;
+  const Gcs_xcom_node_information *ret = nullptr;
+  Gcs_xcom_node_information *ret_1 = nullptr;
+  Gcs_xcom_node_information *ret_2 = nullptr;
 
   /*
     Copying nodes through the add_nodes method which cleans up
@@ -449,15 +581,15 @@ TEST_F(GcsNodesTest, TestGcsNodesEncoding) {
     addrs[n] -> Pointer to the member identifier as string.
     uuids[n] -> data.data_len and data.data_val.
   */
-  const Gcs_xcom_node_information *ret_1 = NULL;
-  const Gcs_xcom_node_information *ret_2 = NULL;
+  const Gcs_xcom_node_information *ret_1 = nullptr;
+  const Gcs_xcom_node_information *ret_2 = nullptr;
 
   Gcs_xcom_uuid uuid_1;
   Gcs_xcom_uuid uuid_2;
 
   unsigned int length = 0;
-  char **addrs = NULL;
-  blob *uuids = NULL;
+  char **addrs = nullptr;
+  blob *uuids = nullptr;
 
   nodes.encode(&length, &addrs, &uuids);
 
@@ -485,7 +617,7 @@ TEST_F(GcsNodesTest, TestGcsNodesEncoding) {
 }
 
 TEST_F(GcsNodesTest, TestGcsNodesConstructor) {
-  const Gcs_xcom_node_information *ret = NULL;
+  const Gcs_xcom_node_information *ret = nullptr;
 
   Gcs_xcom_uuid uuid_1 = Gcs_xcom_uuid::create_uuid();
   blob blob_1 = {{0, static_cast<char *>(malloc(uuid_1.actual_value.size()))}};
@@ -498,12 +630,13 @@ TEST_F(GcsNodesTest, TestGcsNodesConstructor) {
                 &blob_2.data.data_len);
 
   node_address node_addrs[2] = {
-      {(char *)"127.0.0.1:12345", blob_1, {x_1_0, x_1_2}},
-      {(char *)"127.0.0.1:12343", blob_2, {x_1_0, x_1_2}}};
+      {const_cast<char *>("127.0.0.1:12345"), blob_1, {x_1_0, x_1_2}},
+      {const_cast<char *>("127.0.0.1:12343"), blob_2, {x_1_0, x_1_2}}};
 
   site_def *site_config = new_site_def();
   init_site_def(2, node_addrs, site_config);
   site_config->nodeno = 0;
+  site_config->x_proto = static_cast<xcom_proto>(1);
 
   node_set nodes;
   alloc_node_set(&nodes, 2);

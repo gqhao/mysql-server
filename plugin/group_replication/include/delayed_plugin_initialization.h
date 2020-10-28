@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2020, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -23,7 +23,7 @@
 #ifndef DELAYED_PLUGIN_INITIALIZATION_INCLUDE
 #define DELAYED_PLUGIN_INITIALIZATION_INCLUDE
 
-#include "plugin/group_replication/include/read_mode_handler.h"
+#include "plugin/group_replication/include/plugin_handlers/read_mode_handler.h"
 
 class Delayed_initialization_thread {
  public:
@@ -37,9 +37,8 @@ class Delayed_initialization_thread {
   /**
     The thread handler.
 
-    @return
-      @retval 0      OK
-      @retval !=0    Error
+    @retval 0      OK
+    @retval !=0    Error
   */
   int initialization_thread_handler();
 

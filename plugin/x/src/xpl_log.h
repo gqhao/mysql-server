@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,8 +22,14 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-#ifndef _XPL_LOG_H_
-#define _XPL_LOG_H_
+#ifndef PLUGIN_X_SRC_XPL_LOG_H_
+#define PLUGIN_X_SRC_XPL_LOG_H_
+
+#if defined(XPLUGIN_LOG_DEBUG) && !defined(XPLUGIN_DISABLE_LOG)
+#define DEBUG_VAR(YES) YES
+#else
+#define DEBUG_VAR(NO)
+#endif  // defined(XPLUGIN_LOG_DEBUG) && !defined(XPLUGIN_DISABLE_LOG)
 
 #ifndef XPLUGIN_DISABLE_LOG
 
@@ -39,8 +45,6 @@ namespace xpl {
 
 extern MYSQL_PLUGIN plugin_handle;
 
-void plugin_log_message(MYSQL_PLUGIN *p, const plugin_log_level, const char *);
-
 }  // namespace xpl
 
 #define log_error(errcode, ...) \
@@ -51,6 +55,8 @@ void plugin_log_message(MYSQL_PLUGIN *p, const plugin_log_level, const char *);
 
 #define log_info(errcode, ...) \
   LogPluginErr(INFORMATION_LEVEL, errcode, ##__VA_ARGS__)
+
+#define log_system(errcode, ...) LogErr(SYSTEM_LEVEL, errcode, ##__VA_ARGS__)
 
 #ifdef XPLUGIN_LOG_DEBUG
 #define log_debug(...) \
@@ -75,7 +81,10 @@ void plugin_log_message(MYSQL_PLUGIN *p, const plugin_log_level, const char *);
 #define log_error(...) \
   do {                 \
   } while (0)
+#define log_system(...) \
+  do {                  \
+  } while (0)
 
 #endif  // XPLUGIN_DISABLE_LOG
 
-#endif  // _XPL_LOG_H_
+#endif  // PLUGIN_X_SRC_XPL_LOG_H_

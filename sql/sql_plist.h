@@ -1,6 +1,6 @@
 #ifndef SQL_PLIST_H
 #define SQL_PLIST_H
-/* Copyright (c) 2009, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2009, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -80,13 +80,13 @@ class I_P_List : public C, public I {
     is a bad idea.
   */
  public:
-  I_P_List() : I(&m_first), m_first(NULL){};
-  inline void empty() {
-    m_first = NULL;
+  I_P_List() : I(&m_first), m_first(nullptr) {}
+  inline void clear() {
+    m_first = nullptr;
     C::reset();
     I::set_last(&m_first);
   }
-  inline bool is_empty() const { return (m_first == NULL); }
+  inline bool is_empty() const { return (m_first == nullptr); }
   inline void push_front(T *a) {
     *B::next_ptr(a) = m_first;
     if (m_first)
@@ -106,7 +106,7 @@ class I_P_List : public C, public I {
     C::inc();
   }
   inline void insert_after(T *pos, T *a) {
-    if (pos == NULL)
+    if (pos == nullptr)
       push_front(a);
     else {
       *B::next_ptr(a) = *B::next_ptr(pos);
@@ -240,7 +240,7 @@ class I_P_List_counter {
 template <typename T>
 class I_P_List_no_push_back {
  protected:
-  I_P_List_no_push_back(T **){};
+  I_P_List_no_push_back(T **) {}
   void set_last(T **) {}
   /*
     T** get_last() const method is intentionally left unimplemented
@@ -260,7 +260,7 @@ class I_P_List_fast_push_back {
   T **m_last;
 
  protected:
-  I_P_List_fast_push_back(T **a) : m_last(a){};
+  I_P_List_fast_push_back(T **a) : m_last(a) {}
   void set_last(T **a) { m_last = a; }
   T **get_last() const { return m_last; }
   void swap(I_P_List_fast_push_back<T> &rhs) { std::swap(m_last, rhs.m_last); }

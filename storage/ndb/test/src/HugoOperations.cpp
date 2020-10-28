@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2003, 2017, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2003, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -104,15 +104,13 @@ NdbConnection* HugoOperations::getTransaction(){
   return pTrans;
 }
 
-int HugoOperations::pkReadRecord(Ndb* pNdb,
-				 int recordNo,
-				 int numRecords,
-				 NdbOperation::LockMode lm,
-                                 NdbOperation::LockMode *lmused){
+int HugoOperations::pkReadRecord(Ndb* pNdb, int recordNo, int numRecords,
+                                 NdbOperation::LockMode lm,
+                                 NdbOperation::LockMode *lmused, bool noWait) {
   int a;  
   allocRows(numRecords);
   indexScans.clear();  
-  int check;
+  int check = -1;
 
   NdbOperation* pOp = 0;
   pIndexScanOp = 0;
@@ -128,7 +126,7 @@ int HugoOperations::pkReadRecord(Ndb* pNdb,
       setNdbError(pTrans->getNdbError());
       return NDBT_FAILED;
     }
-    
+
 rand_lock_mode:
     switch(lm){
     case NdbOperation::LM_Read:
@@ -162,7 +160,16 @@ rand_lock_mode:
       setNdbError(pTrans->getNdbError());
       return NDBT_FAILED;
     }
-    
+
+    if (noWait)
+    {
+      if (pOp->setNoWait())
+      {
+        g_err << __LINE__  << " Setting noWait flag failed" << endl;
+        return NDBT_FAILED;
+      }
+    }
+
     // Define primary keys
     if (equalForRow(pOp, r+recordNo) != 0)
     {
@@ -876,11 +883,11 @@ HugoOperations::wait_async(Ndb* pNdb, int timeout)
   return -1;
 }
 
-HugoOperations::HugoOperations(const NdbDictionary::Table& _tab,
-			       const NdbDictionary::Index* idx):
-  UtilTransactions(_tab, idx),
+HugoOperations::HugoOperations(const NdbDictionary::Table& table,
+                               const NdbDictionary::Index* index):
+  UtilTransactions(table, index),
   pIndexScanOp(NULL),
-  calc(_tab),
+  calc(table),
   m_quiet(false),
   avCallback(NULL)
 {

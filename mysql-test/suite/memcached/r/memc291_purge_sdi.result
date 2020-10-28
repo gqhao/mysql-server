@@ -9,6 +9,8 @@ c2 VARCHAR(1024),
 primary key(c1))
 ENGINE = INNODB;
 INSTALL PLUGIN daemon_memcached SONAME 'libmemcached.so';
+Warnings:
+Warning	1681	'InnoDB Memcached Plugin' is deprecated and will be removed in a future release.
 1. Insert Small data
 2. Insert Large data. Will be stored in external pages
 3. Move off-page to in-page
@@ -24,6 +26,6 @@ SET GLOBAL innodb_fast_shutdown=0;
 # Kill and restart
 SET GLOBAL innodb_fast_shutdown=0;
 # restart
-DROP TABLE t1;
 UNINSTALL PLUGIN daemon_memcached;
+DROP TABLE t1;
 DROP DATABASE innodb_memcache;

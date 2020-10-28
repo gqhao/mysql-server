@@ -1,5 +1,5 @@
 /*
-   Copyright (c) 2014, 2018, Oracle and/or its affiliates. All rights reserved.
+   Copyright (c) 2014, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -30,7 +30,6 @@
 #include "client/base/abstract_program.h"
 #include "client/base/composite_options_provider.h"
 #include "client/base/i_connection_factory.h"
-#include "client/base/mutex.h"
 #include "client/client_priv.h"
 #include "my_compiler.h"
 #include "my_inttypes.h"
@@ -57,12 +56,12 @@ class Mysql_connection_options : public Composite_options_provider,
       Creates all options that will be provided.
       Implementation of Abstract_options_provider virtual method.
      */
-    void create_options();
+    void create_options() override;
 
     /**
       Applies option values to MYSQL connection structure.
      */
-    void apply_for_connection(MYSQL *connection);
+    bool apply_for_connection(MYSQL *connection);
 
    private:
     Nullable<std::string> m_ssl_mode_string;
@@ -85,13 +84,13 @@ class Mysql_connection_options : public Composite_options_provider,
     Creates all options that will be provided.
     Implementation of Abstract_options_provider virtual method.
    */
-  void create_options();
+  void create_options() override;
 
   /**
     Provides new connection to MySQL database server based on option values.
     Implementation of I_connection_factory interface.
    */
-  MYSQL *create_connection();
+  MYSQL *create_connection() override;
 
   /**
     Retrieves charset that will be used in new MySQL connections.. Can be NULL
@@ -143,6 +142,8 @@ class Mysql_connection_options : public Composite_options_provider,
   Nullable<std::string> m_default_charset;
   Nullable<std::string> m_server_public_key;
   bool m_get_server_public_key;
+  uint m_zstd_compress_level;
+  Nullable<std::string> m_compress_algorithm;
 };
 
 }  // namespace Options

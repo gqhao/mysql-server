@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1994, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1994, 2020, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -24,8 +24,6 @@ this program; if not, write to the Free Software Foundation, Inc.,
 
 *****************************************************************************/
 
-#include "my_compiler.h"
-
 /** @file include/rem0rec.h
  Record manager
 
@@ -38,13 +36,15 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include <ostream>
 #include <sstream>
 
+#include "univ.i"
+
 #include "data0data.h"
 #include "mtr0types.h"
 #include "page0types.h"
 #include "rem/rec.h"
 #include "rem0types.h"
 #include "trx0types.h"
-#include "univ.i"
+#include "ut0class_life_cycle.h"
 
 /** The following function is used to get the pointer of the next chained record
  on the same page.
@@ -110,14 +110,6 @@ ulint rec_get_n_owned_new(
 UNIV_INLINE
 void rec_set_n_owned_new(rec_t *rec, page_zip_des_t *page_zip, ulint n_owned);
 
-/** The following function is used to retrieve the info bits of
- a record.
- @return info bits */
-UNIV_INLINE
-ulint rec_get_info_bits(const rec_t *rec, /*!< in: physical record */
-                        ulint comp) /*!< in: nonzero=compact page format */
-    MY_ATTRIBUTE((warn_unused_result));
-
 /** The following function is used to set the info bits of a record.
 @param[in]	rec	old-style physical record
 @param[in]	bits	info bits */
@@ -172,10 +164,16 @@ void rec_set_deleted_flag_old(rec_t *rec, ulint flag);
 UNIV_INLINE
 void rec_set_deleted_flag_new(rec_t *rec, page_zip_des_t *page_zip, ulint flag);
 
+/** The following function is used to set the instant bit.
+@param[in,out]	rec	new-style physical record
+@param[in]	flag	set the bit to this flag */
+UNIV_INLINE
+void rec_set_instant_flag_new(rec_t *rec, bool flag);
+
 /** The following function tells if a new-style record is a node pointer.
  @return true if node pointer */
 UNIV_INLINE
-ibool rec_get_node_ptr_flag(const rec_t *rec) /*!< in: physical record */
+bool rec_get_node_ptr_flag(const rec_t *rec) /*!< in: physical record */
     MY_ATTRIBUTE((warn_unused_result));
 
 /** The following function is used to get the order number of an old-style
@@ -266,11 +264,24 @@ ulint rec_get_n_extern_new(
 /** The following function is used to get the offset to the nth
  data field in an old-style record.
  @return offset to the field */
-ulint rec_get_nth_field_offs_old(
-    const rec_t *rec, /*!< in: record */
-    ulint n,          /*!< in: index of the field */
-    ulint *len);      /*!< out: length of the field; UNIV_SQL_NULL
-                      if SQL null */
+ulint rec_get_nth_field_offs_old(const rec_t *rec, /*!< in: record */
+                                 ulint n,     /*!< in: index of the field */
+                                 ulint *len); /*!< out: length of the field;
+                                              UNIV_SQL_NULL if SQL null */
+
+/** Gets the value of the specified field in the record in old style.
+This is only used for record from instant index, which is clustered
+index and has some instantly added columns.
+@param[in]	rec	physical record
+@param[in]	n	index of the field
+@param[in]	index	clustered index where the record resides
+@param[out]	len	length of the field, UNIV_SQL if SQL null
+@return value of the field, could be either pointer to rec or default value */
+UNIV_INLINE
+const byte *rec_get_nth_field_old_instant(const rec_t *rec, uint16_t n,
+                                          const dict_index_t *index,
+                                          ulint *len);
+
 #define rec_get_nth_field_old(rec, n, len) \
   ((rec) + rec_get_nth_field_offs_old(rec, n, len))
 /** Gets the physical size of an old-style field.
@@ -286,13 +297,61 @@ ulint rec_get_nth_field_size(const rec_t *rec, /*!< in: record */
 record.
 @param[in]	offsets	array returned by rec_get_offsets()
 @param[in]	n	index of the field
-@param[out]	len	length of the field; UNIV_SQL_NULL if SQL null
+@param[out]	len	length of the field; UNIV_SQL_NULL if SQL null;
+                        UNIV_SQL_ADD_COL_DEFAULT if it's default value and no
+value inlined
 @return offset from the origin of rec */
 UNIV_INLINE
 ulint rec_get_nth_field_offs(const ulint *offsets, ulint n, ulint *len);
 
+#ifdef UNIV_DEBUG
+/** Gets the value of the specified field in the record.
+This is used for normal cases, i.e. secondary index or clustered index
+which must have no instantly added columns. Also note, if it's non-leaf
+page records, it's OK to always use this functioni.
+@param[in]	rec	physical record
+@param[in]	offsets	array returned by rec_get_offsets()
+@param[in]	n	index of the field
+@param[out]	len	length of the field, UNIV_SQL_NULL if SQL null
+@return value of the field */
+inline byte *rec_get_nth_field(const rec_t *rec, const ulint *offsets, ulint n,
+                               ulint *len) {
+  ulint off = rec_get_nth_field_offs(offsets, n, len);
+  ut_ad(*len != UNIV_SQL_ADD_COL_DEFAULT);
+  return (const_cast<byte *>(rec) + off);
+}
+#else /* UNIV_DEBUG */
+/** Gets the value of the specified field in the record.
+This is used for normal cases, i.e. secondary index or clustered index
+which must have no instantly added columns. Also note, if it's non-leaf
+page records, it's OK to always use this functioni. */
 #define rec_get_nth_field(rec, offsets, n, len) \
   ((rec) + rec_get_nth_field_offs(offsets, n, len))
+#endif /* UNIV_DEBUG */
+
+/** Gets the value of the specified field in the record.
+This is only used when there is possibility that the record comes from the
+clustered index, which has some instantly added columns.
+@param[in]	rec	physical record
+@param[in]	offsets	array returned by rec_get_offsets()
+@param[in]	n	index of the field
+@param[in]	index	clustered index where the record resides, or nullptr
+                        if the record doesn't have instantly added columns
+                        for sure
+@param[out]	len	length of the field, UNIV_SQL_NULL if SQL null
+@return	value of the field, could be either pointer to rec or default value */
+UNIV_INLINE
+const byte *rec_get_nth_field_instant(const rec_t *rec, const ulint *offsets,
+                                      ulint n, const dict_index_t *index,
+                                      ulint *len);
+
+/** Determine if the field is not NULL and not having default value
+after instant ADD COLUMN
+@param[in]	len	length of a field
+@return	true if not NULL and not having default value */
+UNIV_INLINE
+bool rec_field_not_null_not_add_col_def(ulint len);
+
 /** Determine if the offsets are for a record in the new
  compact format.
  @return nonzero if compact format */
@@ -333,6 +392,12 @@ ulint rec_offs_nth_sql_null(
     const ulint *offsets, /*!< in: array returned by rec_get_offsets() */
     ulint n)              /*!< in: nth field */
     MY_ATTRIBUTE((warn_unused_result));
+
+/** Returns nonzero if the default bit is set in nth field of rec.
+@return	nonzero if default bit is set */
+UNIV_INLINE
+ulint rec_offs_nth_default(const ulint *offsets, ulint n);
+
 /** Gets the physical size of a field.
  @return length of field */
 UNIV_INLINE
@@ -375,6 +440,81 @@ ulint rec_get_data_size_old(const rec_t *rec) /*!< in: physical record */
     MY_ATTRIBUTE((warn_unused_result));
 #define rec_offs_init(offsets) \
   rec_offs_set_n_alloc(offsets, (sizeof offsets) / sizeof *offsets)
+
+/**
+A helper RAII wrapper for otherwise difficult to use sequence of:
+
+  ulint offsets_[REC_OFFS_NORMAL_SIZE];
+  rec_offs_init(offsets_);
+  mem_heap_t *heap = nullptr;
+
+  const ulint *offsets =
+      rec_get_offsets(rec, index, offsets_, ULINT_UNDEFINED, &heap);
+
+  DO_SOMETHING(offsets);
+
+  if (heap != nullptr) {
+    mem_heap_free(heap);
+  }
+
+With this helper you can simply do:
+
+  DO_SOMETHING(Rec_offsets().compute(rec,index));
+
+And if you need to reuse the memory allocated offsets several times you can:
+  Rec_offsets offsets;
+  for(rec: recs) DO_SOMTHING(offsets.compute(rec,index))
+*/
+class Rec_offsets : private ut::Non_copyable {
+ public:
+  /** Prepares offsets to initially point to the fixed-size buffer, and marks
+  the memory as allocated, but uninitialized. You first need to call compute()
+  to use it */
+  Rec_offsets() { rec_offs_init(m_preallocated_buffer); }
+
+  /** Computes offsets for given record. Returned array is owned by this
+  instance. You can use its value as long as this object does not go out of
+  scope (which can free the buffer), and you don't call compute() again (which
+  can overwrite the offsets).
+  @param[in]  rec   The record for which you want to compute the offsets
+  @param[in]  index The index which contains the record
+  @return A pointer to offsets array owned by this instance. Valid till next
+  call to compute() or end of this instance lifetime.
+  */
+  const ulint *compute(const rec_t *rec, const dict_index_t *index) {
+    m_offsets =
+        rec_get_offsets(rec, index, m_offsets, ULINT_UNDEFINED, &m_heap);
+    return m_offsets;
+  }
+  /** Deallocated dynamically allocated memory, if any. */
+  ~Rec_offsets() {
+    if (m_heap) {
+      mem_heap_free(m_heap);
+      m_heap = nullptr;
+    }
+  }
+
+ private:
+  /** Pointer to heap used by rec_get_offsets(). Initially nullptr. If row is
+  really big, rec_get_offsets() may need to allocate new buffer for offsets.
+  At, first, when heap is null, rec_get_offsets() will create new heap, and pass
+  it back via reference. On subsequent calls, we will pass this heap, so it
+  is reused if needed. Therefore all allocated buffers are in this heap, if it
+  is not nullptr */
+  mem_heap_t *m_heap{nullptr};
+
+  /** Buffer with size large enough to handle common cases without having to use
+  heap. This is the initial value of m_offsets.*/
+  ulint m_preallocated_buffer[REC_OFFS_NORMAL_SIZE];
+
+  /* Initially points to m_preallocated_buffer (which is uninitialized memory).
+  After each call to compute() contains the pointer to the most recently
+  computed offsets.
+  We pass it back to rec_get_offsets() on subsequent calls to compute() to reuse
+  the same memory if possible. */
+  ulint *m_offsets{m_preallocated_buffer};
+};
+
 /** The following function returns the data size of a physical
  record, that is the sum of field lengths. SQL null fields
  are counted as length 0 fields. The value returned by the function
@@ -467,17 +607,20 @@ rec_t *rec_copy_prefix_to_buf(
     byte **buf,                /*!< in/out: memory buffer
                                for the copied prefix,
                                or NULL */
-    ulint *buf_size);          /*!< in/out: buffer size */
+    size_t *buf_size           /*!< in/out: buffer size */
+);
 /** Compute a hash value of a prefix of a leaf page record.
 @param[in]	rec		leaf page record
 @param[in]	offsets		rec_get_offsets(rec)
 @param[in]	n_fields	number of complete fields to fold
 @param[in]	n_bytes		number of bytes to fold in the last field
 @param[in]	fold		fold value of the index identifier
+@param[in]	index		index where the record resides
 @return the folded value */
 UNIV_INLINE
 ulint rec_fold(const rec_t *rec, const ulint *offsets, ulint n_fields,
-               ulint n_bytes, ulint fold) MY_ATTRIBUTE((warn_unused_result));
+               ulint n_bytes, ulint fold, const dict_index_t *index)
+    MY_ATTRIBUTE((warn_unused_result));
 #endif /* !UNIV_HOTBACKUP */
 /** Builds a physical record out of a data tuple and
  stores it into the given buffer.
@@ -486,19 +629,17 @@ rec_t *rec_convert_dtuple_to_rec(
     byte *buf,                 /*!< in: start address of the
                                physical record */
     const dict_index_t *index, /*!< in: record descriptor */
-    const dtuple_t *dtuple,    /*!< in: data tuple */
-    ulint n_ext)               /*!< in: number of
-                               externally stored columns */
+    const dtuple_t *dtuple)    /*!< in: data tuple */
     MY_ATTRIBUTE((warn_unused_result));
 /** Returns the extra size of an old-style physical record if we know its
  data size and number of fields.
+ @param[in] data_size	data size
+ @param[in] n_fields	number of fields
+ @param[in] has_ext	true if tuple has ext fields
  @return extra size */
 UNIV_INLINE
-ulint rec_get_converted_extra_size(
-    ulint data_size, /*!< in: data size */
-    ulint n_fields,  /*!< in: number of fields */
-    ulint n_ext)     /*!< in: number of externally stored columns */
-    MY_ATTRIBUTE((const));
+ulint rec_get_converted_extra_size(ulint data_size, ulint n_fields,
+                                   bool has_ext);
 /** Determines the size of a data tuple prefix in ROW_FORMAT=COMPACT.
  @return total size */
 ulint rec_get_converted_size_comp_prefix(
@@ -520,12 +661,11 @@ ulint rec_get_converted_size_comp(
     ulint *extra);             /*!< out: extra size */
 /** The following function returns the size of a data tuple when converted to
  a physical record.
+ @param[in] index	record descriptor
+ @param[in] dtuple	data tuple
  @return size */
 UNIV_INLINE
-ulint rec_get_converted_size(
-    dict_index_t *index,    /*!< in: record descriptor */
-    const dtuple_t *dtuple, /*!< in: data tuple */
-    ulint n_ext)            /*!< in: number of externally stored columns */
+ulint rec_get_converted_size(const dict_index_t *index, const dtuple_t *dtuple)
     MY_ATTRIBUTE((warn_unused_result));
 #ifndef UNIV_HOTBACKUP
 /** Copies the first n fields of a physical record to a data tuple.
@@ -538,29 +678,51 @@ void rec_copy_prefix_to_dtuple(
                                to copy */
     mem_heap_t *heap);         /*!< in: memory heap */
 #endif                         /* !UNIV_HOTBACKUP */
+
+/** Get the length of the number of fields for any new style record.
+@param[in]	n_fields	number of fields in the record
+@return	length of specified number of fields */
+UNIV_INLINE
+uint8_t rec_get_n_fields_length(ulint n_fields);
+
+/** Set the number of fields for one new style leaf page record.
+This is only needed for table after instant ADD COLUMN.
+@param[in,out]	rec		leaf page record
+@param[in]	n_fields	number of fields in the record
+@return the length of the n_fields occupies */
+UNIV_INLINE
+uint8_t rec_set_n_fields(rec_t *rec, ulint n_fields);
+
 /** Validates the consistency of a physical record.
  @return true if ok */
 ibool rec_validate(
     const rec_t *rec,      /*!< in: physical record */
     const ulint *offsets); /*!< in: array returned by rec_get_offsets() */
-/** Prints an old-style physical record. */
-void rec_print_old(FILE *file,        /*!< in: file where to print */
-                   const rec_t *rec); /*!< in: physical record */
+
+/** Prints an old-style physical record.
+@param[in] file File where to print
+@param[in] rec Physical record */
+void rec_print_old(FILE *file, const rec_t *rec);
+
 #ifndef UNIV_HOTBACKUP
-/** Prints a spatial index record. */
-void rec_print_mbr_rec(
-    FILE *file,            /*!< in: file where to print */
-    const rec_t *rec,      /*!< in: physical record */
-    const ulint *offsets); /*!< in: array returned by rec_get_offsets() */
+
+/** Prints a spatial index record.
+@param[in] file File where to print
+@param[in] rec Physical record
+@param[in] offsets Array returned by rec_get_offsets() */
+void rec_print_mbr_rec(FILE *file, const rec_t *rec, const ulint *offsets);
+
 /** Prints a physical record. */
 void rec_print_new(
     FILE *file,            /*!< in: file where to print */
     const rec_t *rec,      /*!< in: physical record */
     const ulint *offsets); /*!< in: array returned by rec_get_offsets() */
-/** Prints a physical record. */
-void rec_print(FILE *file,                 /*!< in: file where to print */
-               const rec_t *rec,           /*!< in: physical record */
-               const dict_index_t *index); /*!< in: record descriptor */
+
+/** Prints a physical record.
+@param[in] file File where to print
+@param[in] rec Physical record
+@param[in] index Record descriptor */
+void rec_print(FILE *file, const rec_t *rec, const dict_index_t *index);
 
 /** Pretty-print a record.
 @param[in,out]	o	output stream

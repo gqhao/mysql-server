@@ -1,3 +1,4 @@
+CALL mtr.add_suppression("Enabling keys got errno");
 drop table if exists t1,t2;
 SET SQL_WARNINGS=1;
 SET sql_mode = 'NO_ENGINE_SUBSTITUTION';
@@ -43,9 +44,9 @@ optimize table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	optimize	status	OK
 show index from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	0	PRIMARY	1	a	A	5	NULL	NULL		BTREE			YES
-t1	1	b	1	b	A	2	NULL	NULL		BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	0	PRIMARY	1	a	A	5	NULL	NULL		BTREE			YES	NULL
+t1	1	b	1	b	A	2	NULL	NULL		BTREE			YES	NULL
 analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	Table is already up to date
@@ -53,9 +54,9 @@ optimize table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	optimize	status	Table is already up to date
 show index from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	0	PRIMARY	1	a	A	5	NULL	NULL		BTREE			YES
-t1	1	b	1	b	A	2	NULL	NULL		BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	0	PRIMARY	1	a	A	5	NULL	NULL		BTREE			YES	NULL
+t1	1	b	1	b	A	2	NULL	NULL		BTREE			YES	NULL
 drop table t1;
 create table t1 (a int not null, b int not null, c int not null, primary key (a),key(b)) engine=myisam;
 insert into t1 values (3,3,3),(1,1,1),(2,2,2),(4,4,4);
@@ -338,6 +339,10 @@ KEY `poster_login` (`poster_login`),
 KEY `topic_id` (`topic_id`),
 FULLTEXT KEY `post_text` (`post_text`)
 ) ENGINE=MyISAM;
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 INSERT INTO t1 (post_text) VALUES ('ceci est un test'),('ceci est un test'),('ceci est un test'),('ceci est un test'),('ceci est un test');
 REPAIR TABLE t1;
 Table	Op	Msg_type	Msg_text
@@ -363,23 +368,23 @@ analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	Table is already up to date
 show index from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	b	1	b	A	5	NULL	NULL	YES	BTREE			YES
-t1	1	c	1	c	A	5	NULL	NULL	YES	BTREE			YES
-t1	1	a	1	a	A	2	NULL	NULL		BTREE			YES
-t1	1	a	2	b	A	5	NULL	NULL	YES	BTREE			YES
-t1	1	c_2	1	c	A	5	NULL	NULL	YES	BTREE			YES
-t1	1	c_2	2	a	A	5	NULL	NULL		BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	b	1	b	A	5	NULL	NULL	YES	BTREE			YES	NULL
+t1	1	c	1	c	A	5	NULL	NULL	YES	BTREE			YES	NULL
+t1	1	a	1	a	A	2	NULL	NULL		BTREE			YES	NULL
+t1	1	a	2	b	A	5	NULL	NULL	YES	BTREE			YES	NULL
+t1	1	c_2	1	c	A	5	NULL	NULL	YES	BTREE			YES	NULL
+t1	1	c_2	2	a	A	5	NULL	NULL		BTREE			YES	NULL
 explain select * from t1,t2 where t1.a=t2.a;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t2	NULL	ALL	a	NULL	NULL	NULL	2	100.00	NULL
-1	SIMPLE	t1	NULL	ALL	a	NULL	NULL	NULL	5	60.00	Using where; Using join buffer (Block Nested Loop)
+1	SIMPLE	t1	NULL	ALL	a	NULL	NULL	NULL	5	60.00	Using where; Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b`,`test`.`t1`.`c` AS `c`,`test`.`t2`.`a` AS `a`,`test`.`t2`.`b` AS `b`,`test`.`t2`.`c` AS `c` from `test`.`t1` join `test`.`t2` where (`test`.`t1`.`a` = `test`.`t2`.`a`)
 explain select * from t1,t2 force index(a) where t1.a=t2.a;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t2	NULL	ALL	a	NULL	NULL	NULL	2	100.00	NULL
-1	SIMPLE	t1	NULL	ALL	a	NULL	NULL	NULL	5	60.00	Using where; Using join buffer (Block Nested Loop)
+1	SIMPLE	t1	NULL	ALL	a	NULL	NULL	NULL	5	60.00	Using where; Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b`,`test`.`t1`.`c` AS `c`,`test`.`t2`.`a` AS `a`,`test`.`t2`.`b` AS `b`,`test`.`t2`.`c` AS `c` from `test`.`t1` join `test`.`t2` FORCE INDEX (`a`) where (`test`.`t1`.`a` = `test`.`t2`.`a`)
 explain select * from t1 force index(a),t2 force index(a) where t1.a=t2.a;
@@ -397,7 +402,7 @@ Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b`,`t
 explain select * from t1,t2 force index(c) where t1.a=t2.a;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t2	NULL	ALL	NULL	NULL	NULL	NULL	2	100.00	NULL
-1	SIMPLE	t1	NULL	ALL	a	NULL	NULL	NULL	5	60.00	Using where; Using join buffer (Block Nested Loop)
+1	SIMPLE	t1	NULL	ALL	a	NULL	NULL	NULL	5	60.00	Using where; Using join buffer (hash join)
 Warnings:
 Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b`,`test`.`t1`.`c` AS `c`,`test`.`t2`.`a` AS `a`,`test`.`t2`.`b` AS `b`,`test`.`t2`.`c` AS `c` from `test`.`t1` join `test`.`t2` FORCE INDEX (`c`) where (`test`.`t1`.`a` = `test`.`t2`.`a`)
 explain select * from t1 where a=0 or a=2;
@@ -511,9 +516,9 @@ b.
 c.
 update t1 set b='b\b' where a=2;
 update t1 set b='B' where a > 1;
-ERROR 23000: Duplicate entry 'B' for key 'b'
+ERROR 23000: Duplicate entry 'B' for key 't1.b'
 insert into t1 (b) values ('b');
-ERROR 23000: Duplicate entry 'b' for key 'b'
+ERROR 23000: Duplicate entry 'b' for key 't1.b'
 select * from t1;
 a	b
 1	a
@@ -545,13 +550,13 @@ a
 explain select sql_big_result distinct t1.a from t1,t2 order by t2.a;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	system	NULL	NULL	NULL	NULL	1	100.00	Using temporary
-1	SIMPLE	t2	NULL	index	NULL	PRIMARY	4	NULL	2	100.00	Using index; Distinct
+1	SIMPLE	t2	NULL	index	NULL	PRIMARY	4	NULL	2	100.00	Using index
 Warnings:
 Note	1003	/* select#1 */ select distinct sql_big_result '1' AS `a` from `test`.`t2` order by `test`.`t2`.`a`
 explain select distinct t1.a from t1,t2 order by t2.a;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	system	NULL	NULL	NULL	NULL	1	100.00	Using temporary
-1	SIMPLE	t2	NULL	index	NULL	PRIMARY	4	NULL	2	100.00	Using index; Distinct
+1	SIMPLE	t2	NULL	index	NULL	PRIMARY	4	NULL	2	100.00	Using index
 Warnings:
 Note	1003	/* select#1 */ select distinct '1' AS `a` from `test`.`t2` order by `test`.`t2`.`a`
 drop table t1,t2;
@@ -596,7 +601,7 @@ t1c1	t2c1
 UNLOCK TABLES;
 DROP TABLE t1,t2;
 CREATE TABLE t1 (`a` int(11) NOT NULL default '0', `b` int(11) NOT NULL default '0', UNIQUE KEY `a` USING RTREE (`a`,`b`)) ENGINE=MyISAM;
-Got one of the listed errors
+ERROR 42000: A SPATIAL index may only contain a geometrical type column
 create table t1 (a int, b varchar(200), c text not null) checksum=1;
 create table t2 (a int, b varchar(200), c text not null) checksum=0;
 insert t1 values (1, "aaa", "bbb"), (NULL, "", "ccccc"), (0, NULL, "");
@@ -628,15 +633,15 @@ analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	Table is already up to date
 show keys from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	a	1	a	A	NULL	NULL	NULL	YES	BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	a	1	a	A	NULL	NULL	NULL	YES	BTREE			YES	NULL
 alter table t1 disable keys;
 analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	OK
 show keys from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	a	1	a	A	NULL	NULL	NULL	YES	BTREE	disabled		YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	a	1	a	A	NULL	NULL	NULL	YES	BTREE	disabled		YES	NULL
 create table t2 (a int);
 set @@rand_seed1=31415926,@@rand_seed2=2718281828;
 insert t1 select * from t2;
@@ -644,15 +649,15 @@ analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	OK
 show keys from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	a	1	a	A	NULL	NULL	NULL	YES	BTREE	disabled		YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	a	1	a	A	NULL	NULL	NULL	YES	BTREE	disabled		YES	NULL
 alter table t1 enable keys;
 analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	Table is already up to date
 show keys from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	a	1	a	A	1000	NULL	NULL	YES	BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	a	1	a	A	1000	NULL	NULL	YES	BTREE			YES	NULL
 alter table t1 engine=heap;
 alter table t1 disable keys;
 Warnings:
@@ -661,8 +666,8 @@ analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	note	The storage engine for the table doesn't support analyze
 show keys from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	a	1	a	NULL	500	NULL	NULL	YES	HASH			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	a	1	a	NULL	500	NULL	NULL	YES	HASH			YES	NULL
 drop table t1,t2;
 create table t1 ( a tinytext, b char(1), index idx (a(1),b) );
 insert into t1 values (null,''), (null,'');
@@ -670,7 +675,7 @@ explain select count(*) from t1 where a is null;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	ref	idx	idx	7	const	1	100.00	Using where
 Warnings:
-Note	1003	/* select#1 */ select count(0) AS `count(*)` from `test`.`t1` where isnull(`test`.`t1`.`a`)
+Note	1003	/* select#1 */ select count(0) AS `count(*)` from `test`.`t1` where (`test`.`t1`.`a` is null)
 select count(*) from t1 where a is null;
 count(*)
 2
@@ -678,7 +683,7 @@ drop table t1;
 create table t1 (c1 int, c2 varchar(4) not null default '',
 key(c2(3))) default charset=utf8;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 insert into t1 values (1,'A'), (2, 'B'), (3, 'A');
 update t1 set c2='A  B' where c1=2;
 check table t1;
@@ -709,8 +714,8 @@ analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	OK
 show index from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	a	1	a	A	10	NULL	NULL	YES	BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	a	1	a	A	10	NULL	NULL	YES	BTREE			YES	NULL
 insert into t1 values (11);
 delete from t1 where a=11;
 check table t1;
@@ -720,8 +725,8 @@ analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	Table is already up to date
 show index from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	a	1	a	A	10	NULL	NULL	YES	BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	a	1	a	A	10	NULL	NULL	YES	BTREE			YES	NULL
 set myisam_stats_method=nulls_equal;
 show variables like 'myisam_stats_method';
 Variable_name	Value
@@ -732,8 +737,8 @@ analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	OK
 show index from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	a	1	a	A	5	NULL	NULL	YES	BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	a	1	a	A	5	NULL	NULL	YES	BTREE			YES	NULL
 insert into t1 values (11);
 delete from t1 where a=11;
 check table t1;
@@ -743,8 +748,8 @@ analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	Table is already up to date
 show index from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	a	1	a	A	5	NULL	NULL	YES	BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	a	1	a	A	5	NULL	NULL	YES	BTREE			YES	NULL
 set myisam_stats_method=DEFAULT;
 show variables like 'myisam_stats_method';
 Variable_name	Value
@@ -755,8 +760,8 @@ analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	OK
 show index from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	a	1	a	A	10	NULL	NULL	YES	BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	a	1	a	A	10	NULL	NULL	YES	BTREE			YES	NULL
 insert into t1 values (11);
 delete from t1 where a=11;
 check table t1;
@@ -766,8 +771,8 @@ analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	Table is already up to date
 show index from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	a	1	a	A	10	NULL	NULL	YES	BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	a	1	a	A	10	NULL	NULL	YES	BTREE			YES	NULL
 drop table t1;
 set myisam_stats_method=nulls_ignored;
 show variables like 'myisam_stats_method';
@@ -785,21 +790,21 @@ analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	OK
 show index from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	a	1	a	A	2	NULL	NULL	YES	BTREE			YES
-t1	1	a	2	b	A	4	NULL	NULL	YES	BTREE			YES
-t1	1	a	3	c	A	4	NULL	NULL	YES	BTREE			YES
-t1	1	a	4	d	A	4	NULL	NULL	YES	BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	a	1	a	A	2	NULL	NULL	YES	BTREE			YES	NULL
+t1	1	a	2	b	A	4	NULL	NULL	YES	BTREE			YES	NULL
+t1	1	a	3	c	A	4	NULL	NULL	YES	BTREE			YES	NULL
+t1	1	a	4	d	A	4	NULL	NULL	YES	BTREE			YES	NULL
 delete from t1;
 analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	OK
 show index from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	a	1	a	A	0	NULL	NULL	YES	BTREE			YES
-t1	1	a	2	b	A	0	NULL	NULL	YES	BTREE			YES
-t1	1	a	3	c	A	0	NULL	NULL	YES	BTREE			YES
-t1	1	a	4	d	A	0	NULL	NULL	YES	BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	a	1	a	A	0	NULL	NULL	YES	BTREE			YES	NULL
+t1	1	a	2	b	A	0	NULL	NULL	YES	BTREE			YES	NULL
+t1	1	a	3	c	A	0	NULL	NULL	YES	BTREE			YES	NULL
+t1	1	a	4	d	A	0	NULL	NULL	YES	BTREE			YES	NULL
 set myisam_stats_method=DEFAULT;
 drop table t1;
 create table t1(
@@ -879,6 +884,13 @@ PRIMARY KEY  (`_id`),
 UNIQUE KEY `sequence_name_index` (`name`(50)),
 KEY (`length_`)
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 INSERT INTO t1 VALUES
 (1,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'sample1',''),
 (2,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'sample2',''),
@@ -944,6 +956,13 @@ PRIMARY KEY  (`_id`),
 UNIQUE KEY `sequence_name_index` (`name`(50)),
 KEY (`length_`)
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 INSERT INTO t1 VALUES
 (1,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'sample1',''),
 (2,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'sample2',''),
@@ -1166,8 +1185,8 @@ length(c1)	c1
 0	
 SELECT DISTINCT length(c1), c1 FROM t1 ORDER BY c1;
 length(c1)	c1
-0	
 2		A
+0	
 2	 B
 DROP TABLE t1;
 End of 4.1 tests
@@ -1322,7 +1341,7 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 Warnings:
 Note	1003	/* select#1 */ select count(0) AS `count(*)` from `test`.`t1` where ((`test`.`t1`.`v` between 'a' and 'a ') and (`test`.`t1`.`v` between 'a  ' and 'b\n'))
 alter table t1 add unique(v);
-ERROR 23000: Duplicate entry '{ ' for key 'v_2'
+ERROR 23000: Duplicate entry '{ ' for key 't1.v_2'
 alter table t1 add key(v);
 Warnings:
 Warning	1831	Duplicate index 'v_2' defined on the table 'test.t1'. This is deprecated and will be disallowed in a future release.
@@ -1343,7 +1362,7 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 1	SIMPLE	t1	NULL	ref	v,v_2	#	13	const	#	100.00	NULL
 Warnings:
 Note	1003	/* select#1 */ select `test`.`t1`.`v` AS `v`,`test`.`t1`.`c` AS `c`,`test`.`t1`.`t` AS `t` from `test`.`t1` where (`test`.`t1`.`v` = 'a')
-select TRIM(v),count(*) from t1 group by TRIM(v) asc limit 10;
+select TRIM(v),count(*) from t1 group by TRIM(v) order by TRIM(v) limit 10;
 TRIM(v)	count(*)
 a	1
 a	10
@@ -1355,7 +1374,7 @@ f	10
 g	10
 h	10
 i	10
-select TRIM(v),count(t) from t1 group by TRIM(v) asc limit 10;
+select TRIM(v),count(t) from t1 group by TRIM(v) order by TRIM(v) limit 10;
 TRIM(v)	count(t)
 a	1
 a	10
@@ -1367,7 +1386,7 @@ f	10
 g	10
 h	10
 i	10
-select TRIM(v),count(c) from t1 group by TRIM(v) asc limit 10;
+select TRIM(v),count(c) from t1 group by TRIM(v) order by TRIM(v) limit 10;
 TRIM(v)	count(c)
 a	1
 a	10
@@ -1379,7 +1398,7 @@ f	10
 g	10
 h	10
 i	10
-select sql_big_result TRIM(v),count(t) from t1 group by TRIM(v) asc limit 10;
+select sql_big_result TRIM(v),count(t) from t1 group by TRIM(v) order by TRIM(v) limit 10;
 TRIM(v)	count(t)
 a	1
 a	10
@@ -1391,7 +1410,7 @@ f	10
 g	10
 h	10
 i	10
-select sql_big_result TRIM(v),count(c) from t1 group by TRIM(v) asc limit 10;
+select sql_big_result TRIM(v),count(c) from t1 group by TRIM(v) order by TRIM(v) limit 10;
 TRIM(v)	count(c)
 a	1
 a	10
@@ -1403,7 +1422,7 @@ f	10
 g	10
 h	10
 i	10
-select c,count(*) from t1 group by c asc limit 10;
+select c,count(*) from t1 group by c order by c limit 10;
 c	count(*)
 a	1
 a	10
@@ -1415,7 +1434,7 @@ f	10
 g	10
 h	10
 i	10
-select c,count(t) from t1 group by c asc limit 10;
+select c,count(t) from t1 group by c order by c limit 10;
 c	count(t)
 a	1
 a	10
@@ -1439,8 +1458,8 @@ f	10
 g	10
 h	10
 i	10
-select t,count(*) from t1 group by t asc limit 10;
-t	count(*)
+select TRIM(t),count(*) from t1 group by TRIM(t) order by TRIM(t) limit 10;
+TRIM(t)	count(*)
 a	1
 a	10
 b	10
@@ -1451,8 +1470,8 @@ f	10
 g	10
 h	10
 i	10
-select t,count(t) from t1 group by t asc limit 10;
-t	count(t)
+select TRIM(t),count(t) from t1 group by TRIM(t) order by TRIM(t) limit 10;
+TRIM(t)	count(t)
 a	1
 a	10
 b	10
@@ -1463,8 +1482,8 @@ f	10
 g	10
 h	10
 i	10
-select sql_big_result t,count(t) from t1 group by t asc limit 10;
-t	count(t)
+select sql_big_result TRIM(t),count(t) from t1 group by TRIM(t) order by TRIM(t) limit 10;
+TRIM(t)	count(t)
 a	1
 a	10
 b	10
@@ -1529,7 +1548,7 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 1	SIMPLE	t1	NULL	ref	v	v	303	const	#	100.00	NULL
 Warnings:
 Note	1003	/* select#1 */ select `test`.`t1`.`v` AS `v`,`test`.`t1`.`c` AS `c`,`test`.`t1`.`t` AS `t` from `test`.`t1` where (`test`.`t1`.`v` = 'a')
-select v,count(*) from t1 group by v asc limit 10;
+select v,count(*) from t1 group by v order by v limit 10;
 v	count(*)
 a	1
 a	10
@@ -1541,7 +1560,7 @@ f	10
 g	10
 h	10
 i	10
-select TRIM(v),count(t) from t1 group by v asc limit 10;
+select TRIM(v),count(t) from t1 group by v order by v limit 10;
 TRIM(v)	count(t)
 a	1
 a	10
@@ -1553,7 +1572,7 @@ f	10
 g	10
 h	10
 i	10
-select sql_big_result TRIM(v),count(t) from t1 group by v asc limit 10;
+select sql_big_result TRIM(v),count(t) from t1 group by v order by v limit 10;
 TRIM(v)	count(t)
 a	1
 a	10
@@ -1619,7 +1638,7 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 1	SIMPLE	t1	NULL	ref	v	v	33	const	#	100.00	Using where
 Warnings:
 Note	1003	/* select#1 */ select `test`.`t1`.`v` AS `v`,`test`.`t1`.`c` AS `c`,`test`.`t1`.`t` AS `t` from `test`.`t1` where (`test`.`t1`.`v` = 'a')
-select TRIM(v),count(*) from t1 group by v asc limit 10;
+select TRIM(v),count(*) from t1 group by v order by v limit 10;
 TRIM(v)	count(*)
 a	1
 a	10
@@ -1631,7 +1650,7 @@ f	10
 g	10
 h	10
 i	10
-select TRIM(v),count(t) from t1 group by v asc limit 10;
+select TRIM(v),count(t) from t1 group by v order by v limit 10;
 TRIM(v)	count(t)
 a	1
 a	10
@@ -1643,7 +1662,7 @@ f	10
 g	10
 h	10
 i	10
-select sql_big_result TRIM(v),count(t) from t1 group by v asc limit 10;
+select sql_big_result TRIM(v),count(t) from t1 group by v order by v limit 10;
 TRIM(v)	count(t)
 a	1
 a	10
@@ -1666,7 +1685,7 @@ t1	CREATE TABLE `t1` (
   KEY `t` (`t`(10)),
   KEY `v` (`v`)
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1 STATS_PERSISTENT=0
-select TRIM(v),count(*) from t1 group by v asc limit 10;
+select TRIM(v),count(*) from t1 group by v order by v limit 10;
 TRIM(v)	count(*)
 a	1
 a	10
@@ -1678,7 +1697,7 @@ f	10
 g	10
 h	10
 i	10
-select TRIM(v),count(t) from t1 group by v asc limit 10;
+select TRIM(v),count(t) from t1 group by v order by v limit 10;
 TRIM(v)	count(t)
 a	1
 a	10
@@ -1690,7 +1709,7 @@ f	10
 g	10
 h	10
 i	10
-select sql_big_result TRIM(v),count(t) from t1 group by v asc limit 10;
+select sql_big_result TRIM(v),count(t) from t1 group by v order by v limit 10;
 TRIM(v)	count(t)
 a	1
 a	10
@@ -1707,16 +1726,16 @@ SET NAMES utf8mb4;
 create table t1 (a char(10), unique (a));
 insert into t1 values ('a   ');
 insert into t1 values ('a ');
-ERROR 23000: Duplicate entry 'a' for key 'a'
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
 alter table t1 modify a varchar(10);
 insert into t1 values ('a'),('á'),('à'),('å');
-ERROR 23000: Duplicate entry 'a' for key 'a'
+ERROR 23000: Duplicate entry 'a' for key 't1.a'
 insert into t1 values ('á');
-ERROR 23000: Duplicate entry 'á' for key 'a'
+ERROR 23000: Duplicate entry 'á' for key 't1.a'
 insert into t1 values ('A');
-ERROR 23000: Duplicate entry 'A' for key 'a'
+ERROR 23000: Duplicate entry 'A' for key 't1.a'
 insert into t1 values ('å');
-ERROR 23000: Duplicate entry 'å' for key 'a'
+ERROR 23000: Duplicate entry 'å' for key 't1.a'
 update t1 set a='a  ' where a like 'a%';
 select concat(a,'.') from t1;
 concat(a,'.')
@@ -1749,7 +1768,7 @@ t1	CREATE TABLE `t1` (
 drop table t1;
 create table t1 (v char(10) character set utf8);
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
@@ -1781,7 +1800,7 @@ explain select * from t1 where a=20 and b is null;
 id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	NULL	ref	ba	ba	56	const,const	1	100.00	Using where; Using index
 Warnings:
-Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b` from `test`.`t1` where ((`test`.`t1`.`a` = 20) and isnull(`test`.`t1`.`b`))
+Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b` from `test`.`t1` where ((`test`.`t1`.`a` = 20) and (`test`.`t1`.`b` is null))
 select * from t1 where a=20 and b is null;
 a	b
 20	NULL
@@ -1801,7 +1820,7 @@ t1	CREATE TABLE `t1` (
 drop table t1;
 create table t1 (v varchar(65530) character set utf8);
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 Note	1246	Converting column 'v' from VARCHAR to TEXT
 show create table t1;
 Table	Create Table
@@ -1875,16 +1894,16 @@ analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	OK
 show keys from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	a	1	a	A	8	NULL	NULL	YES	BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	a	1	a	A	8	NULL	NULL	YES	BTREE			YES	NULL
 alter table t1 disable keys;
 alter table t1 enable keys;
 analyze table t1;
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	Table is already up to date
 show keys from t1;
-Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible
-t1	1	a	1	a	A	8	NULL	NULL	YES	BTREE			YES
+Table	Non_unique	Key_name	Seq_in_index	Column_name	Collation	Cardinality	Sub_part	Packed	Null	Index_type	Comment	Index_comment	Visible	Expression
+t1	1	a	1	a	A	8	NULL	NULL	YES	BTREE			YES	NULL
 drop table t1;
 create table t1 (c1 int) engine=myisam pack_keys=0;
 create table t2 (c1 int) engine=myisam pack_keys=1;
@@ -2049,7 +2068,7 @@ create table t1 (a int not null, key `a` (a) key_block_size=1024);
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `a` int(11) NOT NULL,
+  `a` int NOT NULL,
   KEY `a` (`a`) KEY_BLOCK_SIZE=1024
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 drop table t1;
@@ -2057,7 +2076,7 @@ create table t1 (a int not null, key `a` (a) key_block_size=2048);
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `a` int(11) NOT NULL,
+  `a` int NOT NULL,
   KEY `a` (`a`) KEY_BLOCK_SIZE=2048
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 drop table t1;
@@ -2087,7 +2106,7 @@ Warning	1071	Specified key was too long; max key length is 1000 bytes
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `a` int(11) NOT NULL,
+  `a` int NOT NULL,
   `b` varchar(2048) DEFAULT NULL,
   KEY `a` (`a`),
   KEY `b` (`b`(250)) KEY_BLOCK_SIZE=4096
@@ -2096,7 +2115,7 @@ alter table t1 key_block_size=2048;
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `a` int(11) NOT NULL,
+  `a` int NOT NULL,
   `b` varchar(2048) DEFAULT NULL,
   KEY `a` (`a`) KEY_BLOCK_SIZE=1024,
   KEY `b` (`b`(250)) KEY_BLOCK_SIZE=4096
@@ -2105,9 +2124,9 @@ alter table t1 add c int, add key (c);
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `a` int(11) NOT NULL,
+  `a` int NOT NULL,
   `b` varchar(2048) DEFAULT NULL,
-  `c` int(11) DEFAULT NULL,
+  `c` int DEFAULT NULL,
   KEY `a` (`a`) KEY_BLOCK_SIZE=1024,
   KEY `b` (`b`(250)) KEY_BLOCK_SIZE=4096,
   KEY `c` (`c`)
@@ -2117,10 +2136,10 @@ alter table t1 add d int, add key (d);
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `a` int(11) NOT NULL,
+  `a` int NOT NULL,
   `b` varchar(2048) DEFAULT NULL,
-  `c` int(11) DEFAULT NULL,
-  `d` int(11) DEFAULT NULL,
+  `c` int DEFAULT NULL,
+  `d` int DEFAULT NULL,
   KEY `a` (`a`) KEY_BLOCK_SIZE=1024,
   KEY `b` (`b`(250)) KEY_BLOCK_SIZE=4096,
   KEY `c` (`c`) KEY_BLOCK_SIZE=2048,
@@ -2133,7 +2152,7 @@ Warning	1071	Specified key was too long; max key length is 1000 bytes
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `a` int(11) NOT NULL,
+  `a` int NOT NULL,
   `b` varchar(2048) DEFAULT NULL,
   KEY `a` (`a`),
   KEY `b` (`b`(250))
@@ -2145,7 +2164,7 @@ Warning	1071	Specified key was too long; max key length is 1000 bytes
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `a` int(11) NOT NULL,
+  `a` int NOT NULL,
   `b` varchar(2048) DEFAULT NULL,
   KEY `a` (`a`) KEY_BLOCK_SIZE=1024,
   KEY `b` (`b`(250))
@@ -2155,8 +2174,8 @@ create table t1 (a int not null, b int, key (a) key_block_size=1024, key(b) key_
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `a` int(11) NOT NULL,
-  `b` int(11) DEFAULT NULL,
+  `a` int NOT NULL,
+  `b` int DEFAULT NULL,
   KEY `a` (`a`) KEY_BLOCK_SIZE=1024,
   KEY `b` (`b`) KEY_BLOCK_SIZE=8192
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci KEY_BLOCK_SIZE=16384
@@ -2165,7 +2184,7 @@ create table t1 (a int not null, key `a` (a) key_block_size=512);
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `a` int(11) NOT NULL,
+  `a` int NOT NULL,
   KEY `a` (`a`) KEY_BLOCK_SIZE=1024
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 drop table t1;
@@ -2183,7 +2202,7 @@ create table t1 (a int not null, key `a` (a) key_block_size=1025);
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `a` int(11) NOT NULL,
+  `a` int NOT NULL,
   KEY `a` (`a`) KEY_BLOCK_SIZE=2048
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
 drop table t1;
@@ -2322,10 +2341,10 @@ c1 CHAR(50),
 c2 VARCHAR(1)
 ) ENGINE=MyISAM DEFAULT CHARSET UTF8;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 INSERT INTO t1 VALUES(REPEAT(_utf8 x'e0ae85',43), 'b');
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 SELECT COUNT(*) FROM t1;
 COUNT(*)
 1
@@ -2347,10 +2366,10 @@ c1 CHAR(50),
 c2 VARCHAR(1)
 ) ENGINE=MyISAM DEFAULT CHARSET UTF8;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 INSERT INTO t1 VALUES(REPEAT(_utf8 x'e0ae85',43), 'b');
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 SELECT COUNT(*) FROM t1;
 COUNT(*)
 1
@@ -2372,10 +2391,10 @@ c1 CHAR(50),
 c2 VARCHAR(1)
 ) ENGINE=MyISAM DEFAULT CHARSET UTF8;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 INSERT INTO t1 VALUES(REPEAT(_utf8 x'e0ae85',43), 'b');
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 INSERT INTO t1 VALUES('b', 'b');
 INSERT INTO t1 VALUES('c', 'b');
 DELETE FROM t1 WHERE c1='b';
@@ -2395,11 +2414,11 @@ c2 VARCHAR(1),
 KEY (c1)
 ) ENGINE=MyISAM DEFAULT CHARSET UTF8;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 # Insert 100 rows. Query log disabled.
 UPDATE t1 SET c1=REPEAT(_utf8 x'e0ae85',43) LIMIT 90;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 SELECT COUNT(*) FROM t1;
 COUNT(*)
 100
@@ -2422,7 +2441,7 @@ KEY (c1),
 KEY (c2)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8 PACK_KEYS=0;
 Warnings:
-Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, which will be replaced by UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
+Warning	3719	'utf8' is currently an alias for the character set UTF8MB3, but will be an alias for UTF8MB4 in a future release. Please consider using UTF8MB4 in order to be unambiguous.
 
 MyISAM file:         MYSQLD_DATADIR/test/t1
 Record format:       Packed
@@ -2658,7 +2677,7 @@ id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered
 1	SIMPLE	t1	NULL	ALL	NULL	NULL	NULL	NULL	5	100.00	NULL
 1	SIMPLE	t2	NULL	ref	a	a	4	test.t1.a	1	100.00	Using index condition
 Warnings:
-Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t2`.`a` AS `a`,`test`.`t2`.`b` AS `b`,`test`.`t2`.`filler` AS `filler` from `test`.`t1` join `test`.`t2` where ((`test`.`t2`.`a` = `test`.`t1`.`a`) and (`test`.`t2`.`b` + 1))
+Note	1003	/* select#1 */ select `test`.`t1`.`a` AS `a`,`test`.`t2`.`a` AS `a`,`test`.`t2`.`b` AS `b`,`test`.`t2`.`filler` AS `filler` from `test`.`t1` join `test`.`t2` where ((`test`.`t2`.`a` = `test`.`t1`.`a`) and (0 <> (`test`.`t2`.`b` + 1)))
 select * from t1, t2 where t2.a=t1.a and t2.b + 1;
 a	a	b	filler
 0	0	1	filler
@@ -2704,7 +2723,7 @@ DROP TABLE t1;
 #
 # Bug#14093521 SIMPLE SELECT..WHERE QUERY ON YEAR GIVES DIFFERENT ORDER BY TRANSFORMED RESULT
 #
-CREATE TABLE t1 (f1 year(4), key k1(f1)) ENGINE=MYISAM;
+CREATE TABLE t1 (f1 year, key k1(f1)) ENGINE=MYISAM;
 INSERT INTO t1 VALUES(0000),(0000);
 SELECT * FROM t1 FORCE INDEX(k1) WHERE f1 = 'lhsi';
 f1
@@ -2723,6 +2742,8 @@ col1_id INT(11) DEFAULT NULL,
 KEY col1 (col1),
 KEY col1_id (col1_id)
 ) charset latin1 ENGINE=MyISAM;
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 INSERT INTO t1 (col1, col1_id) VALUES
 ('5cm', 10000), ('people', 10000), ('king', 10000), ('queen', 10000),
 ('minister', 10000), ('servent', 13000);
@@ -2760,6 +2781,9 @@ col1_id_dummy INT(10) DEFAULT NULL,
 KEY col1 (col1, col1_dummy),
 KEY col1_id (col1, col1_id_dummy)
 ) charset latin1 ENGINE=MyISAM;
+Warnings:
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
+Warning	1681	Integer display width is deprecated and will be removed in a future release.
 INSERT INTO t1 (col1, col1_dummy, col1_id, col1_id_dummy) VALUES
 ('5cm', '5cm' , 10000, 100), ('people', 'people', 10000, 100),
 ('king', 'king' , 10000, 100), ('queen', 'queen', 10000, 100),

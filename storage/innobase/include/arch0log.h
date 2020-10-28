@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2017, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, 2020, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -40,8 +40,8 @@ this program; if not, write to the Free Software Foundation, Inc.,
 @param[in]	read_offset	offset to start reading from
 @param[in]	ctx		context passed by caller
 @return error code */
-using Log_Arch_Cbk = dberr_t(char *file_name, ib_uint64_t file_size,
-                             ib_uint64_t read_offset, void *ctx);
+using Log_Arch_Cbk = int(char *file_name, ib_uint64_t file_size,
+                         ib_uint64_t read_offset, void *ctx);
 
 /** Redo Log archiver client context */
 class Log_Arch_Client_Ctx {
@@ -63,20 +63,21 @@ class Log_Arch_Client_Ctx {
   @param[out]	header	redo header. Caller must allocate buffer.
   @param[in]	len	buffer length
   @return error code */
-  dberr_t start(byte *header, uint len);
+  int start(byte *header, uint len);
 
-  /** Stop redo log archiving
+  /** Stop redo log archiving. Exact trailer length is returned as out
+  parameter which could be less than the redo block size.
   @param[out]	trailer	redo trailer. Caller must allocate buffer.
-  @param[in,out]	len	buffer length
+  @param[in,out]	len	trailer length
   @param[out]	offset	trailer block offset
   @return error code */
-  dberr_t stop(byte *trailer, uint32_t &len, uint64_t &offset);
+  int stop(byte *trailer, uint32_t &len, uint64_t &offset);
 
   /** Get archived data file details
   @param[in]	cbk_func	callback called for each file
   @param[in]	ctx		callback function context
   @return error code */
-  dberr_t get_files(Log_Arch_Cbk *cbk_func, void *ctx);
+  int get_files(Log_Arch_Cbk *cbk_func, void *ctx);
 
   /** Release archived data so that system can purge it */
   void release();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -26,11 +26,13 @@
 #include "mysql/psi/mysql_socket.h"
 
 #include "plugin/x/ngs/include/ngs/vio_wrapper.h"
-#include "plugin/x/ngs/include/ngs_common/connection_type.h"
+#include "plugin/x/src/io/connection_type.h"
+#include "plugin/x/src/xpl_performance_schema.h"
 
 namespace ngs {
 
-Vio_wrapper::Vio_wrapper(Vio *vio) : m_vio(vio) {}
+Vio_wrapper::Vio_wrapper(::Vio *vio)
+    : m_vio(vio), m_shutdown_mutex(KEY_mutex_x_vio_shutdown) {}
 
 ssize_t Vio_wrapper::read(uchar *buffer, ssize_t bytes_to_send) {
   return vio_read(m_vio, buffer, bytes_to_send);
@@ -41,9 +43,27 @@ ssize_t Vio_wrapper::write(const uchar *buffer, ssize_t bytes_to_send) {
   return vio_write(m_vio, buffer, bytes_to_send);
 }
 
-void Vio_wrapper::set_timeout(const Direction direction,
-                              const uint32_t timeout) {
-  vio_timeout(m_vio, static_cast<uint32_t>(direction), timeout);
+void Vio_wrapper::set_timeout_in_ms(const Direction direction,
+                                    const uint64_t timeout_ms) {
+  // VIO can set only timeouts with 1 second resolution.
+  //
+  // Thus if application needs second resolution ten following it
+  // can do following:
+  // vio_timeout(m_vio, static_cast<uint32_t>(direction), timeout_s);
+  //
+  // To get the millisecond resolution, we need to duplicate the logic
+  // from "vio_timeout".
+
+  bool old_mode = m_vio->write_timeout < 0 && m_vio->read_timeout < 0;
+
+  int which = direction == Direction::k_write ? 1 : 0;
+
+  if (which)
+    m_vio->write_timeout = timeout_ms;
+  else
+    m_vio->read_timeout = timeout_ms;
+
+  if (m_vio->timeout) m_vio->timeout(m_vio, which, old_mode);
 }
 
 void Vio_wrapper::set_state(const PSI_socket_state state) {
@@ -60,19 +80,19 @@ void Vio_wrapper::set_thread_owner() {
 
 my_socket Vio_wrapper::get_fd() { return vio_fd(m_vio); }
 
-Connection_type Vio_wrapper::get_type() {
-  return Connection_type_helper::convert_type(vio_type(m_vio));
+xpl::Connection_type Vio_wrapper::get_type() const {
+  return xpl::Connection_type_helper::convert_type(vio_type(m_vio));
 }
 
-sockaddr_storage *Vio_wrapper::peer_addr(std::string &address, uint16 &port) {
-  address.resize(256);
-  char *buffer = &address[0];
+sockaddr_storage *Vio_wrapper::peer_addr(std::string *address, uint16_t *port) {
+  address->resize(256);
+  char *buffer = &(*address)[0];
 
   buffer[0] = 0;
 
-  if (vio_peer_addr(m_vio, buffer, &port, address.capacity())) return nullptr;
+  if (vio_peer_addr(m_vio, buffer, port, address->capacity())) return nullptr;
 
-  address.resize(strlen(buffer));
+  address->resize(strlen(buffer));
 
   return &m_vio->remote;
 }

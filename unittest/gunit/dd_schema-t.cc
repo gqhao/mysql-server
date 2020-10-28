@@ -1,4 +1,4 @@
-/* Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2014, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -35,29 +35,23 @@
 #include "unittest/gunit/dd.h"
 #include "unittest/gunit/test_utils.h"
 
-/*
-  HAVE_UBSAN: undefined behaviour in gmock.
-  runtime error: member call on null pointer of type 'const struct ResultHolder'
- */
-#if !defined(HAVE_UBSAN)
-
 namespace dd_schema_unittest {
 
 using namespace dd;
 using namespace dd_unittest;
 
-using dd_unittest::Mock_dd_HANDLER;
 using dd_unittest::Mock_dd_field_longlong;
 using dd_unittest::Mock_dd_field_varstring;
+using dd_unittest::Mock_dd_HANDLER;
 
+using my_testing::Server_initializer;
+using ::testing::_;
 using ::testing::Invoke;
 using ::testing::NiceMock;
 using ::testing::Return;
 using ::testing::SetArgPointee;
 using ::testing::StrictMock;
 using ::testing::WithArgs;
-using ::testing::_;
-using my_testing::Server_initializer;
 
 /**
   Test fixture for testing the dd::Schema, Schema_impl and Raw_* classes.
@@ -72,7 +66,7 @@ class SchemaTest : public ::testing::Test {
  protected:
   SchemaTest() {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     m_dict = new Dictionary_impl();
     m_def_cat_id = Dictionary_impl::DEFAULT_CATALOG_ID;
 
@@ -88,7 +82,7 @@ class SchemaTest : public ::testing::Test {
     m_init.thd()->variables.option_bits |= OPTION_NOT_AUTOCOMMIT;
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     delete m_dict;
 
     // Tear down dummy server.
@@ -127,7 +121,6 @@ class SchemaTest : public ::testing::Test {
 
     destroy(table->file);
     delete[] table->s->default_values;
-    delete[] table->record[0];
     delete[] table->record[1];
     delete table;
   }
@@ -173,7 +166,7 @@ class SchemaTest : public ::testing::Test {
 
 TEST_F(SchemaTest, CreateSchema) {
   // Execution context.
-  Schema_impl *schema = NULL;
+  Schema_impl *schema = nullptr;
   Update_dictionary_tables_ctx *ctx = begin_dd_updates();
   Fake_TABLE *schemata_table =
       static_cast<Fake_TABLE *>(ctx->otx.get_table<Schema>()->get_table());
@@ -274,7 +267,7 @@ TEST_F(SchemaTest, CreateSchema) {
 
 TEST_F(SchemaTest, UpdateSchema) {
   // Execution context.
-  Schema_impl *schema = NULL;
+  Schema_impl *schema = nullptr;
   Update_dictionary_tables_ctx *ctx = begin_dd_updates();
   Fake_TABLE *schemata_table =
       static_cast<Fake_TABLE *>(ctx->otx.get_table<Schema>()->get_table());
@@ -382,7 +375,7 @@ TEST_F(SchemaTest, UpdateSchema) {
 
 TEST_F(SchemaTest, GetSchema) {
   // Execution context.
-  const Schema_impl *schema = NULL;
+  const Schema_impl *schema = nullptr;
   Update_dictionary_tables_ctx *ctx = begin_dd_updates();
   Fake_TABLE *schemata_table =
       static_cast<Fake_TABLE *>(ctx->otx.get_table<Schema>()->get_table());
@@ -475,7 +468,7 @@ TEST_F(SchemaTest, GetSchema) {
   EXPECT_FALSE(t->find_record(key, r));
 
   // Restore the object from the record.
-  Entity_object *new_object = NULL;
+  Entity_object *new_object = nullptr;
   EXPECT_FALSE(Schema::DD_table::instance().restore_object_from_record(
       &ctx->otx, *r.get(), &new_object));
   schema = dynamic_cast<const Schema_impl *>(new_object);
@@ -494,5 +487,3 @@ TEST_F(SchemaTest, GetSchema) {
   delete schema;
 }
 }  // namespace dd_schema_unittest
-
-#endif  // HAVE_UBSAN

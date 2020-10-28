@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2020, Oracle and/or its affiliates. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License, version 2.0,
@@ -22,109 +22,88 @@
  * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301  USA
  */
 
-#ifndef _XPL_SESSION_H_
-#define _XPL_SESSION_H_
+#ifndef PLUGIN_X_SRC_XPL_SESSION_H_
+#define PLUGIN_X_SRC_XPL_SESSION_H_
 
+#include <map>
 #include <string>
 #include <vector>
 
 #include "plugin/x/ngs/include/ngs/client_session.h"
 #include "plugin/x/ngs/include/ngs/session_status_variables.h"
-#include "plugin/x/src/crud_cmd_handler.h"
-#include "plugin/x/src/expect/expect_stack.h"
+#include "plugin/x/src/document_id_aggregator.h"
+#include "plugin/x/src/interface/notice_output_queue.h"
+#include "plugin/x/src/interface/protocol_encoder.h"
+#include "plugin/x/src/mq/notice_configuration.h"
+#include "plugin/x/src/mq/notice_output_queue.h"
 #include "plugin/x/src/sql_data_context.h"
-#include "plugin/x/src/xpl_global_status_variables.h"
+#include "plugin/x/src/variables/xpl_global_status_variables.h"
+#include "plugin/x/src/xpl_dispatcher.h"
 
 namespace xpl {
 
 class Sql_data_context;
-class Dispatcher;
 class Cursor_manager;
 class Client;
 
-class Session_options {
- public:
-  Session_options() : m_send_warnings(true), m_send_xplugin_deprecation(true) {}
-
-  void set_send_warnings(bool flag) { m_send_warnings = flag; }
-  bool get_send_warnings() const { return m_send_warnings; }
-
-  void set_send_xplugin_deprecation(bool flag) {
-    m_send_xplugin_deprecation = flag;
-  }
-  bool get_send_xplugin_deprecation() const {
-    return m_send_xplugin_deprecation;
-  }
-
- private:
-  bool m_send_warnings;
-  bool m_send_xplugin_deprecation;
-};
-
 class Session : public ngs::Session {
  public:
-  Session(ngs::Client_interface &client, ngs::Protocol_encoder_interface *proto,
+  Session(iface::Client *client, iface::Protocol_encoder *proto,
           const Session_id session_id);
-  virtual ~Session();
+  ~Session() override;
 
- public:  // impl ngs::Session_interface
+ public:  // impl iface::Session
   ngs::Error_code init() override;
-  virtual void on_auth_success(
-      const ngs::Authentication_interface::Response &response) override;
-  virtual void on_auth_failure(
-      const ngs::Authentication_interface::Response &response) override;
+  void on_auth_success(
+      const iface::Authentication::Response &response) override;
+  void on_auth_failure(
+      const iface::Authentication::Response &response) override;
+  void on_reset() override;
 
-  virtual void mark_as_tls_session() override;
-  virtual THD *get_thd() const override;
-  ngs::Sql_session_interface &data_context() override { return m_sql; }
+  void mark_as_tls_session() override;
+  THD *get_thd() const override;
+  bool can_see_user(const std::string &user) const override;
+  iface::Sql_session &data_context() override { return m_sql; }
+  iface::Notice_output_queue &get_notice_output_queue() override {
+    return m_notice_output_queue;
+  }
+  iface::Notice_configuration &get_notice_configuration() override {
+    return m_notice_configuration;
+  }
+
+  void set_proto(iface::Protocol_encoder *encoder) override;
 
  public:
   using Variable =
       ngs::Common_status_variables::Variable ngs::Common_status_variables::*;
 
-  Session_options &options() { return m_options; }
   ngs::Session_status_variables &get_status_variables() override {
     return m_status_variables;
   }
 
-  bool can_see_user(const std::string &user) const;
+  void update_status(Variable variable) override;
 
-  template <Variable variable>
-  void update_status();
-
-  template <Variable variable>
-  void update_status(long param);
-
-  void update_status(Variable variable);
+  bool get_prepared_statement_id(const uint32_t client_stmt_id,
+                                 uint32_t *out_stmt_id) const override;
+  iface::Document_id_aggregator &get_document_id_aggregator() override {
+    return m_document_id_aggregator;
+  }
 
  private:  // reimpl ngs::Session
-  virtual void on_kill() override;
-  virtual bool handle_ready_message(ngs::Message_request &command) override;
+  void on_kill() override;
+
+  bool handle_ready_message(const ngs::Message_request &command) override;
 
  private:
   Sql_data_context m_sql;
-  Crud_command_handler m_crud_handler;
-  Expectation_stack m_expect_stack;
-
-  Session_options m_options;
+  Notice_configuration m_notice_configuration;
+  Dispatcher m_dispatcher{this};
+  Notice_output_queue m_notice_output_queue;
   ngs::Session_status_variables m_status_variables;
-
   bool m_was_authenticated;
+  Document_id_aggregator m_document_id_aggregator;
 };
 
-template <ngs::Common_status_variables::Variable ngs::Common_status_variables::
-              *variable>
-void Session::update_status() {
-  ++(m_status_variables.*variable);
-  ++(Global_status_variables::instance().*variable);
-}
-
-template <ngs::Common_status_variables::Variable ngs::Common_status_variables::
-              *variable>
-void Session::update_status(long param) {
-  (m_status_variables.*variable) += param;
-  (Global_status_variables::instance().*variable) += param;
-}
 }  // namespace xpl
 
-#endif  // _XPL_SESSION_H_
+#endif  // PLUGIN_X_SRC_XPL_SESSION_H_

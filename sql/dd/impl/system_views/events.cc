@@ -1,4 +1,4 @@
-/* Copyright (c) 2017, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2017, 2019, Oracle and/or its affiliates. All rights reserved.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -33,8 +33,10 @@ const Events &Events::instance() {
 Events::Events() {
   m_target_def.set_view_name(view_name());
 
-  m_target_def.add_field(FIELD_EVENT_CATALOG, "EVENT_CATALOG", "cat.name");
-  m_target_def.add_field(FIELD_EVENT_SCHEMA, "EVENT_SCHEMA", "sch.name");
+  m_target_def.add_field(FIELD_EVENT_CATALOG, "EVENT_CATALOG",
+                         "cat.name" + m_target_def.fs_name_collation());
+  m_target_def.add_field(FIELD_EVENT_SCHEMA, "EVENT_SCHEMA",
+                         "sch.name" + m_target_def.fs_name_collation());
   m_target_def.add_field(FIELD_EVENT_NAME, "EVENT_NAME", "evt.name");
   m_target_def.add_field(FIELD_DEFINER, "DEFINER", "evt.definer");
   m_target_def.add_field(FIELD_TIME_ZONE, "TIME_ZONE", "evt.time_zone");
@@ -47,7 +49,8 @@ Events::Events() {
   m_target_def.add_field(FIELD_EXECUTE_AT, "EXECUTE_AT",
                          "CONVERT_TZ(evt.execute_at,'+00:00', evt.time_zone)");
   m_target_def.add_field(FIELD_INTERVAL_VALUE, "INTERVAL_VALUE",
-                         "evt.interval_value");
+                         "CONVERT_INTERVAL_TO_USER_INTERVAL(evt.interval_value,"
+                         "evt.interval_field)");
   m_target_def.add_field(FIELD_INTERVAL_FIELD, "INTERVAL_FIELD",
                          "evt.interval_field");
   m_target_def.add_field(FIELD_SQL_MODE, "SQL_MODE", "evt.sql_mode");
@@ -62,8 +65,9 @@ Events::Events() {
   m_target_def.add_field(FIELD_CREATED, "CREATED", "evt.created");
   m_target_def.add_field(FIELD_LAST_ALTERED, "LAST_ALTERED",
                          "evt.last_altered");
-  m_target_def.add_field(FIELD_LAST_EXECUTED, "LAST_EXECUTED",
-                         "evt.last_executed");
+  m_target_def.add_field(
+      FIELD_LAST_EXECUTED, "LAST_EXECUTED",
+      "CONVERT_TZ(evt.last_executed,'+00:00', evt.time_zone)");
   m_target_def.add_field(FIELD_EVENT_COMMENT, "EVENT_COMMENT", "evt.comment");
   m_target_def.add_field(FIELD_ORIGINATOR, "ORIGINATOR", "evt.originator");
   m_target_def.add_field(FIELD_CHARACTER_SET_CLIENT, "CHARACTER_SET_CLIENT",

@@ -685,7 +685,7 @@ FLUSH STATUS;
 TRUNCATE TABLE t2;
 
 connection monitor;
---replace_regex /[0-9]*//
+--replace_regex /[0-9]+//
 --source include/get_handler_status_counts.inc
 connection default;
 
@@ -711,7 +711,7 @@ FLUSH STATUS;
 ALTER TABLE t2 TRUNCATE PARTITION p1;
 
 connection monitor;
---replace_regex /[0-9]*//
+--replace_regex /[0-9]+//
 --source include/get_handler_status_counts.inc
 connection default;
 
@@ -1404,6 +1404,7 @@ connection monitor;
 connection default;
 
 --echo # 34 locks (dictionary related)
+--sorted_result
 SELECT TABLE_NAME, CHECK_OPTION, IS_UPDATABLE, VIEW_DEFINITION
 FROM INFORMATION_SCHEMA.VIEWS
 WHERE TABLE_SCHEMA = 'test' AND TABLE_NAME LIKE 'v1_%';

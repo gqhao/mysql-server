@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2017, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2017, 2020, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -30,6 +30,12 @@ this program; if not, write to the Free Software Foundation, Inc.,
 #include <zconf.h>
 #include <zlib.h>
 
+/** Size of sdi_key_t::type */
+constexpr const uint32_t SDI_TYPE_LEN = 4;
+
+/** Size of sdi_key_t::id */
+constexpr const uint32_t SDI_KEY_LEN = 8;
+
 /** Compress SDI using zlib */
 class Sdi_Compressor {
  public:
@@ -49,15 +55,15 @@ class Sdi_Compressor {
     switch (
         compress2(m_comp_sdi, &zlen, src, static_cast<uLong>(m_src_len), 6)) {
       case Z_BUF_ERROR:
-        ib::fatal() << "Compression failed, Z_BUF_ERROR";
+        ib::fatal(ER_IB_MSG_FAILED_SDI_Z_BUF_ERROR);
         break;
 
       case Z_MEM_ERROR:
-        ib::fatal() << "Compression failed, Z_MEM_ERROR";
+        ib::fatal(ER_IB_MSG_FAILED_SDI_Z_MEM_ERROR);
         break;
 
       case Z_STREAM_ERROR:
-        ib::fatal() << "Compression failed, Z_STREAM_ERROR";
+        ib::fatal(ER_IB_MSG_SDI_Z_STREAM_ERROR);
         break;
 
       case Z_OK:
@@ -65,7 +71,7 @@ class Sdi_Compressor {
         break;
 
       default:
-        ib::fatal() << "Compression failed, UNKNOWN_ERROR";
+        ib::fatal(ER_IB_MSG_SDI_Z_UNKNOWN_ERROR);
         break;
     }
   }
@@ -109,8 +115,7 @@ bool dict_sdi_drop(dd::Tablespace *tablespace);
 @param[in,out]	vector		vector to hold SDI keys
 @retval		false		success
 @retval		true		failure */
-bool dict_sdi_get_keys(const dd::Tablespace &tablespace,
-                       dd::sdi_vector_t &vector);
+bool dict_sdi_get_keys(const dd::Tablespace &tablespace, sdi_vector_t &vector);
 
 /** Retrieve SDI from tablespace.
 @param[in]	tablespace	tablespace object
@@ -119,11 +124,11 @@ bool dict_sdi_get_keys(const dd::Tablespace &tablespace,
 @param[in,out]	sdi_len		in:  size of memory allocated
                                 out: actual length of SDI
 @retval		false		success
-@retval		true		incase of failures like record not found,
+@retval		true		in case of failures like record not found,
                                 sdi_len is UINT64MAX_T, else sdi_len is
                                 actual length of SDI */
-bool dict_sdi_get(const dd::Tablespace &tablespace,
-                  const dd::sdi_key_t *sdi_key, void *sdi, uint64 *sdi_len);
+bool dict_sdi_get(const dd::Tablespace &tablespace, const sdi_key_t *sdi_key,
+                  void *sdi, uint64 *sdi_len);
 
 /** Insert/Update SDI in tablespace.
 @param[in]	hton            handlerton object
@@ -136,7 +141,7 @@ object
 @retval		false		success
 @retval		true		failure */
 bool dict_sdi_set(handlerton *hton, const dd::Tablespace &tablespace,
-                  const dd::Table *table, const dd::sdi_key_t *sdi_key,
+                  const dd::Table *table, const sdi_key_t *sdi_key,
                   const void *sdi, uint64 sdi_len);
 
 /** Delete SDI from tablespace.
@@ -147,5 +152,5 @@ bool dict_sdi_set(handlerton *hton, const dd::Tablespace &tablespace,
 @retval		false		success
 @retval		true		failure */
 bool dict_sdi_delete(const dd::Tablespace &tablespace, const dd::Table *table,
-                     const dd::sdi_key_t *sdi_key);
+                     const sdi_key_t *sdi_key);
 #endif

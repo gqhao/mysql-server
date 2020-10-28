@@ -1,4 +1,4 @@
-/* Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+/* Copyright (c) 2016, 2020, Oracle and/or its affiliates.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License, version 2.0,
@@ -40,14 +40,14 @@ extern PSI_file_key keyring_backup_file_data_key;
 #endif
 
 namespace keyring__file_io_unittest {
-using ::testing::StartsWith;
-using ::testing::StrEq;
 using keyring::Mock_logger;
 using my_testing::Server_initializer;
+using ::testing::StartsWith;
+using ::testing::StrEq;
 
 class File_io_test : public ::testing::Test {
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     keyring::keyring_file_data_key = PSI_NOT_INSTRUMENTED;
     keyring::keyring_backup_file_data_key = PSI_NOT_INSTRUMENTED;
     logger = new Mock_logger();
@@ -58,7 +58,7 @@ class File_io_test : public ::testing::Test {
     sec_ctx->set_master_access(sec_ctx->master_access() | SUPER_ACL);
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     delete logger;
     initializer.TearDown();
   }
@@ -124,7 +124,7 @@ TEST_F(File_io_test, SeekOnInvalidFileDescriptor) {
   keyring::File_io file_io(logger);
   File file = 2050;
 
-  EXPECT_CALL(*logger, log(ERROR_LEVEL, StartsWith("Can't seek in file")));
+  EXPECT_CALL(*logger, log(ERROR_LEVEL, StartsWith("Cannot seek in file")));
   ASSERT_TRUE(file_io.seek(file, 0, MY_SEEK_END, MYF(MY_WME)) ==
               MY_FILEPOS_ERROR);
 }
@@ -133,7 +133,7 @@ TEST_F(File_io_test, TellOnInvalidFileDescriptor) {
   keyring::File_io file_io(logger);
   File file = 2050;
 
-  EXPECT_CALL(*logger, log(ERROR_LEVEL, StartsWith("Can't seek in file")));
+  EXPECT_CALL(*logger, log(ERROR_LEVEL, StartsWith("Cannot seek in file")));
   ASSERT_TRUE(file_io.tell(file, MYF(MY_WME)) == ((my_off_t)-1));
 }
 

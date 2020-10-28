@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2018, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2020, Oracle and/or its affiliates.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License, version 2.0, as published by the
@@ -92,7 +92,7 @@ UNIV_INLINE
 dberr_t dict_create_add_foreign_id(ulint *id_nr, const char *name,
                                    dict_foreign_t *foreign);
 
-/** Check if a foreign constraint is on columns server as base columns
+/** Check if a foreign constraint is on columns served as base columns
 of any stored column. This is to prevent creating SET NULL or CASCADE
 constraint on such columns
 @param[in]	local_fk_set	set of foreign key objects, to be added to
@@ -136,7 +136,7 @@ struct tab_node_t {
 @param[in]	is_create	true when creating SDI index
 @return in-memory index structure for tablespace dictionary or NULL */
 dict_index_t *dict_sdi_create_idx_in_mem(space_id_t space, bool space_discarded,
-                                         ulint in_flags, bool is_create);
+                                         uint32_t in_flags, bool is_create);
 
 /* Index create node struct */
 
