@@ -175,6 +175,12 @@ PSI_memory_key key_memory_Rows_query_log_event_rows_query;
 
 extern bool pfs_processlist_enabled;
 
+/*added by gqhao*/
+extern enum_flb_op_type opt_flb_op_type;
+extern uint opt_flashback;
+extern uint opt_colname;
+extern MYSQL *mysql;
+
 using std::max;
 using std::min;
 
@@ -1600,6 +1606,17 @@ static void my_b_write_bit(IO_CACHE *file, const uchar *ptr, uint nbits) {
   my_b_printf(file, "'");
 }
 
+static void jk_print_bit (std::string &value, const uchar *ptr, uint nbits)
+{
+  uint bitnum, nbits8 = ((nbits + 7) / 8) * 8, skip_bits = nbits8 - nbits;
+  value += "b'";
+  for (bitnum = skip_bits; bitnum < nbits8; bitnum++) {
+    int is_set = (ptr[(bitnum) / 8] >> (7 - bitnum % 8)) & 0x01;
+    value += (is_set ? "1" : "0");
+  }
+  value += "'";  
+}
+
 /**
   Prints a packed string to io cache.
   The string consists of length packed to 1 or 2 bytes,
@@ -1623,6 +1640,23 @@ static size_t my_b_write_quoted_with_length(IO_CACHE *file, const uchar *ptr,
     return length + 2;
   }
 }
+
+//added by gqhao
+static void jk_get_value_quoted_with_length(std::string &col_value, const uchar *ptr,
+                                            uint length) {
+  col_value +="'";
+  if (length < 256) {
+    length = *ptr;
+    std::string tmp_value((const char *)ptr + 1, length);
+    col_value += tmp_value;
+  } else {
+    length = uint2korr(ptr);
+    std::string tmp_value((const char *)ptr + 2, length);
+    col_value += tmp_value;
+  }
+  col_value += "'";
+}
+
 
 /**
   Prints a 32-bit number in both signed and unsigned representation
@@ -2189,6 +2223,517 @@ static size_t log_event_print_value(IO_CACHE *file, const uchar *ptr, uint type,
   *typestr = 0;
   return 0;
 }
+// added by gqhao to implement generating flashback sqls
+
+std::string flb_sql;
+std::string cols_values_af;
+std::string cols_values_bf;
+table_metadata_type global_table_metadata;
+col_md_vec cols_md;
+bool first_row_event = true;
+bool glb_update_af_flag = false;
+
+static void jk_refresh_table_metadata(col_md_vec &cols_md, bool no_pk)
+{
+  if (no_pk == true)
+  {
+    col_md_vec::iterator iter = cols_md.begin();
+    while (iter != cols_md.end())
+    {
+      (*iter).pk_flag = true;
+      iter++;
+    }
+  }
+}
+static void jk_get_table_metadata(const char *db_name, const char *tb_name)
+{
+  MYSQL_RES *result = NULL;
+  MYSQL_ROW row;
+  int r = 0;
+  std::string sql = "select column_name, case when data_type like '%int' then 1 else  0 end as int_flag, case when column_type like '%unsigned' then 1 else 0 end as unsigned_flag,"
+  " case when column_key  like 'PRI%' then 1 else 0 end as pk_flag from information_schema.columns where table_schema='";
+  sql += db_name;
+  sql += "' and table_name='";
+  sql += tb_name;
+  sql += "' order by ordinal_position;";
+  std::string tb_key = "";
+  tb_key += db_name;
+  tb_key += ":";
+  tb_key += tb_name;
+  std::transform(tb_key.begin(), tb_key.end(), tb_key.begin(), ::tolower);
+  col_md_vec tmp_cols_md;
+  r = mysql_query(mysql, sql.c_str());
+  if (r != 0)
+  {
+    std::cout << mysql_error(mysql) <<", please check manually!" << std::endl;
+    return;
+  }
+  bool no_pk = true;
+  result = mysql_store_result(mysql);
+  if (result)
+  {
+    while((row = mysql_fetch_row(result)))
+    {
+      col_md_st col_md;
+      strcpy(col_md.col_name, row[0]);
+      col_md.int_flag = (bool)(row[1][0] - '0');
+      col_md.unsigned_flag = (bool)(row[2][0] - '0');
+      if (strcmp(row[3],"1") == 0)
+      {
+        no_pk = false;
+      }
+      col_md.pk_flag = (bool)(row[3][0] - '0');
+      tmp_cols_md.push_back(col_md);
+    }
+    if (mysql_errno(mysql))
+    {
+      std::cout << mysql_errno(mysql) << ":" << mysql_error(mysql) << std::endl;
+      return;
+    }
+    jk_refresh_table_metadata(tmp_cols_md, no_pk);
+    global_table_metadata[tb_key] = tmp_cols_md;
+  }
+  else
+  {
+    std::cout << "Can't get metadata of table " << tb_name << "please check manually !" << std::endl; 
+  }
+}
+
+/*just get value*/
+void jk_log_event_print_value(const uchar *ptr, uint type,
+                                       uint meta, char *col_name,
+                                       bool is_partial,
+                                       col_md_st *col_md,
+                                       std::string &col_value) {
+  uint32 length = 0;
+  //no use
+  printf("%d", is_partial);
+  printf("%s", col_name);
+  printf("%d", length);
+
+  if (type == MYSQL_TYPE_STRING) {
+    if (meta >= 256) {
+      uint byte0 = meta >> 8;
+      uint byte1 = meta & 0xFF;
+
+      if ((byte0 & 0x30) != 0x30) {
+        /* a long CHAR() field: see #37426 */
+        length = byte1 | (((byte0 & 0x30) ^ 0x30) << 4);
+        type = byte0 | 0x30;
+      } else
+        length = meta & 0xFF;
+    } else
+      length = meta;
+  }
+
+  switch (type) {
+    case MYSQL_TYPE_LONG: {
+      if (!ptr) col_value = "NULL";
+      else {
+        int32 si = sint4korr(ptr);
+        uint32 ui = uint4korr(ptr);
+        char tmp_value[255] = {0};
+        if (col_md->unsigned_flag == false &&si < 0)
+        { 
+          sprintf(tmp_value, "%d", si);
+          col_value = tmp_value;
+        }
+        else
+        {
+          sprintf(tmp_value, "%u", ui);
+          col_value = tmp_value;
+        }
+      }
+      break;
+    }
+    case MYSQL_TYPE_TINY: {
+      if (!ptr) col_value = "NULL";
+      else {
+        int si = (signed char)*ptr;
+        uint ui = (unsigned char)*ptr;
+        char tmp_value[255] = {0};
+        if (col_md->unsigned_flag == false &&si < 0)
+        { 
+          sprintf(tmp_value, "%d", si);
+          col_value = tmp_value;
+        }
+        else
+        {
+          sprintf(tmp_value, "%d", ui);
+          col_value = tmp_value;
+        }
+      }
+      break;      
+    }
+
+    case MYSQL_TYPE_SHORT: {
+      if (!ptr) col_value = "NULL";
+      else {
+        int32 si = (int32)sint2korr(ptr);
+        uint32 ui = (uint32)uint2korr(ptr);
+        char tmp_value[255] = {0};
+        if (col_md->unsigned_flag == false &&si < 0)
+        { 
+          sprintf(tmp_value, "%d", si);
+          col_value = tmp_value;
+        }
+        else
+        {
+          sprintf(tmp_value, "%u", ui);
+          col_value = tmp_value;
+        }
+      }
+      break;
+    }
+
+   case MYSQL_TYPE_INT24: {
+      if (!ptr) col_value = "NULL";
+      else {
+        int32 si = sint3korr(ptr);
+        uint32 ui = uint3korr(ptr);
+        char tmp_value[255] = {0};
+        if (col_md->unsigned_flag == false &&si < 0)
+        { 
+          sprintf(tmp_value, "%d", si);
+          col_value = tmp_value;
+        }
+        else
+        {
+          sprintf(tmp_value, "%u", ui);
+          col_value = tmp_value;
+        }
+      }
+      break;
+    }
+
+    case MYSQL_TYPE_LONGLONG: {
+      if (!ptr) col_value = "NULL";
+      else {
+        char tmp[64];
+        longlong si = sint8korr(ptr);
+
+        if (col_md->unsigned_flag == false &&si < 0)
+        { 
+          longlong10_to_str(si, tmp, -10);
+          col_value = tmp;
+        }
+        else
+        {
+          ulonglong ui = uint8korr(ptr);
+          longlong10_to_str((longlong)ui, tmp, 10);
+          col_value = tmp;
+        }
+      }      
+      break;      
+    }
+
+    case MYSQL_TYPE_NEWDECIMAL: {
+      uint precision = meta >> 8;
+      uint decimals = meta & 0xFF;
+      if (!ptr) col_value = "NULL";
+      else {
+        my_decimal dec;
+        binary2my_decimal(E_DEC_FATAL_ERROR, pointer_cast<const uchar *>(ptr),
+                          &dec, precision, decimals);
+        char buff[DECIMAL_MAX_STR_LENGTH + 1];
+        int len = sizeof(buff);
+        decimal2string(&dec, buff, &len);
+        col_value = buff;
+      }
+      break;
+    }
+
+    case MYSQL_TYPE_FLOAT: {
+      if (!ptr) col_value = "NULL";
+      else {
+        float fl = float4get(ptr);
+        char tmp[320];
+        sprintf(tmp, "%-20g", (double)fl);
+        col_value = tmp;
+      }
+      break;
+    }
+
+    case MYSQL_TYPE_DOUBLE: {
+      if (!ptr) col_value = "NULL";
+      else { 
+        double dbl = float8get(ptr);
+        char tmp[320];
+        sprintf(tmp, "%-.20g", dbl); /* my_b_printf doesn't support %-20g */
+        col_value = tmp;
+      }
+      break;
+    }
+
+    case MYSQL_TYPE_BIT: {
+      /* Meta-data: bit_len, bytes_in_rec, 2 bytes */
+      uint nbits = ((meta >> 8) * 8) + (meta & 0xFF);
+      if (!ptr) col_value = "NULL";
+      else {
+        length = (nbits + 7) / 8;
+        jk_print_bit (col_value, ptr, nbits);
+        //my_b_write_bit(file, ptr, nbits);
+      }
+      break;
+    }
+
+    case MYSQL_TYPE_TIMESTAMP: {
+      //snprintf(typestr, typestr_length, "TIMESTAMP");
+      if (!ptr) col_value = "NULL";
+      else {
+      uint32 i32 = uint4korr(ptr);
+      char tmp_value[255] = {0};
+      sprintf(tmp_value, "FROM_UNIXTIME(%u)",i32);
+      col_value = tmp_value;
+      }
+      break;
+    }
+
+    case MYSQL_TYPE_TIMESTAMP2: {
+      //snprintf(typestr, typestr_length, "TIMESTAMP(%d)", meta);
+      if (!ptr) col_value = "NULL";
+      else {
+        char buf[MAX_DATE_STRING_REP_LENGTH];
+        struct timeval tm;
+        my_timestamp_from_binary(&tm, ptr, meta);
+        col_value += "FROM_UNIXTIME(";
+        col_value += buf;
+        col_value += ")";
+      }
+      break;
+    }
+
+    case MYSQL_TYPE_DATETIME: {
+      if (!ptr) col_value = "NULL";
+      else {
+        size_t d, t;
+        uint64 i64 = uint8korr(ptr); /* YYYYMMDDhhmmss */
+        d = static_cast<size_t>(i64 / 1000000);
+        t = i64 % 1000000;
+        char tmp_value[255] = {0};
+        sprintf(tmp_value, "'%04d-%02d-%02d %02d:%02d:%02d'",
+                static_cast<int>(d / 10000),
+                static_cast<int>(d % 10000) / 100, static_cast<int>(d % 100),
+                static_cast<int>(t / 10000),
+                static_cast<int>(t % 10000) / 100, static_cast<int>(t % 100));
+        col_value = tmp_value;
+      }
+      break;
+    }
+
+    case MYSQL_TYPE_DATETIME2: {
+      if (!ptr) col_value = "NULL";
+      else {
+        char buf[MAX_DATE_STRING_REP_LENGTH];
+        MYSQL_TIME ltime;
+        longlong packed = my_datetime_packed_from_binary(ptr, meta);
+        TIME_from_longlong_datetime_packed(&ltime, packed);
+        int buflen = my_datetime_to_str(ltime, buf, meta);
+        std::string tmp_value((const char *)buf, buflen);
+        col_value += "'";
+        col_value += buf;
+        col_value += "'";
+      }
+      break;
+    }
+    case MYSQL_TYPE_TIME: {
+      if (!ptr) col_value = "NULL";
+      else {
+      uint32 i32 = uint3korr(ptr);
+      char tmp_value[255] = {0};
+      sprintf(tmp_value, "'%02d:%02d:%02d'", i32 / 10000, (i32 % 10000) / 100,
+              i32 % 100);
+      col_value = tmp_value;
+      }
+      break;
+    }
+
+    case MYSQL_TYPE_TIME2: {
+      if (!ptr) col_value = "NULL";
+      else {
+        char buf[MAX_DATE_STRING_REP_LENGTH];
+        MYSQL_TIME ltime;
+        longlong packed = my_time_packed_from_binary(ptr, meta);
+        TIME_from_longlong_time_packed(&ltime, packed);
+        int buflen = my_time_to_str(ltime, buf, meta);
+        //        my_b_write_quoted(file, (uchar *)buf, buflen);
+        std::string tmp_value((const char *)buf, buflen);
+        col_value += "'";
+        col_value += tmp_value;
+        col_value += "'";
+      } 
+      break;
+    }
+
+    case MYSQL_TYPE_NEWDATE: {
+      if (!ptr) col_value = "NULL";
+      else {
+        uint32 tmp = uint3korr(ptr);
+        int part;
+        char buf[11];
+        char *pos = &buf[10];  // start from '\0' to the beginning
+
+        /* Copied from field.cc */
+        *pos-- = 0;  // End NULL
+        part = (int)(tmp & 31);
+        *pos-- = (char)('0' + part % 10);
+        *pos-- = (char)('0' + part / 10);
+        *pos-- = ':';
+        part = (int)(tmp >> 5 & 15);
+        *pos-- = (char)('0' + part % 10);
+        *pos-- = (char)('0' + part / 10);
+        *pos-- = ':';
+        part = (int)(tmp >> 9);
+        *pos-- = (char)('0' + part % 10);
+        part /= 10;
+        *pos-- = (char)('0' + part % 10);
+        part /= 10;
+        *pos-- = (char)('0' + part % 10);
+        part /= 10;
+        *pos = (char)('0' + part);
+        col_value += "'";
+        col_value += buf;
+        col_value += "'";
+        }
+      break;
+    }
+
+    case MYSQL_TYPE_YEAR: {
+      if (!ptr) col_value = "NULL";
+      else {
+      uint32 i32 = *ptr;
+      char tmp_value[8] = {0};
+      sprintf(tmp_value, "%04d", i32 + 1900);
+      col_value = tmp_value;
+      }
+      break;
+    }
+    case MYSQL_TYPE_ENUM:
+      switch (meta & 0xFF) {
+        case 1:
+          if (!ptr) col_value = "NULL";
+          else {
+            char tmp_value[16] = {0};
+            sprintf(tmp_value, "%d", (int)*ptr);
+            col_value = tmp_value;
+          }
+          break;
+        case 2: {
+          if (!ptr) col_value = "NULL";
+          else {
+            int32 i32 = uint2korr(ptr);
+            char tmp_value[16] = {0};
+            sprintf(tmp_value, "%d", i32);
+            col_value = tmp_value;
+          }
+          break;
+        }
+        default:
+          col_value = "NULL";
+      }
+      break;
+
+    case MYSQL_TYPE_SET:
+      if (!ptr) col_value = "NULL";
+      else {
+        jk_print_bit (col_value, ptr, (meta & 0xFF) * 8);
+      }
+      break;
+    case MYSQL_TYPE_BLOB:
+    {
+      switch (meta) {
+        case 1:
+          if (!ptr) col_value = "NULL";
+          else {
+          length = *ptr;
+          std::string tmp_value((const char *)ptr + 1, length);
+          col_value += tmp_value;
+          }
+          break;
+        case 2:
+          if (!ptr) col_value = "NULL";
+          else {
+            length = uint2korr(ptr);
+            std::string tmp_value((const char*)ptr + 2, length);
+            col_value = tmp_value;
+          }
+          break;
+      case 3:
+        if (!ptr) col_value = "NULL";
+        else {
+          length = uint3korr(ptr);
+          std::string tmp_value((const char *)ptr + 3, length);
+          col_value = tmp_value;
+        }
+          break;
+        case 4:
+          if (!ptr) col_value = "NULL";
+          else {
+            length = uint4korr(ptr);
+            std::string tmp_value((const char *)ptr + 4, length);
+            col_value = tmp_value;
+          }
+          break;
+        default:
+          col_value = "NULL";
+      };
+      break;
+    }
+
+    case MYSQL_TYPE_VARCHAR:
+    case MYSQL_TYPE_VAR_STRING:
+    {
+      //TODO: Implement getting value of this type
+      
+      length = meta;
+      if (!ptr) col_value = "NULL";
+      else {
+        jk_get_value_quoted_with_length(col_value, ptr, length);
+      }
+      break;
+    }
+    case MYSQL_TYPE_STRING:
+      if (!ptr) col_value = "NULL";
+      else {
+        jk_get_value_quoted_with_length(col_value, ptr, length);
+      }
+      break;
+    // case MYSQL_TYPE_JSON: {
+    //   snprintf(typestr, typestr_length, "JSON");
+    //   if (!ptr) return my_b_printf(file, "NULL");
+    //   length = uint4korr(ptr);
+    //   ptr += 4;
+    //   if (is_partial) {
+    //     const char *error = print_json_diff(file, ptr, length, col_name);
+    //     if (error != nullptr)
+    //       my_b_printf(file, "Error %s while printing JSON diff\n", error);
+    //   } else {
+    //     json_binary::Value value =
+    //         json_binary::parse_binary((const char *)ptr, length);
+    //     if (value.type() == json_binary::Value::ERROR) {
+    //       if (my_b_printf(
+    //               file,
+    //               "Invalid JSON\n")) /* purecov: inspected */  // corrupted
+    //                                                            // event
+    //         return 0; /* purecov: inspected */  // error writing output
+    //     } else {
+    //       Json_wrapper wrapper(value);
+    //       StringBuffer<STRING_BUFFER_USUAL_SIZE> s;
+    //       if (json_wrapper_to_string(file, &s, &wrapper, true))
+    //         my_b_printf(file, "Failed to format JSON object as string.\n");
+    //       /* purecov: inspected */  // OOM
+    //     }
+    //   }
+    //   return length + meta;
+    //   break;
+    // }
+    case MYSQL_TYPE_BOOL:
+    case MYSQL_TYPE_INVALID:
+    default: {
+     col_value = "NULL";
+    } break;
+  }
+}
 #endif
 
 /**
@@ -2238,7 +2783,20 @@ size_t Rows_log_event::print_verbose_one_row(
   value += (bitmap_bits_set(cols_bitmap) + 7) / 8;
 
   my_b_printf(file, "%s", prefix);
-
+  std::string col_value = "";
+  std::string part_word = "";
+  bool update_flag = false;
+  if (this->get_type_code() == binary_log::WRITE_ROWS_EVENT || 
+      glb_update_af_flag == true)
+  {
+    part_word = " AND ";
+  }
+  else
+  {
+    if (this->get_type_code() == binary_log::UPDATE_ROWS_EVENT)
+      update_flag = true;
+    part_word = ",";
+  }
   for (size_t i = 0; i < td->size(); i++) {
     /*
       Note: need to read partial bit before reading cols_bitmap, since
@@ -2252,8 +2810,15 @@ size_t Rows_log_event::print_verbose_one_row(
     if (bitmap_is_set(cols_bitmap, i) == 0) continue;
 
     bool is_null = null_bits.get();
-
-    my_b_printf(file, "###   @%d=", static_cast<int>(i + 1));
+  
+    if (opt_colname == true)
+    {
+      col_md_st *col_md = &(cols_md[i]);
+      my_b_printf(file, "###   %s=", col_md->col_name);
+    }else{
+      my_b_printf(file, "###   @%d=", static_cast<int>(i + 1));
+    }
+    
     if (!is_null) {
       size_t fsize =
           td->calc_field_size((uint)i, pointer_cast<const uchar *>(value));
@@ -2268,9 +2833,62 @@ size_t Rows_log_event::print_verbose_one_row(
     }
     char col_name[256];
     sprintf(col_name, "@%lu", (unsigned long)i + 1);
+    
     size_t size = log_event_print_value(
         file, is_null ? nullptr : value, td->type(i), td->field_metadata(i),
         typestr, sizeof(typestr), col_name, is_partial);
+    
+    //added by gqhao to get column value
+    if (opt_flashback == true)
+    {
+      col_md_st *col_md = &(cols_md[i]);
+      col_value.clear();
+      jk_log_event_print_value(
+        is_null ? nullptr : value, td->type(i), td->field_metadata(i),
+        col_name, is_partial, col_md, col_value);
+      if (part_word == " AND ")
+      {
+        if (col_md->pk_flag == true)
+        {
+          if (glb_update_af_flag == true)
+          {
+            cols_values_af += col_md->col_name;
+            if (col_value == "NULL")
+              cols_values_af += " is ";
+            else
+              cols_values_af += "=";
+            cols_values_af += col_value;
+            cols_values_af += part_word;
+          }
+          else
+          {
+            cols_values_bf += col_md->col_name;
+            if (col_value == "NULL")
+              cols_values_bf += " is ";
+            else
+              cols_values_bf += "=";
+            cols_values_bf += col_value;
+            cols_values_bf += part_word;
+          }
+        }
+      }
+      else
+      {
+        if (update_flag == true)
+        {
+          cols_values_bf += col_md->col_name;
+          cols_values_bf += "=";
+          cols_values_bf += col_value;
+          cols_values_bf += part_word;
+        }
+        else
+        {
+          cols_values_bf += col_value;
+          cols_values_bf += part_word;
+        }
+      
+      }
+    }
     if (!size) return 0;
 
     if (!is_null) value += size;
@@ -2287,8 +2905,20 @@ size_t Rows_log_event::print_verbose_one_row(
 
     my_b_printf(file, "\n");
   }
+  
+  if (glb_update_af_flag == false && cols_values_bf.length() > 0)
+  {
+    cols_values_bf = cols_values_bf.substr(0, cols_values_bf.length() - part_word.length());
+  }
+  if (cols_values_af.length() > 0)
+  {
+    cols_values_af = cols_values_af.substr(0, cols_values_af.length() - part_word.length());
+  }
+
   return value - value0;
 }
+
+
 
 /**
   Print a row event into IO cache in human readable form (in SQL format)
@@ -2296,8 +2926,13 @@ size_t Rows_log_event::print_verbose_one_row(
   @param[in] file              IO cache
   @param[in] print_event_info  Print parameters
 */
+
 void Rows_log_event::print_verbose(IO_CACHE *file,
                                    PRINT_EVENT_INFO *print_event_info) {
+  if (first_row_event == true){
+    flb_sql.clear();
+    first_row_event = false;
+  }
   // Quoted length of the identifier can be twice the original length
   char quoted_db[1 + NAME_LEN * 2 + 2];
   char quoted_table[1 + NAME_LEN * 2 + 2];
@@ -2382,7 +3017,32 @@ void Rows_log_event::print_verbose(IO_CACHE *file,
                 llstr(m_table_id, llbuff));
     return;
   }
-
+  
+  //added by gqhao to get table metadata
+  if (opt_flashback == true || opt_colname == true){
+    std::string tb_key = "";
+    tb_key += map->get_db_name();
+    tb_key += ":";
+    tb_key += map->get_table_name();
+    table_metadata_type::iterator iter = global_table_metadata.find(tb_key);
+    if (iter == global_table_metadata.end())
+    {
+      jk_get_table_metadata(map->get_db_name(), map->get_table_name());
+    }
+    iter = global_table_metadata.find(tb_key);
+    if (iter == global_table_metadata.end())
+    {
+      return;
+    }
+    cols_md = iter->second;
+  }
+  
+  // Table_map_event::Optional_metadata_fields tb_metadata(map->m_optional_metadata, map->m_optional_metadata_len);
+  // printf("%d", tb_metadata.is_valid)
+  
+  //added by gqhao to get flashback values;
+  std::string flb_sql_one_row;
+  
   /* If the write rows event contained no values for the AI */
   if (((general_type_code == binary_log::WRITE_ROWS_EVENT) &&
        (m_rows_buf == m_rows_end))) {
@@ -2390,11 +3050,14 @@ void Rows_log_event::print_verbose(IO_CACHE *file,
                 map->get_db_name(), map->get_table_name());
     goto end;
   }
-
+    
   for (const uchar *value = m_rows_buf; value < m_rows_end;) {
+    flb_sql_one_row.clear();
+    cols_values_bf.clear();
+    cols_values_af.clear();
     size_t length;
     quoted_db_len =
-        my_strmov_quoted_identifier((char *)quoted_db, map->get_db_name());
+    my_strmov_quoted_identifier((char *)quoted_db, map->get_db_name());
     quoted_table_len = my_strmov_quoted_identifier((char *)quoted_table,
                                                    map->get_table_name());
     quoted_db[quoted_db_len] = '\0';
@@ -2409,16 +3072,89 @@ void Rows_log_event::print_verbose(IO_CACHE *file,
 
     /* Print the second image (for UPDATE only) */
     if (sql_clause2) {
+      //added by gqhao 
+      glb_update_af_flag = true;
       if (!(length = print_verbose_one_row(
                 file, td, print_event_info, &m_cols_ai, value,
                 (const uchar *)sql_clause2, enum_row_image_type::UPDATE_AI)))
         goto end;
+      glb_update_af_flag = false;
       value += length;
+    }
+    if (opt_flashback == true){
+      switch (general_type_code) {
+      case binary_log::WRITE_ROWS_EVENT:
+        if (opt_flb_op_type == FLB_ALL ||
+            opt_flb_op_type == FLB_INSERT ||
+            opt_flb_op_type == FLB_DEL_AND_INS ||
+            opt_flb_op_type == FLB_UPD_AND_INS)
+        {
+          flb_sql_one_row = "DELETE FROM ";
+          flb_sql_one_row += map->get_db_name();
+          flb_sql_one_row += ".";
+          flb_sql_one_row += map->get_table_name();
+          flb_sql_one_row += " WHERE ";
+          flb_sql_one_row += cols_values_bf;
+          flb_sql_one_row += " LIMIT 1;";
+        }
+        break;
+      case binary_log::DELETE_ROWS_EVENT:
+        if (opt_flb_op_type == FLB_ALL ||
+            opt_flb_op_type == FLB_DELETE ||
+            opt_flb_op_type == FLB_DEL_AND_INS ||
+            opt_flb_op_type == FLB_DEL_AND_UPD)
+        {
+          flb_sql_one_row = "INSERT INTO ";
+          flb_sql_one_row += map->get_db_name();
+          flb_sql_one_row += ".";
+          flb_sql_one_row += map->get_table_name();
+          flb_sql_one_row += " values(";
+          flb_sql_one_row += cols_values_bf;
+          flb_sql_one_row += ");";
+        }      
+        break;
+      case binary_log::UPDATE_ROWS_EVENT:
+      case binary_log::PARTIAL_UPDATE_ROWS_EVENT:
+        if (opt_flb_op_type == FLB_ALL ||
+            opt_flb_op_type == FLB_UPDATE ||
+            opt_flb_op_type == FLB_UPD_AND_INS ||
+            opt_flb_op_type == FLB_DEL_AND_UPD)
+        {
+          flb_sql_one_row = "UPDAE ";
+          flb_sql_one_row += map->get_db_name();
+          flb_sql_one_row += ".";
+          flb_sql_one_row += map->get_table_name();
+          flb_sql_one_row += " SET  ";
+          flb_sql_one_row += cols_values_bf;
+          flb_sql_one_row += " WHERE ";
+          flb_sql_one_row += cols_values_af;
+          flb_sql_one_row += " LIMIT 1;";
+        }
+        break;
+      default:
+        flb_sql_one_row.clear();
+        DBUG_ASSERT(0); /* Not possible */
+      }
+      if(flb_sql_one_row.empty() == false)
+        flb_sql += flb_sql_one_row;
     }
   }
 
+  
 end:
   delete td;
+  if (opt_flashback == true){
+    if (get_flags(STMT_END_F) == true)
+    {
+      if (flb_sql.empty() == false){
+        flb_sql += "\n";
+        my_b_printf(file, "### FLASHBACK SQL: %s", flb_sql.c_str());
+      }
+    
+      first_row_event = true;
+      flb_sql.clear();
+    }
+  }
 }
 
 void Log_event::print_base64(IO_CACHE *file, PRINT_EVENT_INFO *print_event_info,
@@ -10710,6 +11446,7 @@ int Table_map_log_event::do_apply_event(Relay_log_info const *rli) {
     /* 'memory' is freed in clear_tables_to_lock */
   } else  // FILTERED_OUT, SAME_ID_MAPPING_*
   {
+    
     if (tblmap_status == FILTERED_WITH_XA_ACTIVE) {
       if (thd->slave_thread)
         rli->report(ERROR_LEVEL, ER_XA_REPLICATION_FILTERS, "%s",

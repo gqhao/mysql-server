@@ -114,7 +114,7 @@ static bool verbose = false, opt_no_create_info = false, opt_no_data = false,
             opt_compact = false, opt_hex_blob = false,
             opt_order_by_primary = false, opt_ignore = false,
             opt_complete_insert = false, opt_drop_database = false,
-            opt_replace_into = false, opt_dump_triggers = false,
+            opt_replace_into = false, opt_dump_triggers = false, opt_jk_backup = false,
             opt_routines = false, opt_tz_utc = true, opt_slave_apply = false,
             opt_include_master_host_port = false, opt_events = false,
             opt_comments_used = false, opt_alltspcs = false,
@@ -569,6 +569,9 @@ static struct my_option my_long_options[] = {
     {"triggers", OPT_TRIGGERS, "Dump triggers for each dumped table.",
      &opt_dump_triggers, &opt_dump_triggers, nullptr, GET_BOOL, NO_ARG, 1, 0, 0,
      nullptr, 0, nullptr},
+    {"jk_backup", 0, "Jkbackup,using logical database and tables in backup file.",
+     &opt_jk_backup, &opt_jk_backup, nullptr, GET_BOOL, NO_ARG, 0, 0, 0,
+     nullptr, 0, nullptr},
     {"tz-utc", OPT_TZ_UTC,
      "SET TIME_ZONE='+00:00' at top of dump to allow dumping of TIMESTAMP data "
      "when a server has data in different time zones or data is being moved "
@@ -741,7 +744,7 @@ static void write_header(FILE *sql_file, char *db_name) {
     print_comment(sql_file, false, "-- Server version\t%s\n",
                   mysql_get_server_info(&mysql_connection));
 
-    if (opt_set_charset)
+    if (opt_set_charset && opt_jk_backup == false)
       fprintf(
           sql_file,
           "\n/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;"
@@ -751,18 +754,18 @@ static void write_header(FILE *sql_file, char *db_name) {
           "\n/*!50503 SET NAMES %s */;\n",
           default_charset);
 
-    if (opt_tz_utc) {
+    if (opt_tz_utc && opt_jk_backup == false) {
       fprintf(sql_file, "/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;\n");
       fprintf(sql_file, "/*!40103 SET TIME_ZONE='+00:00' */;\n");
     }
-    if (stats_tables_included) {
+    if (stats_tables_included && opt_jk_backup == false) {
       fprintf(sql_file,
               "/*!50606 SET "
               "@OLD_INNODB_STATS_AUTO_RECALC=@@INNODB_STATS_AUTO_RECALC */;\n");
       fprintf(sql_file,
               "/*!50606 SET GLOBAL INNODB_STATS_AUTO_RECALC=OFF */;\n");
     }
-    if (!path) {
+    if (!path && opt_jk_backup == false) {
       fprintf(md_result_file,
               "\
 /*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;\n\
@@ -772,6 +775,7 @@ static void write_header(FILE *sql_file, char *db_name) {
     const char *mode1 = path ? "" : "NO_AUTO_VALUE_ON_ZERO";
     const char *mode2 = ansi_mode ? "ANSI" : "";
     const char *comma = *mode1 && *mode2 ? "," : "";
+    if (opt_jk_backup == false)
     fprintf(sql_file,
             "/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='%s%s%s' */;\n"
             "/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;\n",
@@ -2576,6 +2580,68 @@ static inline bool is_innodb_stats_tables_included(int argc, char **argv) {
 }
 
 /*
+  added by gqhao:
+  rewrite table name for JK DRDS backup
+  for sharding table: rename the sharding table suffix
+  for global table and vertical table: no chaning
+*/
+
+static std::string jk_get_table_name(const char *tb_name, bool with_quoted = true)
+{
+  int tb_len = strlen(tb_name);
+  if (tb_len > 0)
+    tb_len -= 1;
+  const char *end = tb_name + tb_len;
+  const char *split_start = end;
+  while (split_start >= tb_name)
+  {
+    if (*split_start == '_')
+      break;
+    split_start--;
+  }
+  if (split_start == tb_name - 1)
+    return tb_name;
+  split_start++;
+  const char *check = split_start;
+  while(check < end)
+  {
+    if (*check < '0' || *check > '9')
+      break;
+    check++;
+  }
+  if (check == end)
+  {
+    std::string ret_tb_name(tb_name, split_start - tb_name - 1);
+    if (with_quoted == true)
+      ret_tb_name +="`";
+    return ret_tb_name;
+  }
+  return tb_name;
+}
+
+std::string jk_get_db_name(const char *db_name)
+{
+  int db_len = strlen(db_name);
+  if (db_len > 0)
+    db_len -= 1;
+  const char *end = db_name + db_len;
+  const char *split_start = end;
+  while (split_start >= db_name)
+  {
+    if (*split_start >='0' && *split_start <= '9'){
+      split_start--;
+      continue;
+      }
+    break;
+  }
+  if (split_start == db_name - 1)
+    return db_name;
+  split_start++;
+  std::string ret_db_name(db_name, split_start - db_name);
+  return ret_db_name;
+}
+
+/*
   get_table_structure -- retrieves database structure, prints out corresponding
   CREATE statement and fills out insert_pat if the table is the type we will
   be dumping.
@@ -2670,12 +2736,17 @@ static uint get_table_structure(const char *table, char *db, char *table_type,
       bool freemem = false;
       char const *text = fix_identifier_with_newline(result_table, &freemem);
       if (strcmp(table_type, "VIEW") == 0) /* view */
-        print_comment(sql_file, false,
-                      "\n--\n-- Temporary view structure for view %s\n--\n\n",
-                      text);
-      else
-        print_comment(sql_file, false,
-                      "\n--\n-- Table structure for table %s\n--\n\n", text);
+      {
+        if (opt_jk_backup == false)
+          print_comment(sql_file, false,
+                        "\n--\n-- Temporary view structure for view %s\n--\n\n",
+                        text);
+      
+      }else{
+        if (opt_jk_backup == false)
+          print_comment(sql_file, false,
+                        "\n--\n-- Table structure for table %s\n--\n\n", text);
+      }
       if (freemem) my_free(const_cast<char *>(text));
 
       if (opt_drop) {
@@ -2810,17 +2881,36 @@ static uint get_table_structure(const char *table, char *db, char *table_type,
       is_replication_metadata_table = replication_metadata_tables(db, table);
       if (is_log_table || is_replication_metadata_table)
         row[1] += 13; /* strlen("CREATE TABLE ")= 13 */
-
-      fprintf(sql_file,
-              "/*!40101 SET @saved_cs_client     = @@character_set_client */;\n"
-              "/*!50503 SET character_set_client = utf8mb4 */;\n"
-              "%s%s;\n"
-              "/*!40101 SET character_set_client = @saved_cs_client */;\n",
-              (is_log_table || is_replication_metadata_table)
-                  ? "CREATE TABLE IF NOT EXISTS "
-                  : "",
-              row[1]);
-
+      if (opt_jk_backup == true)
+      {
+        std::string tmp_sql = "CREATE TABLE IF NOT EXISTS ";
+        const char *start = row[1] + strlen("CREATE TABLE");
+        const char *end = row[1] + strlen(row[1]) - strlen("CREATE TABLE");
+        const char *split = start;
+        std::string tmp_tb_name = "";
+        while(split < end)
+        {
+          if(*split =='(')
+            break;
+          if (*split !=' ')
+            tmp_tb_name += *split;
+          split++;
+        }
+        
+        tmp_sql += jk_get_table_name(tmp_tb_name.c_str());
+        tmp_sql += split;
+        tmp_sql += ";";
+        fprintf(sql_file,"%s\n", tmp_sql.c_str());
+      }else{
+        fprintf(sql_file,
+                "/*!40101 SET @saved_cs_client     = @@character_set_client */;\n"
+                "/*!50503 SET character_set_client = utf8mb4 */;\n"
+                "%s%s;\n"
+                "/*!40101 SET character_set_client = @saved_cs_client */;\n",
+                (is_log_table || is_replication_metadata_table)
+                ? "CREATE TABLE IF NOT EXISTS "
+                : "",
+                row[1]);}
       check_io(sql_file);
       mysql_free_result(result);
     }
@@ -2864,7 +2954,14 @@ static uint get_table_structure(const char *table, char *db, char *table_type,
         dynstr_append_checked(&insert_pat, "INSERT ");
       dynstr_append_checked(&insert_pat, insert_option);
       dynstr_append_checked(&insert_pat, "INTO ");
-      dynstr_append_checked(&insert_pat, opt_quoted_table);
+      if (opt_jk_backup == true)
+      {
+        std::string tmp_tb_name = jk_get_table_name(opt_quoted_table);
+        dynstr_append_checked(&insert_pat, tmp_tb_name.c_str());
+      }
+      else{
+        dynstr_append_checked(&insert_pat, opt_quoted_table);
+      }
       if (complete_insert) {
         dynstr_append_checked(&insert_pat, " (");
       } else {
@@ -2937,7 +3034,7 @@ static uint get_table_structure(const char *table, char *db, char *table_type,
       if (opt_drop)
         fprintf(sql_file, "DROP TABLE IF EXISTS %s;\n", result_table);
       if (!opt_xml)
-        fprintf(sql_file, "CREATE TABLE %s (\n", result_table);
+        fprintf(sql_file, "CREATE TABLE IF NOT EXISTS %s (\n", result_table);
       else
         print_xml_tag(sql_file, "\t", "\n", "table_structure", "name=", table,
                       NullS);
@@ -2951,7 +3048,14 @@ static uint get_table_structure(const char *table, char *db, char *table_type,
         dynstr_append_checked(&insert_pat, "INSERT ");
       dynstr_append_checked(&insert_pat, insert_option);
       dynstr_append_checked(&insert_pat, "INTO ");
-      dynstr_append_checked(&insert_pat, result_table);
+      if (opt_jk_backup == true)
+      {
+        std::string tmp_tb_name = jk_get_table_name(result_table);
+        dynstr_append_checked(&insert_pat, tmp_tb_name.c_str());
+      }
+      else{
+        dynstr_append_checked(&insert_pat, result_table);
+      }
       if (complete_insert)
         dynstr_append_checked(&insert_pat, " (");
       else {
@@ -3655,8 +3759,9 @@ static void dump_table(char *table, char *db) {
     bool data_freemem = false;
     char const *data_text =
         fix_identifier_with_newline(result_table, &data_freemem);
-    print_comment(md_result_file, false,
-                  "\n--\n-- Dumping data for table %s\n--\n", data_text);
+    if (opt_jk_backup == false)
+      print_comment(md_result_file, false,
+                    "\n--\n-- Dumping data for table %s\n--\n", data_text);
     if (data_freemem) my_free(const_cast<char *>(data_text));
 
     dynstr_append_checked(&query_string,
@@ -3713,7 +3818,8 @@ static void dump_table(char *table, char *db) {
     }
 
     if (opt_lock && !(innodb_stats_tables(db, table))) {
-      fprintf(md_result_file, "LOCK TABLES %s WRITE;\n", opt_quoted_table);
+      if (opt_jk_backup == false)
+        fprintf(md_result_file, "LOCK TABLES %s WRITE;\n", opt_quoted_table);
       check_io(md_result_file);
     }
     /* Moved disable keys to after lock per bug 15977 */
@@ -3956,7 +4062,8 @@ static void dump_table(char *table, char *db) {
       check_io(md_result_file);
     }
     if (opt_lock && !(innodb_stats_tables(db, table))) {
-      fputs("UNLOCK TABLES;\n", md_result_file);
+      if (opt_jk_backup == false)
+        fputs("UNLOCK TABLES;\n", md_result_file);
       check_io(md_result_file);
     }
     if (opt_autocommit) {
@@ -4272,6 +4379,14 @@ static int dump_all_databases() {
       continue;
 
     if (is_ndbinfo(mysql, row[0])) continue;
+    if (opt_jk_backup == true)
+    {
+      if (strcasecmp("mysql", row[0]) == 0||
+          strcasecmp("peformance_schema", row[0]) == 0 ||
+          strcasecmp("information_schema", row[0]) == 0 ||
+          strcasecmp("sys", row[0]) == 0)
+        continue;
+    }
 
     if (dump_all_tables_in_db(row[0])) result = 1;
   }
@@ -4299,6 +4414,14 @@ static int dump_all_databases() {
         continue;
 
       if (is_ndbinfo(mysql, row[0])) continue;
+      if (opt_jk_backup == true)
+      {
+        if (strcasecmp("mysql", row[0]) == 0||
+            strcasecmp("peformance_schema", row[0]) == 0 ||
+            strcasecmp("information_schema", row[0]) == 0 ||
+            strcasecmp("sys", row[0]) == 0)
+          continue;
+      }
 
       if (dump_all_views_in_db(row[0])) result = 1;
     }
@@ -4362,23 +4485,52 @@ int init_dumping_tables(char *qdatabase) {
     MYSQL_ROW row;
     MYSQL_RES *dbinfo;
 
-    snprintf(qbuf, sizeof(qbuf), "SHOW CREATE DATABASE IF NOT EXISTS %s",
-             qdatabase);
+    if (opt_jk_backup)
+      snprintf(qbuf, sizeof(qbuf), "SHOW CREATE DATABASE %s",
+               qdatabase);
+    else
+      snprintf(qbuf, sizeof(qbuf), "SHOW CREATE DATABASE IF NOT EXISTS %s",
+               qdatabase);
 
     if (mysql_query(mysql, qbuf) || !(dbinfo = mysql_store_result(mysql))) {
       /* Old server version, dump generic CREATE DATABASE */
       if (opt_drop_database)
         fprintf(md_result_file, "\n/*!40000 DROP DATABASE IF EXISTS %s*/;\n",
                 qdatabase);
-      fprintf(md_result_file,
-              "\nCREATE DATABASE /*!32312 IF NOT EXISTS*/ %s;\n", qdatabase);
+      if (opt_jk_backup == true)
+      {
+        std::string jk_db = jk_get_db_name(qdatabase);
+        fprintf(md_result_file,
+                "\nCREATE DATABASE IF NOT EXISTS %s;\n", jk_db.c_str());  
+      }else{
+        fprintf(md_result_file,
+                "\nCREATE DATABASE /*!32312 IF NOT EXISTS*/ %s;\n", qdatabase);
+      }
     } else {
       if (opt_drop_database)
         fprintf(md_result_file, "\n/*!40000 DROP DATABASE IF EXISTS %s*/;\n",
                 qdatabase);
       row = mysql_fetch_row(dbinfo);
       if (row[1]) {
-        fprintf(md_result_file, "\n%s;\n", row[1]);
+        if (opt_jk_backup == true)
+        {
+          std::string tmp_sql = "\nCREATE DATABASE IF NOT EXISTS `";
+          const char *start = row[1] + strlen("CREATE DATABASE `");
+          const char *split = start;
+          const char *end = row[1] + strlen(row[1]);
+          while(split < end)
+          {
+            if (*split == '`')
+              break;
+            split++;
+          }
+          std::string tmp_db_name(start, split - start);
+          tmp_sql += jk_get_db_name(tmp_db_name.c_str());
+          tmp_sql += "`";
+          fprintf(md_result_file, "\n%s;\n", tmp_sql.c_str());
+        }
+        else
+          fprintf(md_result_file, "\n%s;\n", row[1]);
       }
       mysql_free_result(dbinfo);
     }
@@ -4406,14 +4558,23 @@ static int init_dumping(char *database, int init_func(char *)) {
 
       bool freemem = false;
       char const *text = fix_identifier_with_newline(qdatabase, &freemem);
+      if (opt_jk_backup == false)
       print_comment(md_result_file, false,
                     "\n--\n-- Current Database: %s\n--\n", text);
       if (freemem) my_free(const_cast<char *>(text));
 
       /* Call the view or table specific function */
       init_func(qdatabase);
-
-      fprintf(md_result_file, "\nUSE %s;\n", qdatabase);
+      if (opt_jk_backup == true)
+      {
+        std::string tmp_db_bf(qdatabase + 1, strlen(qdatabase) -2);
+        std::string tmp_db_af ="`";
+        tmp_db_af += jk_get_db_name(tmp_db_bf.c_str());
+        tmp_db_af +="`";
+        fprintf(md_result_file, "\nUSE %s;\n", tmp_db_af.c_str());
+      }
+      else
+        fprintf(md_result_file, "\nUSE %s;\n", qdatabase);
       check_io(md_result_file);
     }
   }
@@ -4475,8 +4636,23 @@ static int dump_all_tables_in_db(char *database) {
     if (mysql_query_with_error_report(mysql, nullptr, "SAVEPOINT sp")) return 1;
   }
   while ((table = getTableName(0))) {
-    char *end = my_stpcpy(afterdot, table);
-    if (include_table(hash_key, end - hash_key)) {
+    const char* final_tb_hash_key = NULL;
+    std::string tmp_hash_key = "";
+    int len = 0;
+    if (opt_jk_backup == true)
+    {
+      tmp_hash_key += jk_get_db_name(database);
+      tmp_hash_key += '.';
+      tmp_hash_key += jk_get_table_name(table, false);
+      final_tb_hash_key = tmp_hash_key.c_str();
+      len = tmp_hash_key.length();
+    }
+    else{
+      char *end = my_stpcpy(afterdot, table);
+      final_tb_hash_key = hash_key;
+      len = end - hash_key;
+    }
+    if (include_table(final_tb_hash_key, len)) {
       dump_table(table, database);
       if (opt_dump_triggers && mysql_get_server_version(mysql) >= 50009) {
         if (dump_triggers_for_table(table, database)) {
@@ -4547,7 +4723,7 @@ static int dump_all_tables_in_db(char *database) {
     fputs("</database>\n", md_result_file);
     check_io(md_result_file);
   }
-  if (lock_tables)
+  if (lock_tables &&(opt_jk_backup == false))
     (void)mysql_query_with_error_report(mysql, nullptr, "UNLOCK TABLES");
   if (using_mysql_db) {
     char table_type[NAME_LEN];
@@ -5336,21 +5512,24 @@ static bool add_set_gtid_purged(MYSQL *mysql_con) {
 
   /* query to get the GTID_EXECUTED */
   if (mysql_query_with_error_report(mysql_con, &gtid_purged_res,
-                                    "SELECT @@GLOBAL.GTID_EXECUTED"))
+                                    "SELECT REPLACE(@@GLOBAL.GTID_EXECUTED,'\n', '') AS `@@GLOBAL.GTID_EXECUTED`"))
     return true;
 
   /* Proceed only if gtid_purged_res is non empty */
   if ((num_sets = mysql_num_rows(gtid_purged_res)) > 0) {
-    if (opt_comments)
+    if (opt_comments && opt_jk_backup == false)
       fprintf(md_result_file,
               "\n--\n-- GTID state at the beginning of the backup \n--\n\n");
 
     const char *comment_suffix = "";
     if (opt_set_gtid_purged_mode == SET_GTID_PURGED_COMMENTED) {
       comment_suffix = "*/";
-      fprintf(md_result_file, "/* SET @@GLOBAL.GTID_PURGED='+");
+      fprintf(md_result_file, "-- /* SET @@GLOBAL.GTID_PURGED='+");
     } else {
-      fprintf(md_result_file, "SET @@GLOBAL.GTID_PURGED=/*!80000 '+'*/ '");
+      if (opt_jk_backup == true)
+        fprintf(md_result_file, "-- SET @@GLOBAL.GTID_PURGED= '");
+      else
+        fprintf(md_result_file, "-- SET @@GLOBAL.GTID_PURGED=/*!80000 '+'*/ '");
     }
 
     /* formatting is not required, even for multiple gtid sets */
@@ -5422,8 +5601,8 @@ static bool process_set_gtid_purged(MYSQL *mysql_con) {
               "--set-gtid-purged=OFF. To make a complete dump, pass "
               "--all-databases --triggers --routines --events. \n");
     }
-
-    set_session_binlog(false);
+    if (opt_jk_backup == false)
+      set_session_binlog(false);
     if (add_set_gtid_purged(mysql_con)) {
       mysql_free_result(gtid_mode_res);
       return true;
@@ -5699,7 +5878,7 @@ int main(int argc, char **argv) {
 
   stats_tables_included = is_innodb_stats_tables_included(argc, argv);
 
-  if (!path) write_header(md_result_file, *argv);
+  if ((!path) && opt_jk_backup == false) write_header(md_result_file, *argv);
 
   if (opt_slave_data && do_stop_slave_sql(mysql)) goto err;
 
@@ -5819,7 +5998,7 @@ int main(int argc, char **argv) {
   */
 err:
   dbDisconnect(current_host);
-  if (!path) write_footer(md_result_file);
+  if ((!path) && opt_jk_backup == false) write_footer(md_result_file);
   free_resources();
 
   if (stderror_file) fclose(stderror_file);

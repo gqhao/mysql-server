@@ -696,6 +696,10 @@ ulong opt_binlog_rows_event_max_size;
 uint test_flags = 0;
 static uint opt_protocol = 0;
 static uint opt_compress = 0;
+/*added by gqhao*/
+uint opt_flashback = 0;
+uint opt_colname = 0;
+
 static FILE *result_file;
 
 #ifndef DBUG_OFF
@@ -722,8 +726,15 @@ static enum enum_remote_proto {
   BINLOG_DUMP_GTID = 1,
   BINLOG_LOCAL = 2
 } opt_remote_proto = BINLOG_LOCAL;
+
 static char *opt_remote_proto_str = nullptr;
 static char *database = nullptr;
+/* added by gqhao */
+enum_flb_op_type opt_flb_op_type = FLB_ALL;
+static char *tables = nullptr;
+static char *opt_op_type = nullptr;
+static std::string need_flb_tables;
+
 static char *output_file = nullptr;
 static char *rewrite = nullptr;
 bool force_opt = false, short_form = false, idempotent_mode = false;
@@ -757,7 +768,7 @@ static ulonglong start_position, stop_position;
 static char *start_datetime_str, *stop_datetime_str;
 static my_time_t start_datetime = 0, stop_datetime = MY_TIME_T_MAX;
 static ulonglong rec_count = 0;
-static MYSQL *mysql = nullptr;
+MYSQL *mysql = nullptr;
 static char *dirname_for_local_load = nullptr;
 static uint opt_server_id_bits = 0;
 ulong opt_server_id_mask = 0;
@@ -1088,6 +1099,53 @@ static bool shall_skip_database(const char *log_dbname) {
          strcmp(log_dbname, database);
 }
 
+static bool shall_skip_tables(const char *tb_name)
+{
+  if (need_flb_tables.empty() == true)
+    return false;
+  std::string ev_tb_name = tb_name;
+  std::transform(ev_tb_name.begin(), ev_tb_name.end(), ev_tb_name.begin(),
+                 ::tolower);
+  std::transform(need_flb_tables.begin(), need_flb_tables.end(), 
+                 need_flb_tables.begin(), ::tolower);
+  if (need_flb_tables.find(ev_tb_name) != std::string::npos)
+    return false;
+  else
+    return true;
+}
+
+static enum_flb_op_type get_flb_op_type(const char *op_type)
+{
+  if (op_type == nullptr || strlen(op_type) == 0)
+    return FLB_ALL;
+  std::string str_op_type = op_type;
+  std::transform(str_op_type.begin(), str_op_type.end(), str_op_type.begin(),
+                 ::tolower);
+  if (str_op_type.length() <= strlen("insert"))
+  {
+    if (str_op_type.find("insert") != std::string::npos)
+      return FLB_INSERT;
+    else if (str_op_type.find("update") != std::string::npos)
+      return FLB_UPDATE;
+    else if (str_op_type.find("delete") != std::string::npos)
+      return FLB_DELETE;
+    else
+      return FLB_ALL;
+  }
+  else
+  {
+    if ((str_op_type.find("delete") != std::string::npos) &&
+        (str_op_type.find("update") != std::string::npos))
+      return FLB_DEL_AND_UPD;
+    else if ((str_op_type.find("delete") != std::string::npos) &&
+             (str_op_type.find("insert") != std::string::npos))
+      return FLB_DEL_AND_INS;
+    else if ((str_op_type.find("update") != std::string::npos) &&
+             (str_op_type.find("insert") != std::string::npos))
+      return FLB_UPD_AND_INS;
+    else return FLB_ALL;
+  }
+} 
 /**
   Checks whether the given event should be filtered out,
   according to the include-gtids, exclude-gtids and
@@ -1600,6 +1658,21 @@ static Exit_status process_event(PRINT_EVENT_INFO *print_event_info,
           ev = nullptr;
           goto end;
         }
+        /* added by gqhao 
+         * 1. not filtered database 
+         * 2. but filtered tables 
+         */
+        else
+        {
+          if (shall_skip_tables(map->get_table_name()))
+          {
+            print_event_info->skipped_event_in_transaction = true;
+            print_event_info->m_table_map_ignored.set_table(map->get_table_id(),
+                                                            map);
+            ev = nullptr;
+            goto end;
+          }
+        }
       }
       // Fall through
       case binary_log::ROWS_QUERY_LOG_EVENT:
@@ -1809,6 +1882,14 @@ static struct my_option my_long_options[] = {
     {"database", 'd', "List entries for just this database (local log only).",
      &database, &database, nullptr, GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0,
      nullptr, 0, nullptr},
+    /* added by gqhao */
+    {"tables", 'T', "List entries for just these tables (local log only).",
+     &tables, &tables, nullptr, GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0,
+     nullptr, 0, nullptr},
+    {"op_type", 0, "Generate flashback sqls for these operations.",
+     &opt_op_type, &opt_op_type, nullptr, GET_STR_ALLOC, REQUIRED_ARG, 0, 0, 0,
+     nullptr, 0, nullptr},
+
     {"rewrite-db", OPT_REWRITE_DB,
      "Rewrite the row event to point so that "
      "it can be applied to a new database",
@@ -2040,6 +2121,13 @@ static struct my_option my_long_options[] = {
     {"compress", 'C', "Use compression in server/client protocol.",
      &opt_compress, &opt_compress, nullptr, GET_BOOL, NO_ARG, 0, 0, 0, nullptr,
      0, nullptr},
+    /*added by gqhao */
+    {"flashback", 0, "Generate flashback sqls.",
+     &opt_flashback, &opt_flashback, nullptr, GET_BOOL, NO_ARG, 0, 0, 0, nullptr,
+     0, nullptr},
+    {"colname", 0, "Print sqls with column names.",
+     &opt_colname, &opt_colname, nullptr, GET_BOOL, NO_ARG, 0, 0, 0, nullptr,
+     0, nullptr}, 
     {"compression-algorithms", 0,
      "Use compression algorithm in server/client protocol. Valid values "
      "are any combination of 'zstd','zlib','uncompressed'.",
@@ -2128,6 +2216,8 @@ static void cleanup() {
   my_free(host);
   my_free(user);
   my_free(dirname_for_local_load);
+  my_free(tables);
+  my_free(opt_op_type);
 
   for (size_t i = 0; i < buff_ev->size(); i++) {
     buff_event_info pop_event_array = buff_ev->at(i);
@@ -2143,7 +2233,7 @@ static void usage() {
   puts(ORACLE_WELCOME_COPYRIGHT_NOTICE("2000"));
   printf(
       "\
-Dumps a MySQL binary log in a format usable for viewing or for piping to\n\
+Dumps a MySQL binary log in a format usable for viewing or for piping to\n \
 the mysql command line client.\n\n");
   printf("Usage: %s [options] log-files\n", my_progname);
   my_print_help(my_long_options);
@@ -2269,13 +2359,17 @@ extern "C" bool get_one_option(int optid, const struct my_option *opt,
       warning(CLIENT_WARN_DEPRECATED_NO_REPLACEMENT_MSG("--short-form"));
       short_form = true;
       break;
+    case 'T':
+      need_flb_tables.clear();
+      need_flb_tables = tables;
+      break;
     case OPT_WAIT_SERVER_ID:
       warning(CLIENT_WARN_DEPRECATED_MSG("--stop-never-slave-server-id",
                                          "--connection-server-id"));
       break;
   }
   if (tty_password) pass = get_tty_password(NullS);
-
+  
   return false;
 }
 
@@ -3220,7 +3314,21 @@ int main(int argc, char **argv) {
   my_getopt_use_args_separator = false;
 
   parse_args(&argc, &argv);
-
+  //added by gqhao
+  opt_flb_op_type = get_flb_op_type(opt_op_type);
+  if (opt_flashback == true || opt_colname == true)
+  {
+    if (opt_remote_alias != true)
+    {
+      Exit_status r = OK_CONTINUE;
+      if ((r = safe_connect()) != OK_CONTINUE) 
+      {
+        std::cout << "Connect to server error, please check manually!" << std::endl;
+        return r;
+      }
+    }
+  }
+  
   if (!argc) {
     usage();
     my_end(my_end_arg);

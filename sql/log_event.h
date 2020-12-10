@@ -372,6 +372,39 @@ const int64 SEQ_MAX_TIMESTAMP = LLONG_MAX;
 */
 int get_rpl_part_id(partition_info *part_info);
 
+/*added by gqhao*/
+/* 1. flashback trx type
+   2. we will generate flash back sql for which kind of trx 
+ */
+enum enum_flb_op_type {
+  FLB_ALL = 0,
+  FLB_DELETE = 1,
+  FLB_UPDATE = 2,
+  FLB_INSERT = 3,
+  FLB_DEL_AND_UPD = 4,
+  FLB_DEL_AND_INS = 5,
+  FLB_UPD_AND_INS = 6
+};
+
+struct col_metadata_struct{
+  char col_name[255];
+  bool int_flag;
+  bool unsigned_flag;
+  bool pk_flag;
+  col_metadata_struct()
+  {
+    col_name[0]= '\0';
+    int_flag = false;
+    unsigned_flag = false;
+    pk_flag = false;
+  }
+};
+typedef col_metadata_struct col_md_st;
+
+typedef std::vector<col_md_st> col_md_vec;
+typedef std::map<std::string, col_md_vec> table_metadata_type;
+
+
 #ifdef MYSQL_SERVER
 class Item;
 class Protocol;
