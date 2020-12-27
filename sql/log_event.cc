@@ -179,6 +179,9 @@ extern bool pfs_processlist_enabled;
 extern enum_flb_op_type opt_flb_op_type;
 extern uint opt_flashback;
 extern uint opt_colname;
+extern uint opt_pre_gtid_only;
+extern uint opt_jk_restore;
+
 extern MYSQL *mysql;
 
 using std::max;
@@ -329,6 +332,7 @@ static const char *HA_ERR(int i) {
   }
   return "No Error!";
 }
+
 
 /**
    Error reporting facility for Rows_log_event::do_apply_event
@@ -1589,6 +1593,71 @@ static bool my_b_write_quoted(IO_CACHE *file, const uchar *ptr, uint length) {
   return false;
 }
 
+
+/*
+  added by gqhao:
+  rewrite table name for JK DRDS backup
+  for sharding table: rename the sharding table suffix
+  for global table and vertical table: no chaning
+*/
+
+std::string jk_get_table_name(const char *tb_name, bool with_quoted = true)
+{
+  int tb_len = strlen(tb_name);
+  if (tb_len > 0)
+    tb_len -= 1;
+  const char *end = tb_name + tb_len;
+  const char *split_start = end;
+  while (split_start >= tb_name)
+  {
+    if (*split_start == '_')
+      break;
+    split_start--;
+  }
+  if (split_start == tb_name - 1)
+    return tb_name;
+  split_start++;
+  const char *check = split_start;
+  while(check < end)
+  {
+    if (*check < '0' || *check > '9')
+      break;
+    check++;
+  }
+  if (check == end)
+  {
+    std::string ret_tb_name(tb_name, split_start - tb_name - 1);
+    if (with_quoted == true)
+      ret_tb_name +="`";
+    return ret_tb_name;
+  }
+  return tb_name;
+}
+
+std::string jk_get_db_name(const char *db_name)
+{
+  int db_len = strlen(db_name);
+  if (db_len > 0)
+    db_len -= 1;
+  const char *end = db_name + db_len;
+  const char *split_start = end;
+  while (split_start >= db_name)
+  {
+    if (*split_start >='0' && *split_start <= '9'){
+      split_start--;
+      continue;
+      }
+    break;
+  }
+  if (split_start == db_name - 1)
+    return db_name;
+  split_start++;
+  std::string ret_db_name(db_name, split_start - db_name);
+  return ret_db_name;
+}
+
+
+
 /**
   Prints a bit string to io cache in format  b'1010'.
 
@@ -2814,9 +2883,15 @@ size_t Rows_log_event::print_verbose_one_row(
     if (opt_colname == true)
     {
       col_md_st *col_md = &(cols_md[i]);
-      my_b_printf(file, "###   %s=", col_md->col_name);
+      if (opt_jk_restore == true)
+        my_b_printf(file, "###JK_RESTORE   %s=", col_md->col_name);
+      else
+        my_b_printf(file, "###   %s=", col_md->col_name);
     }else{
-      my_b_printf(file, "###   @%d=", static_cast<int>(i + 1));
+      if (opt_jk_restore == true)
+        my_b_printf(file, "###JK_RESTORE   @%d=", static_cast<int>(i + 1));
+      else
+        my_b_printf(file, "###   @%d=", static_cast<int>(i + 1));
     }
     
     if (!is_null) {
@@ -3046,8 +3121,16 @@ void Rows_log_event::print_verbose(IO_CACHE *file,
   /* If the write rows event contained no values for the AI */
   if (((general_type_code == binary_log::WRITE_ROWS_EVENT) &&
        (m_rows_buf == m_rows_end))) {
-    my_b_printf(file, "### INSERT INTO `%s`.`%s` VALUES ()\n",
-                map->get_db_name(), map->get_table_name());
+    if (opt_jk_restore == true)
+    {
+      // std::string tmp_tb_name = jk_get_table_name(map->get_table_name(), false);
+      // std::string tmp_db_name = jk_get_db_name(map->get_db_name());
+      my_b_printf(file, "###JK_RESTORE INSERT INTO `%s`.`%s` VALUES ()\n",
+                  map->get_db_name(), map->get_table_name());
+    }
+    else
+      my_b_printf(file, "### INSERT INTO `%s`.`%s` VALUES ()\n",
+                  map->get_db_name(), map->get_table_name());
     goto end;
   }
     
@@ -3062,7 +3145,14 @@ void Rows_log_event::print_verbose(IO_CACHE *file,
                                                    map->get_table_name());
     quoted_db[quoted_db_len] = '\0';
     quoted_table[quoted_table_len] = '\0';
-    my_b_printf(file, "### %s %s.%s\n", sql_command, quoted_db, quoted_table);
+    if (opt_jk_restore == true)
+    {
+      // std::string tmp_tb_name = jk_get_table_name(map->get_table_name(), false);
+      //std::string tmp_db_name = jk_get_db_name(map->get_db_name());
+      my_b_printf(file, "###JK_RESTORE %s %s.%s\n", sql_command, quoted_db, quoted_table);
+    }
+    else
+      my_b_printf(file, "### %s %s.%s\n", sql_command, quoted_db, quoted_table);
     /* Print the first image */
     if (!(length = print_verbose_one_row(file, td, print_event_info, &m_cols,
                                          value, (const uchar *)sql_clause1,
@@ -5143,7 +5233,14 @@ void Query_log_event::print(FILE *, PRINT_EVENT_INFO *print_event_info) const {
   DBUG_EXECUTE_IF("simulate_file_write_error",
                   { head->write_pos = head->write_end - 500; });
   print_query_header(head, print_event_info);
-  my_b_write(head, pointer_cast<const uchar *>(query), q_len);
+  if (opt_jk_restore == true)
+  {
+    std::string query_sql = "###JK_RESTORE ";
+    query_sql += std::string(query, q_len);
+    my_b_write(head, (const uchar *) query_sql.c_str(), query_sql.length());
+  }
+  else
+    my_b_write(head, pointer_cast<const uchar *>(query), q_len);
   my_b_printf(head, "\n%s\n", print_event_info->delimiter);
 }
 #endif /* !MYSQL_SERVER */
@@ -13466,7 +13563,7 @@ size_t Gtid_log_event::to_string(char *buf) const {
 void Gtid_log_event::print(FILE *, PRINT_EVENT_INFO *print_event_info) const {
   char buffer[MAX_SET_STRING_LENGTH + 1];
   IO_CACHE *const head = &print_event_info->head_cache;
-  if (!print_event_info->short_form) {
+  if (!print_event_info->short_form && opt_jk_restore == false) {
     print_header(head, print_event_info, false);
     my_b_printf(head,
                 "\t%s\tlast_committed=%llu\tsequence_number=%llu\t"
@@ -13512,25 +13609,27 @@ void Gtid_log_event::print(FILE *, PRINT_EVENT_INFO *print_event_info) const {
   microsecond_timestamp_to_str(original_commit_timestamp,
                                original_commit_timestamp_str);
 
-  my_b_printf(head, "# original_commit_timestamp=%s (%s)\n",
-              llstr(original_commit_timestamp, llbuf),
-              original_commit_timestamp_str);
-  my_b_printf(head, "# immediate_commit_timestamp=%s (%s)\n",
-              llstr(immediate_commit_timestamp, llbuf),
-              immediate_commit_timestamp_str);
-
-  if (DBUG_EVALUATE_IF("do_not_write_rpl_OCT", false, true)) {
-    my_b_printf(
+  if (opt_jk_restore == false)
+  {
+    my_b_printf(head, "# original_commit_timestamp=%s (%s)\n",
+                llstr(original_commit_timestamp, llbuf),
+                original_commit_timestamp_str);
+    my_b_printf(head, "# immediate_commit_timestamp=%s (%s)\n",
+                llstr(immediate_commit_timestamp, llbuf),
+                immediate_commit_timestamp_str);
+    
+    if (DBUG_EVALUATE_IF("do_not_write_rpl_OCT", false, true)) {
+      my_b_printf(
         head, "/*!80001 SET @@session.original_commit_timestamp=%s*/%s\n",
         llstr(original_commit_timestamp, llbuf), print_event_info->delimiter);
-  }
+    }
 
-  my_b_printf(head, "/*!80014 SET @@session.original_server_version=%u*/%s\n",
-              original_server_version, print_event_info->delimiter);
-
-  my_b_printf(head, "/*!80014 SET @@session.immediate_server_version=%u*/%s\n",
-              immediate_server_version, print_event_info->delimiter);
-
+    my_b_printf(head, "/*!80014 SET @@session.original_server_version=%u*/%s\n",
+                original_server_version, print_event_info->delimiter);
+    
+    my_b_printf(head, "/*!80014 SET @@session.immediate_server_version=%u*/%s\n",
+                immediate_server_version, print_event_info->delimiter);
+  } 
   to_string(buffer);
   my_b_printf(head, "%s%s\n", buffer, print_event_info->delimiter);
 }

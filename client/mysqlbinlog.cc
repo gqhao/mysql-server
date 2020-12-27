@@ -699,6 +699,8 @@ static uint opt_compress = 0;
 /*added by gqhao*/
 uint opt_flashback = 0;
 uint opt_colname = 0;
+uint opt_pre_gtid_only = 0;
+uint opt_jk_restore = 0;
 
 static FILE *result_file;
 
@@ -2127,7 +2129,13 @@ static struct my_option my_long_options[] = {
      0, nullptr},
     {"colname", 0, "Print sqls with column names.",
      &opt_colname, &opt_colname, nullptr, GET_BOOL, NO_ARG, 0, 0, 0, nullptr,
-     0, nullptr}, 
+     0, nullptr},
+    {"prev-gtid-only", 0, "Print only previous gtid set",
+     &opt_pre_gtid_only, &opt_pre_gtid_only, nullptr, GET_BOOL, NO_ARG, 0, 0, 0, nullptr,
+     0, nullptr},
+    {"jk-restore", 0, "restore jk database from mysqlbinlog files",
+     &opt_jk_restore, &opt_jk_restore, nullptr, GET_BOOL, NO_ARG, 0, 0, 0, nullptr,
+     0, nullptr},  
     {"compression-algorithms", 0,
      "Use compression algorithm in server/client protocol. Valid values "
      "are any combination of 'zstd','zlib','uncompressed'.",
@@ -3169,6 +3177,8 @@ static Exit_status dump_local_log_entries(PRINT_EVENT_INFO *print_event_info,
     if ((retval = process_event(print_event_info, ev, old_off, logname)) !=
         OK_CONTINUE)
       return retval;
+    if (opt_pre_gtid_only == true && ev->get_type_code() == binary_log::PREVIOUS_GTIDS_LOG_EVENT)
+      exit(0);
   }
 
   /* NOTREACHED */
@@ -3371,9 +3381,10 @@ int main(int argc, char **argv) {
     load_processor.init_by_cur_dir();
 
   if (!raw_mode) {
-    fprintf(result_file, "/*!50530 SET @@SESSION.PSEUDO_SLAVE_MODE=1*/;\n");
+    if (opt_jk_restore == false)
+      fprintf(result_file, "/*!50530 SET @@SESSION.PSEUDO_SLAVE_MODE=1*/;\n");
 
-    if (disable_log_bin)
+    if (disable_log_bin && opt_jk_restore == false)
       fprintf(
           result_file,
           "/*!32316 SET @OLD_SQL_LOG_BIN=@@SQL_LOG_BIN, SQL_LOG_BIN=0*/;\n");
@@ -3382,12 +3393,15 @@ int main(int argc, char **argv) {
       In mysqlbinlog|mysql, don't want mysql to be disconnected after each
       transaction (which would be the case with GLOBAL.COMPLETION_TYPE==2).
     */
-    fprintf(result_file,
+    if (opt_jk_restore == false)
+      fprintf(result_file,
             "/*!50003 SET @OLD_COMPLETION_TYPE=@@COMPLETION_TYPE,"
             "COMPLETION_TYPE=0*/;\n");
-
+    
     if (charset)
-      fprintf(
+    {
+      if (opt_jk_restore == false)
+        fprintf(
           result_file,
           "\n/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;"
           "\n/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS "
@@ -3395,12 +3409,18 @@ int main(int argc, char **argv) {
           "\n/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;"
           "\n/*!40101 SET NAMES %s */;\n",
           charset);
+      else
+        fprintf(
+          result_file,
+          "SET NAMES %s */;\n",
+          charset);
+    }
   }
   /*
     In case '--idempotent' or '-i' options has been used, we will notify the
     server to use idempotent mode for the following events.
    */
-  if (idempotent_mode)
+  if (idempotent_mode && opt_jk_restore == false)
     fprintf(result_file,
             "/*!50700 SET @@SESSION.RBR_EXEC_MODE=IDEMPOTENT*/;\n\n");
 
@@ -3412,20 +3432,22 @@ int main(int argc, char **argv) {
 
   if (!raw_mode) {
     fprintf(result_file, "# End of log file\n");
-
-    fprintf(result_file,
-            "/*!50003 SET COMPLETION_TYPE=@OLD_COMPLETION_TYPE*/;\n");
-    if (disable_log_bin)
-      fprintf(result_file, "/*!32316 SET SQL_LOG_BIN=@OLD_SQL_LOG_BIN*/;\n");
-
+    if (opt_jk_restore == false)
+    {
+      fprintf(result_file,
+              "/*!50003 SET COMPLETION_TYPE=@OLD_COMPLETION_TYPE*/;\n");
+      if (disable_log_bin)
+        fprintf(result_file, "/*!32316 SET SQL_LOG_BIN=@OLD_SQL_LOG_BIN*/;\n");
+      
     if (charset)
       fprintf(
-          result_file,
+        result_file,
           "/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;\n"
           "/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;\n"
           "/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;\n");
-
+    
     fprintf(result_file, "/*!50530 SET @@SESSION.PSEUDO_SLAVE_MODE=0*/;\n");
+    }
   }
 
   /*
